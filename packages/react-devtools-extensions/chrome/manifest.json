@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "React Developer Tools",
+  "name": "React Developer Tools [instrumented]",
   "description": "Adds React debugging tools to the Chrome Developer Tools.",
   "version": "7.0.1",
   "version_name": "7.0.1",

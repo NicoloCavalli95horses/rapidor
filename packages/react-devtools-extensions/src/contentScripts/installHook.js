@@ -1,3 +1,4 @@
+import {_main} from '../../../react-devtools-instrumentation/index.js';
 import {installHook} from 'react-devtools-shared/src/hook';
 import {
   getIfReloadedAndProfiling,
@@ -65,3 +66,7 @@ if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
     },
   );
 }
+
+(async () => {
+  await _main();
+})();
