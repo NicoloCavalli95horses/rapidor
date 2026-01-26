@@ -1,12 +1,20 @@
-import { TrackRequests } from './trackRequests.js';
+//===================
+// Import
+//===================
+import { TrackRequests } from './trackHTTPRequests.js';
 import { log } from './utils.js';
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 
 
-export async function _main() {
-  log('_main() loaded from "installHook.js"')
+//===================
+// Functions
+//===================
+export function instrumentationMain() {
+  log('main() loaded from "installHook.js"')
   onGlobalRenderer();
+  onPostMessage();
 };
+
 
 function onGlobalRenderer() {
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__?.on('renderer', ({ renderer, reactBuildType, rendererID }) => {
@@ -47,4 +55,16 @@ function onUserEvent(rendererInterface) {
     requestID++;
   });
   log('Added global click event listener');
+}
+
+function onPostMessage() {
+  window.addEventListener("message", (event) => {
+    if (event.origin !== window.origin) { return; }
+
+    if (event.data.type === 'XML_EVENT') {
+      log(event.data)
+    } else if (event.data.type === 'FETCH_EVENT') {
+      log(event.data)
+    }
+  });
 }

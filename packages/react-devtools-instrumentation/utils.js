@@ -6,14 +6,23 @@ export function deepObjCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
-export function injectScript(scriptPath) {
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL(scriptPath);
-  script.type = 'module';
-  script.onload = () => script.remove();
-  (document.head || document.documentElement).appendChild(script);
+/**
+ * Send a postMessage
+ * @param {Object} message - Il messaggio da inviare
+ * @param {Window} targetWindow - La finestra target (default: parent)
+ * @param {string} targetOrigin - L'origine target (default: '*', ma meglio specificare)
+ */
+export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin = '*') {
+  try {
+    if (!msg || typeof msg !== 'object') {
+      throw new Error('Message must be a non-null object');
+    }
+    targetWindow.postMessage(msg, targetOrigin);
+  } catch (err) {
+    log('[postMessage] Error sending message:', err);
+  }
 }
 
-export function log(txt) {
-  console.log('[INSTRUMENTATION] ', txt);
+export function log(...args) {
+  console.log('[INSTRUMENTATION] ', ...args);
 }

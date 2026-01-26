@@ -40,6 +40,14 @@ const contentScriptsToInject = [
     persistAcrossSessions: true,
     runAt: 'document_start',
   },
+  {
+    id: '@react-devtools/HTTPTracker',
+    js: ['build/HTTPTracker.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.MAIN,
+  },
 ];
 
 async function dynamicallyInjectContentScripts() {
