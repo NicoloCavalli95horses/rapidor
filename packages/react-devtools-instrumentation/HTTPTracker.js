@@ -1,3 +1,5 @@
+// This runs as content script, ie. in the context of the current web page
+
 //==============================
 // Import
 //==============================
@@ -8,14 +10,14 @@ import {
 } from './utils.js';
 
 
-export class trackHTTPRequests {
+export class HTTPTracker {
   constructor() {
   }
 
   async init() {
     await this.captureXMLHttpRequest();
     await this.captureFetchRequest();
-    log('HTTP tracker initialized');
+    log('[INFO] HTTP tracker initialized');
   }
 
   captureXMLHttpRequest() {
@@ -48,7 +50,7 @@ export class trackHTTPRequests {
         uri: uri,
         verb: this._method,
         headers: this._requestHeaders,
-        body: self.getRequestBody(data)
+        body: self.getRequestBody({data, headers: this._requestHeaders})
       };
     };
 
@@ -97,52 +99,80 @@ export class trackHTTPRequests {
   }
 
   async getResponseBody({ data, type }) {
+    const contentType = (type || '').toLowerCase();
+
     const ret = {
       body: data || {},
-      is_json: false,
-      is_text: false,
-      is_blob: false,
+      rawBody: {}, //unparsed
+      type: 'unknown',
+      rawType: contentType, //unparsed
+      error: {},
     };
 
     if (!data) {
       return ret;
     }
 
-    // Type can appear in uppercase or camelCase
-    type = (type || '').toLowerCase();
 
     try {
-      if (type.includes('json')) {
-        // Fetch API has its own .json() variant
-        ret.body = (typeof data.json === 'function') ? await data.json() : JSON.parse(data);
-        ret.is_json = true;
-      } else if (type.startsWith('text/')) {
-        // Data can be a string already
-        ret.body = (typeof data.text === 'function') ? await data.text() : String(data);
-        ret.is_text = true;
+      // JSON
+      if (contentType.includes('json')) {
+        if (data instanceof Response) { // is a fetch response
+          ret.body = await data.clone().json();
+        } else if (typeof data === 'string') {
+          ret.body = JSON.parse(data); // XMLHttpRequest case
+        } else if (typeof data === 'object') {
+          ret.body = data;
+        }
+        ret.type = "json";
+        return ret;
+      } 
+      
+      // Text
+      if (contentType.startsWith('text/') || ['javascript', 'xml', 'html'].includes(contentType)) {
+        if (data instanceof Response) {
+          ret.body = await data.clone().text();
+        } else {
+          ret.body = String(data);
+        }
+        ret.type = 'text';
+        return ret;
+      } 
+      
+      // Blob / unknown
+      if (data instanceof Response){
+        ret.body = await data.clone().arrayBuffer();
       } else {
-        // Data can be already parsed
-        ret.body = (typeof data.blob === 'function') ? await data.blob() : data;
-        ret.is_blob = true;
+        ret.body = data;
       }
+      ret.type = 'blob';
+      return ret;
     } catch (error) {
-      log(`Error parsing response of type "${type}":`, error);
+      ret.error = error;
+      ret.rawBody = data;
+      log(`[ERROR] Error parsing HTTP response body: ${error}.\nRaw response type: ${contentType}.\nRaw data: ${data}`);
     }
 
     return ret;
   }
 
-  getRequestBody(data) {
+  getRequestBody({data, headers}) {
     if (!data) { return; }
-    if (["object", "number", "boolean"].includes(typeof data) || Array.isArray(data)) { return data; }
-    if (["string"].includes(typeof data)) {
+    const contentType = headers['content-type']?.toLowerCase();
+
+    if (typeof data === 'object') {
+      return data;
+    }
+
+    if (typeof data === 'string' && contentType?.includes('application/json')) {
       try {
         return JSON.parse(data);
-      } catch (error) {
-        log(`Error parsing request body`, error);
+      } catch (err) {
         return data;
       }
     }
+    
+    return data;
   }
 
   async captureFetchRequest() {
@@ -153,12 +183,13 @@ export class trackHTTPRequests {
       try {
         const res = await originalFetch.apply(this, args);
         const _res = res.clone();
+        const headers = args[1]?.headers;
 
         const request = {
           uri: decodeURIComponent(args[0]),
           verb: args[1]?.method,
-          headers: args[1]?.headers,
-          body: self.getRequestBody(args[1]?.body),
+          headers: headers,
+          body: self.getRequestBody({data: args[1]?.body, headers}),
         };
 
         const response = {

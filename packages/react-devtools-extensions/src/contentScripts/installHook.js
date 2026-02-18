@@ -67,4 +67,7 @@ if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
   );
 }
 
-instrumentationMain();
+
+(async () => {
+  await instrumentationMain();
+})();

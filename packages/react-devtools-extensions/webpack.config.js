@@ -77,7 +77,6 @@ module.exports = {
     prepareInjection: './src/contentScripts/prepareInjection.js',
     installHook: './src/contentScripts/installHook.js',
     hookSettingsInjector: './src/contentScripts/hookSettingsInjector.js',
-    HTTPTracker: './src/contentScripts/HTTPTracker.js',
   },
   output: {
     path: __dirname + '/build',
