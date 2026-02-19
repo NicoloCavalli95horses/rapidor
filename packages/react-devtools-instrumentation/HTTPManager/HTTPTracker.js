@@ -3,15 +3,13 @@
 //==============================
 // Import
 //==============================
-import {
-  log,
-  deepObjCopy,
-  sendPostMessage,
-} from './utils.js';
+import { log, deepObjCopy } from '../utils.js';
+import { analyzeHTTP } from './HTTPAnalyzer.js';
 
 
 export class HTTPTracker {
   constructor() {
+    this.analyzer = new analyzeHTTP();
   }
 
   async init() {
@@ -50,7 +48,7 @@ export class HTTPTracker {
         uri: uri,
         verb: this._method,
         headers: this._requestHeaders,
-        body: self.getRequestBody({data, headers: this._requestHeaders})
+        body: self.getRequestBody({ data, headers: this._requestHeaders })
       };
     };
 
@@ -68,7 +66,7 @@ export class HTTPTracker {
           }),
         };
 
-        sendPostMessage({ type: 'XML_EVENT', data: { request, response } });
+        self.analyzer.parseHTTP({ type: 'XML_EVENT', request, response });
       };
 
       this.addEventListener('load', handleResponse); // successful response
@@ -126,8 +124,8 @@ export class HTTPTracker {
         }
         ret.type = "json";
         return ret;
-      } 
-      
+      }
+
       // Text
       if (contentType.startsWith('text/') || ['javascript', 'xml', 'html'].includes(contentType)) {
         if (data instanceof Response) {
@@ -137,10 +135,10 @@ export class HTTPTracker {
         }
         ret.type = 'text';
         return ret;
-      } 
-      
+      }
+
       // Blob / unknown
-      if (data instanceof Response){
+      if (data instanceof Response) {
         ret.body = await data.clone().arrayBuffer();
       } else {
         ret.body = data;
@@ -156,7 +154,7 @@ export class HTTPTracker {
     return ret;
   }
 
-  getRequestBody({data, headers}) {
+  getRequestBody({ data, headers }) {
     if (!data) { return; }
     const contentType = headers['content-type']?.toLowerCase();
 
@@ -171,7 +169,7 @@ export class HTTPTracker {
         return data;
       }
     }
-    
+
     return data;
   }
 
@@ -189,7 +187,7 @@ export class HTTPTracker {
           uri: decodeURIComponent(args[0]),
           verb: args[1]?.method,
           headers: headers,
-          body: self.getRequestBody({data: args[1]?.body, headers}),
+          body: self.getRequestBody({ data: args[1]?.body, headers }),
         };
 
         const response = {
@@ -200,8 +198,7 @@ export class HTTPTracker {
             type: _res.headers.get('Content-Type')
           })
         };
-
-        sendPostMessage({ type: 'FETCH_EVENT', data: { request, response } });
+        self.analyzer.parseHTTP({ type: 'FETCH_EVENT', request, response });
         return res;
 
       } catch (error) {

@@ -22,7 +22,7 @@
     },
     "javascript.validate.enable": false,
     "editor.formatOnSave": true,
-    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.defaultFormatter": "vscode.json-language-features",
     "flow.pathToFlow": "${workspaceFolder}/node_modules/.bin/flow",
     "prettier.configPath": "",
     "prettier.ignorePath": ""
