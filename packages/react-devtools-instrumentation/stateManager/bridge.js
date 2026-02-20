@@ -4,7 +4,7 @@
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 import { emit } from '../eventBus.js';
 import { log, sendPostMessage } from '../utils.js';
-
+import { Graph } from './graph.js';
 
 //===================
 // Consts
@@ -47,8 +47,8 @@ export class Bridge {
     // We intercept the event and get the GUI state
     const self = this;
     this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
-      const currentState = self.walkFiberTree(root.current);
-      emit({ type: 'STATE_UPDATE', payload: currentState });
+      const currentGraph = self.getStateGraph(root.current);
+      emit({ type: 'STATE_UPDATE', payload: currentGraph });
       return original?.call(this, rendererID, root, ...rest);
     };
 
@@ -60,41 +60,65 @@ export class Bridge {
   // - minimize the data we get
   // - find a way to map props to closest DOM element (we have both props and DOM els but in different objects)
   // - this mapping will be used in metamorphic relations to solve oracle problem
-  walkFiberTree(fiber) {
-    const result = [];
-    const self = this;
+  getStateGraph(fiber) {
+    const g = new Graph();
+    const graph = g.createGraph();
+    const fiberToId = new WeakMap();
+    let idCounter = 0;
 
-    function visit(node) {
+    function getNextId() {
+      return `node-${idCounter++}`;
+    }
+
+    function visit(node, parentId = null) {
       if (!node) { return };
 
-      const name = node.type?.name || node.type;
-      const key = node.key;
-      const props = node.memoizedProps;
-      const dom = node.stateNode;
-      const tag = node.tag;
+      let id = fiberToId.get(node);
 
-      if (self.isUserComponent(tag)) {
-        result.push({ name, key, props, dom, tag });
+      // Create node if does not exist
+      if (!id) {
+        id = getNextId();
+        fiberToId.set(node, id);
+
+        const data = {
+          id,
+          name: node.type?.name || node.type,
+          key: node.key,
+          props: node.memoizedProps,
+          dom: node.stateNode?.containerInfo instanceof HTMLElement ? node.stateNode.containerInfo
+            : node.stateNode instanceof HTMLElement ? node.stateNode
+              : undefined,
+          tag: node.tag,
+        };
+
+        // Better add all the nodes to create a clean graph
+        // In the data retrieval phase, we will filter unrelevant nodes with this.isUserComponent(node.tag)
+        g.addNode({ graph, id, data });
       }
 
-      visit(node.child);
-      visit(node.sibling);
+      // Add relation if parentID exists
+      if (parentId) {
+        g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
+      }
+
+      visit(node.child, id);
+      visit(node.sibling, parentId);
     }
 
     visit(fiber);
-    return result;
+    return graph;
   }
 
   // Tags are defined in ReactWorkTags.js
   // Useful tags are found empirically
   isUserComponent(tag) {
     return (
-      tag === 0 // FunctionComponent
-      || tag === 1 // ClassComponent
-      || tag === 5 // HostComponent
+      // tag === 0 // FunctionComponent
+      // || tag === 1 // ClassComponent
+      tag === 5 // HostComponent
       // tag === 11 // ForwardRef
       // tag === 13 // SuspenseComponent
-      || tag === 14 // MemoComponent
+      // || tag === 14 // MemoComponent
       // || tag === 15 // SimpleMemoComponent
       // || tag === 16 // LazyComponent
       // || tag === 17 // IncompleteClassComponent

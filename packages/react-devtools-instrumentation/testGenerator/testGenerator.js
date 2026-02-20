@@ -25,7 +25,7 @@ export class TestGenerator {
         // - fetch data from DB
         // - look for matches (eg. api/uuid -> uuid is found in component C1)
         // - construct alternative endpoints (C1 -> C2)
-        // - test requests, compare response, solve oracle problem via metamorphic properties
+        // - test requests, compare response, solve oracle problem via metamorphic properties 
        });
   }
 }
