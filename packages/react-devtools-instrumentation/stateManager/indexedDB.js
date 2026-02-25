@@ -8,7 +8,7 @@ import {log} from "../utils.js"
 //===================
 // Class
 //===================
-export class DbManager {
+export class IDBManager {
   constructor(name = "db", version = 1) {
     this.name = name;
     this.version = version;

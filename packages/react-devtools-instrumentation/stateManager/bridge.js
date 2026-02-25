@@ -126,7 +126,7 @@ export class Bridge {
       const rect = node.getBoundingClientRect();
 
       const current = {
-        tag: node.tagName?.toLowercase(),
+        tag: node.tagName?.toLowerCase(),
         id: node.id,
         classes: [...node.classList],
         width: rect.width,
