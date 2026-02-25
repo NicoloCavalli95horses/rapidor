@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import {log} from "../utils.js"
+import { log } from "../utils.js"
 
 
 
@@ -13,7 +13,6 @@ export class IDBManager {
     this.name = name;
     this.version = version;
     this.db = null;
-    this.id = 0;
   }
 
   async init() {
@@ -34,13 +33,19 @@ export class IDBManager {
         // runs initially when the db is created or a new db version is declared
         const db = event.target.result;
 
-        const store = db.createObjectStore("state", { keyPath: "id" }); //primary key
-        store.createIndex("state_snapshot", "snapshot", { unique: false });
+        if (!db.objectStoreNames.contains("state")) {
+          const store = db.createObjectStore("state", { keyPath: "id", autoIncrement: true }); //primary key
+          store.createIndex("state_snapshot", "snapshot", { unique: false });
+        }
       };
 
       request.onsuccess = (event) => {
         // runs after the 'onpugradeneeded' event, in case of success
         resolve(event.target.result);
+      };
+
+      request.onblocked = () => {
+        reject(new Error("Database upgrade blocked. Close other tabs."));
       };
     });
   }
@@ -49,24 +54,83 @@ export class IDBManager {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction("state", "readwrite");
       const store = tx.objectStore("state");
-      this.id++;
 
-      const payload = {id: this.id, state: data};
+      const payload = { state: data };
       const request = store.put(payload);
 
-      request.onsuccess = () => resolve(payload);
+      request.onsuccess = (e) => {
+        const generatedId = e.target.result;
+        resolve({ ...payload, id: generatedId })
+      };
       request.onerror = (e) => reject(e.target.error);
     });
   }
 
-  getState(id) {
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction("state", "readonly");
-      const store = tx.objectStore("state");
+  async getStateRowByID(id = 0) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    if (typeof id !== "number") {
+      throw new TypeError("ID must be a number");
+    }
+
+    const tx = this.db.transaction("state", "readonly");
+    const store = tx.objectStore("state");
+
+    const result = await new Promise((resolve, reject) => {
       const request = store.get(id);
 
       request.onsuccess = (e) => resolve(e.target.result);
       request.onerror = (e) => reject(e.target.error);
+    });
+
+    if (!result) {
+      throw new Error(`State with ID ${id} not found`);
+    }
+
+    return result;
+  }
+
+  async findState(predicate) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    const tx = this.db.transaction("state", "readonly");
+    const store = tx.objectStore("state");
+
+    return new Promise((resolve, reject) => {
+      const request = store.openCursor();
+
+      request.onerror = (e) => reject(e.target.error);
+
+      request.onsuccess = (e) => {
+        const cursor = e.target.result;
+
+        if (!cursor) {
+          // data is over, no matches
+          log('[DB] Data is over, exiting')
+          resolve(null);
+          return;
+        }
+
+        const state = cursor.value;
+
+        try {
+          const match = predicate(state);
+          if (match) {
+            log('[DB] match found')
+            resolve(match); // early exit
+            return;
+          } else {
+            log('[DB] next row...')
+            cursor.continue();
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
     });
   }
 }

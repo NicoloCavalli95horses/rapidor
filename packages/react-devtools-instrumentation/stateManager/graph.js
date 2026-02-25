@@ -22,8 +22,8 @@ export class Graph {
       },
       relations: {
         // Examples:
-        // "id1": { child: ["id3", "id4"], renders: [domEl_1, domEl_2] }
-        // "id2": { child: ["id5", "id6"], renders: [domEl_3, domEl_4] }
+        // "id1": { child: ["id3", "id4"], render: [domEl_1, domEl_2] }
+        // "id2": { child: ["id5", "id6"], render: [domEl_3, domEl_4] }
       }
     }
   }
@@ -60,6 +60,9 @@ export class Graph {
       } else {
         console.error(`Node ${toId} does not exist`);
       }
+    }
+    if (type === "render") {
+      // [TODO]
     }
   }
 

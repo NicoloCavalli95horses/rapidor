@@ -29,7 +29,7 @@ export class Bridge {
       // `rendererInterface` exposes devtools utilities to get info about single components
       const rendererInterface = attach(this.#hook, rendererID, renderer, window);
       emit({ type: 'RENDERER', payload: rendererInterface });
-      log('[INFO] Renderer attached');
+      log('[BRIDGE] Renderer attached');
     });
   }
 
@@ -43,14 +43,14 @@ export class Bridge {
     // We intercept the event and get the GUI state
     const self = this;
     this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
-      log('[DEBUG] React fiber: ', root.current);
+      // log('[BRIDGE] React fiber: ', root.current);
       const currentGraph = self.getStateGraph(root.current);
 
       emit({ type: 'STATE_UPDATE', payload: currentGraph });
       return original?.call(this, rendererID, root, ...rest);
     };
 
-    log('[INFO] listening to component tree changes');
+    log('[BRIDGE] listening to fiber commits changes');
   }
 
 
@@ -110,6 +110,8 @@ export class Bridge {
         // Add relation if parentID exists
         g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
       }
+
+      // [TODO]: add type: "render" relations (!)
 
       visit(node.child, id);
       visit(node.sibling, parentId);

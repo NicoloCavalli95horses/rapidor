@@ -25,11 +25,16 @@ export class StateManager {
       .subscribe(event => {
         // Save serializable objects
         this.db.saveState(event.payload);
-        log('[DEBUG] Saved to DB');
+        log('[STATE MANAGER] Saved to DB');
       });
   }
 
-  async getData(id) {
-    return await this.db.getState(id);
+  async getStateByID(id) {
+    return await this.db.getStateRowByID(id);
+  }
+
+  async findState(predicate) {
+    log('[STATE MANAGER] getting DB rows');
+    return await this.db.findState(predicate);
   }
 }

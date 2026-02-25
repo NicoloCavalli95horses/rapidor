@@ -12,9 +12,9 @@ import { Bridge } from './stateManager/bridge.js';
 // Functions
 //===================
 export async function instrumentationMain() {
-  log('[INFO] main module loaded from "packages/react-devtools-extensions/src/contentScripts/installHook.js"');
+  log('[INDEX] main module loaded from "packages/react-devtools-extensions/src/contentScripts/installHook.js"');
 
-  debug();
+  // debug();
 
   // Track HTTP messages
   const tracker = new HTTPTracker();
@@ -29,7 +29,7 @@ export async function instrumentationMain() {
   bridge.init();
 
   // Listen to HTTP events, search for similar data in other istances of components, generate and evaluate tests
-  const testGenerator = new TestGenerator();
+  const testGenerator = new TestGenerator(stateManager);
   testGenerator.init();
 };
 
@@ -49,4 +49,5 @@ function debug() {
         log('[DEBUG] Unknown event type', e.type);
     }
   });
+  
 }

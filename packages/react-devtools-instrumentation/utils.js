@@ -60,3 +60,7 @@ export function payloadSize(obj) {
 export async function getEstimatedIndexedDBstorage() {
   await navigator.storage.estimate();
 }
+
+export function isObjEmpty(obj) {
+  return Object.keys(obj).length === 0;
+}
