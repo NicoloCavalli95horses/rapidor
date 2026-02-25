@@ -2,7 +2,6 @@
 // Import
 //===================
 import { log } from './utils.js';
-import { analyzeHTTP } from './HTTPManager/HTTPAnalyzer.js';
 import { StateManager } from './stateManager/stateManager.js';
 import { HTTPTracker } from './HTTPManager/HTTPTracker.js';
 import { eventBus } from './eventBus.js';
@@ -23,7 +22,7 @@ export async function instrumentationMain() {
 
   // Get and save GUI state
   const stateManager = new StateManager();
-  stateManager.init();
+  await stateManager.init();
 
   // Connect to framework-specific APIs and listen to component tree changes
   const bridge = new Bridge();
@@ -43,7 +42,7 @@ function debug() {
         break;
 
       case 'HTTP_EVENT':
-        log('[DEBUG] HTTP request event received', e.payload);
+        log('[DEBUG] HTTP event received', e.payload);
         break;
 
       default:

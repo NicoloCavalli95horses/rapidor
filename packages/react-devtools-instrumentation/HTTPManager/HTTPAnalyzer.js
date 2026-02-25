@@ -13,33 +13,45 @@ export class analyzeHTTP {
   }
 
   parseHTTP({ type, request, response }) {
-    const res = response;
-    const req = request;
-    if (!res || !req) { return; }
+    if (!response || !request) { return; }
 
-    const uri = req?.url ? new URL(req.uri) : null;
+    const uri = this.getURI(request?.uri)
     if (!uri) { return; }
+
     const protocol = uri.protocol;
     const port = uri.port;
     const rawQueries = uri.search; // ?page=1order=asc...
     const params = this.searchParamsToObj(uri.searchParams); // { page:1,order:'asc' }
     const hostname = uri.hostname;
-    const pathname = uri.pathname;
+    const fullPath = decodeURIComponent(uri.pathname); // path name can be encoded
+    const segments = fullPath.split('/').filter(Boolean);
 
-    const detail = {
+    const meta = {
       protocol,
       port,
       rawQueries,
       params,
       hostname,
-      pathname
+      path: { fullPath, segments },
     }
 
-    emit({ type: "HTTP_EVENT", payload: {
-      type,
-      request: { ...request, detail },
-      response
-    }});
+    emit({
+      type: "HTTP_EVENT", payload: {
+        type,
+        request: { ...request, meta },
+        response
+      }
+    });
+  }
+
+  getURI(uri) {
+    if (!uri) { return; }
+
+    try {
+      return new URL(uri, window?.location?.origin);
+    } catch (e) {
+      return;
+    }
   }
 
   searchParamsToObj(searchParams) {

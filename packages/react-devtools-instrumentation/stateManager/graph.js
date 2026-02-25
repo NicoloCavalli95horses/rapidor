@@ -5,7 +5,7 @@
 
 
 //===================
-// Export
+// Class
 //===================
 export class Graph {
   constructor() { }

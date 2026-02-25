@@ -181,13 +181,27 @@ export class HTTPTracker {
       try {
         const res = await originalFetch.apply(this, args);
         const _res = res.clone();
-        const headers = args[1]?.headers;
+        let headers = {};
+        let verb = 'GET';
+        let body = {};
+
+        if (args.length === 2) {
+          // if length is 1, no options are passed, ie. `fetch('api/resource')`
+          // we assume the request is GET and that there is no request body
+          headers = args[1]?.headers;
+          verb = args[1]?.method;
+          try {
+            body = JSON.parse(args[1]?.body)
+          } catch (err) {
+            body = args[1]?.body;
+          }
+        }
 
         const request = {
           uri: decodeURIComponent(args[0]),
-          verb: args[1]?.method,
-          headers: headers,
-          body: self.getRequestBody({ data: args[1]?.body, headers }),
+          verb,
+          headers,
+          body: self.getRequestBody({ data: body, headers }),
         };
 
         const response = {

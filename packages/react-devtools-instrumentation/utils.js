@@ -44,3 +44,19 @@ export function isCloneable(obj) {
     return false;
   }
 }
+
+
+export function payloadSize(obj) {
+  const json = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(json).length;
+
+  return {
+    bytes,
+    kb: (bytes / 1024).toFixed(2),
+    mb: (bytes / (1024 * 1024)).toFixed(2)
+  };
+}
+
+export async function getEstimatedIndexedDBstorage() {
+  await navigator.storage.estimate();
+}
