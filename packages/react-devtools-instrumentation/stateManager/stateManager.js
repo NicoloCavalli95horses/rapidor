@@ -19,19 +19,30 @@ export class StateManager {
 
   async init() {
     await this.db.init();
-
-    eventBus
-      .pipe(filter(event => event.type === "STATE_UPDATE"))
-      .subscribe(event => {
-        // Save serializable objects
-        this.db.saveState(event.payload);
-        log('[STATE MANAGER] Saved to DB');
-      });
+    eventBus.pipe(filter(e => e.type === "STATE_UPDATE")).subscribe(e => this.saveStateSnapshot(e.payload));
   }
+
+
+  // Save serialized component tree state
+  saveStateSnapshot(state) {
+    const payload = {
+      state,
+      sessionId: crypto.randomUUID(),
+      url: window.location.href,
+      timestamp: Date.now()
+    }
+
+    this.db.saveState(payload);
+    log('[STATE MANAGER] Saved to DB');
+  }
+
+
 
   async getStateByID(id) {
     return await this.db.getStateRowByID(id);
   }
+
+
 
   async findState(predicate) {
     log('[STATE MANAGER] getting DB rows');

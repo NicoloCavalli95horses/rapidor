@@ -11,6 +11,8 @@ export class analyzeHTTP {
   constructor() {
   }
 
+
+
   parseHTTP({ type, request, response }) {
     if (!response || !request) { return; }
 
@@ -43,6 +45,8 @@ export class analyzeHTTP {
     });
   }
 
+
+
   getURI(uri) {
     if (!uri) { return; }
 
@@ -53,6 +57,8 @@ export class analyzeHTTP {
     }
   }
 
+
+  
   searchParamsToObj(searchParams) {
     const paramsMap = Array.from(searchParams).reduce((params, [key, val]) => params.set(key, val), new Map());
     return Object.fromEntries(paramsMap);

@@ -19,6 +19,8 @@ export class IDBManager {
     this.db = await this.connectToDb();
   }
 
+
+
   connectToDb() {
     return new Promise((resolve, reject) => {
       // for other browsers: mozIndexedDB, webkitIndexedDB, msIndexedDB, shimIndexedDB
@@ -34,9 +36,24 @@ export class IDBManager {
         const db = event.target.result;
 
         if (!db.objectStoreNames.contains("state")) {
-          const store = db.createObjectStore("state", { keyPath: "id", autoIncrement: true }); //primary key
-          store.createIndex("state_snapshot", "snapshot", { unique: false });
+          const store = db.createObjectStore("state", { autoIncrement: true }); // primary key (id) handled by indexedDB
+          
+          // map values to primary key
+          store.createIndex("sessionId", "sessionId", { unique: false }); // indexName (index name), keyPath (property of the saved object), options
+          store.createIndex("url", "url", { unique: false });
+          store.createIndex("timestamp", "timestamp", { unique: false });
         }
+
+        if (!db.objectStoreNames.contains("httpEvents")) {
+          const httpEvents = db.createObjectStore("httpEvents", { autoIncrement: true });
+
+          store.createIndex("request", "request", {unique: false});
+          store.createIndex("response", "response", {unique: false});
+          store.createIndex("sessionId", "sessionId", {unique: false});
+          store.createIndex("timestamp", "timestamp", { unique: false });
+        }
+
+        log('[DB] IndexedDB initialized');
       };
 
       request.onsuccess = (event) => {
@@ -50,21 +67,23 @@ export class IDBManager {
     });
   }
 
+
+
   saveState(data) {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction("state", "readwrite");
       const store = tx.objectStore("state");
-
-      const payload = { state: data };
-      const request = store.put(payload);
-
-      request.onsuccess = (e) => {
-        const generatedId = e.target.result;
-        resolve({ ...payload, id: generatedId })
+      const request = store.put(data); // primary key (id) is handled by indexedDB
+      request.onsuccess = () => resolve();
+      request.onerror = (e) => {
+        console.error("DB SAVE ERROR PAYLOAD:", data);
+        console.error("DB ERROR:", e.target.error);
+        reject(e.target.error);
       };
-      request.onerror = (e) => reject(e.target.error);
     });
   }
+
+
 
   async getStateRowByID(id = 0) {
     if (!this.db) {
@@ -91,6 +110,8 @@ export class IDBManager {
 
     return result;
   }
+
+
 
   async findState(predicate) {
     if (!this.db) {

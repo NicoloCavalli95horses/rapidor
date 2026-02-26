@@ -28,9 +28,13 @@ export class Graph {
     }
   }
 
+
+
   addNode({ graph, id, data = {} }) {
     graph.nodes[id] = { id, ...data };
   }
+
+
 
   /**
    * 
@@ -66,6 +70,8 @@ export class Graph {
     }
   }
 
+
+
   // Direct access to node: 0(1) complexity
   getNode({ graph, id }) {
     if (graph && id) {
@@ -73,6 +79,8 @@ export class Graph {
     };
   }
 
+
+  
   // siblings: nodes that have the same parent as the given node
   // O(k) complexity (k = number of children)
   getSiblings({ graph, id }) {

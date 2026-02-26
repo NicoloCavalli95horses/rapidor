@@ -3,7 +3,7 @@
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 import { emit } from '../eventBus.js';
-import { log, sendPostMessage } from '../utils.js';
+import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 
 
@@ -17,10 +17,12 @@ export class Bridge {
 
   #hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
 
+  // Connect to React specific APIs
   init() {
     this.listenToFiberCommits();
     this.connectToRenderer();
   }
+
 
 
   // Returns the rendererInterface object with functions to inspect specific components
@@ -34,19 +36,22 @@ export class Bridge {
   }
 
 
+
   // Returns snapshots of the current state of the component tree
   // The state is updated automatically by React
   listenToFiberCommits() {
     const original = this.#hook?.onCommitFiberRoot;
-
-    // The component tree is updated at every `onCommitFiberRoot` event. This may be asynch to user interactions (!)
-    // We intercept the event and get the GUI state
     const self = this;
-    this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
-      // log('[BRIDGE] React fiber: ', root.current);
-      const currentGraph = self.getStateGraph(root.current);
 
-      emit({ type: 'STATE_UPDATE', payload: currentGraph });
+    // The component tree is updated very often
+    // We listen to changes via `onCommitFiberRoot` event and save a snapshot only after 2000ms of idleness
+    const debouncedAnalysis = debounce((root) => {
+      const graph = self.getStateGraph(root.current);
+      emit({ type: 'STATE_UPDATE', payload: graph });
+    }, 1500);
+
+    this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
+      debouncedAnalysis(root);
       return original?.call(this, rendererID, root, ...rest);
     };
 
@@ -76,7 +81,7 @@ export class Bridge {
     }
 
     function visit(node, parentId = null) {
-      if (!node) { return };
+      if (!node) { return; }
 
       let id = fiberToId.get(node);
 
@@ -101,17 +106,19 @@ export class Bridge {
           tag: node.tag,
         };
 
-        // Better add all the nodes to create a clean graph
-        // In the data retrieval phase, we will filter unrelevant nodes with this.isUserComponent(node.tag)
+        // Filter nodes here (?)
+        // PROS: - the bridge class has React-specific info here, eg. tag codes
+        //       - adding all the nodes led to a cleaner graph
+        // CONS: - not filtering the nodes is really expensive computationally
+        //       - if we filter nodes in the data retrieval phase, we will need to use framework-specific information elsewhere
         g.addNode({ graph, id, data: serializableData });
-      }
 
-      if (parentId) {
-        // Add relation if parentID exists
-        g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
+        if (parentId) {
+          // Add relation if parentID exists
+          // [TODO]: add type: "render" relations (!)
+          g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
+        }
       }
-
-      // [TODO]: add type: "render" relations (!)
 
       visit(node.child, id);
       visit(node.sibling, parentId);
@@ -120,6 +127,8 @@ export class Bridge {
     visit(fiber);
     return graph;
   }
+
+
 
   getDOMInfo(el) {
     function visit(node) {
@@ -150,6 +159,8 @@ export class Bridge {
     return visit(el);
   }
 
+
+
   filterReactComponentName(type) {
     if (typeof type === 'function') { return; }
 
@@ -160,6 +171,8 @@ export class Bridge {
       return type.name;
     }
   }
+
+
 
   filterReactProps(props, visited = new WeakSet()) {
     if (props === null || typeof props !== "object") {
@@ -176,7 +189,7 @@ export class Bridge {
     for (const key of Reflect.ownKeys(props)) {
       const value = props[key];
 
-      if (!this.isSerializableValue(value)) {
+      if (!isSerializableValue(value)) {
         continue;
       }
 
@@ -190,25 +203,7 @@ export class Bridge {
     return obj;
   }
 
-  isSerializableValue(value) {
-    if (value === null) { return true };
 
-    const t = typeof value;
-
-    if (["function", "symbol", "undefined"].includes(t)) {
-      return false;
-    }
-
-    if (typeof Node !== "undefined" && value instanceof Node) {
-      return false;
-    }
-
-    if (value instanceof WeakMap || value instanceof WeakSet) {
-      return false;
-    }
-
-    return true;
-  }
 
   // Tags are defined in ReactWorkTags.js
   // Useful tags are found empirically

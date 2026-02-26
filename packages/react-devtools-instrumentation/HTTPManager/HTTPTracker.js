@@ -12,11 +12,15 @@ export class HTTPTracker {
     this.analyzer = new analyzeHTTP();
   }
 
+
+
   async init() {
     await this.captureXMLHttpRequest();
     await this.captureFetchRequest();
     log('[HTTP tracker] initialized');
   }
+
+
 
   captureXMLHttpRequest() {
     const XHR = XMLHttpRequest.prototype;
@@ -77,6 +81,8 @@ export class HTTPTracker {
     };
   }
 
+
+
   async getXHResponseText(data) {
     if (['json', 'document', 'formdata'].includes(data.responseType)) {
       return data.response;
@@ -95,6 +101,8 @@ export class HTTPTracker {
       return decoder.decode(data.response);
     }
   }
+
+
 
   async getResponseBody({ data, type }) {
     const contentType = (type || '').toLowerCase();
@@ -154,6 +162,8 @@ export class HTTPTracker {
     return ret;
   }
 
+
+
   getRequestBody({ data, headers }) {
     if (!data) { return; }
     const contentType = headers['content-type']?.toLowerCase();
@@ -172,6 +182,8 @@ export class HTTPTracker {
 
     return data;
   }
+
+
 
   async captureFetchRequest() {
     const originalFetch = window.fetch;
@@ -221,6 +233,8 @@ export class HTTPTracker {
     }
   }
 
+
+  
   async getFetchResponseHeaders(data) {
     const ret = {};
     data.forEach((value, name) => ret[name] = value);
