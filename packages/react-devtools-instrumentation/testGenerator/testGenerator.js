@@ -13,6 +13,7 @@ import { StateManager } from "../stateManager/stateManager.js";
 export class TestGenerator {
   constructor(stateManager) {
     this.stateManager = stateManager;
+    this.stop = false;
   }
 
   init() {
@@ -25,50 +26,54 @@ export class TestGenerator {
 
   async onDbSuccess(type) {
     // `HTTP events` can be stored before `state events`
-    // start the analysis only after the first state snapshots and only if (valid) HTTP events have been stored
-
+    // start the analysis only after the first state snapshots
+    // and only if (valid) HTTP events have been stored
     if (type !== events.STATE_UPDATE) { return; }
     const canStart = await this.stateManager.hasHTTPevents();
     if (!canStart) { return; }
-    log('[TEST GENERATOR] start the test generation');
 
+    log('[TEST GENERATOR] starting the test generation...');
 
-  }
+    this.stop = false;
+    let currentHttpEvent = {};
+    let currentSnapshot = {};
 
-  // every time we have an HTTP event, testGenerator performs a search on the EXISTING rows in IndexedDB
-  // if rows are added after the HTTP event, we do not see them
-  // [TO DO]
-  // - save all the HTTP events, and then listening to the STATE_UPDATE events
-  // - If more than 3000ms passes after a STATE_UPDATE event, we start working with the HTTP events, and only then we start parsing the available rows
-  async onNetworkEvent(event) {
-    log('[TEST GENERATOR] processing HTTP event...');
+    while (!this.stop) {
+      currentHttpEvent = await this.stateManager.getNextHttpEvent(currentHttpEvent?.key);
 
-    const { request, response } = event.payload;
-    const { fullPath, segments } = request.meta.path; // endpoint details {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
-    if (segments.length) {
-      // const result = await this.findComponent(segments);
-    }
-  }
-
-
-
-  // this will return one or more components containing endpoint segments
-  async findComponent(properties) {
-    return this.stateManager.findState((row) => {
-      const result = this.searchProperty({ state: row, properties });
-
-      if (result.length) {
-        return result;
+      if (!currentHttpEvent) {
+        this.stop = true;
+        break;
       }
 
-      return false;
-    });
+      const { request, response } = currentHttpEvent.value;
+      const { fullPath, segments } = request.meta.path; // endpoint details {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
+
+      if (!segments.length) {
+        this.stop = true;
+        break;
+      }
+
+      while (!this.stop) {
+        currentSnapshot = await this.stateManager.getNextState(currentSnapshot?.key);
+
+        if (!currentSnapshot) {
+          // dont exit here, we want to try other stored HTTP events
+          break;
+        }
+
+        const { nodes, relations } = currentSnapshot.value;
+
+        await this.searchProperties({ nodes, properties: segments });
+      }
+    }
+    log('[TEST GENERATOR] exit analysis')
   }
 
 
 
   // [TODO]
-  // - keep the current snapshot as valid and stop the search if we have at least one component matching one property
+  // - keep the currentHttpEvent snapshot as valid and stop the search if we have at least one component matching one properties
   // - get sibling components and extract data from them
   // - construct alternative endpoints applying gradual transformation to the endpoint, STARTING FROM THE END ie:
   //   `/api/images/id1/red`
@@ -78,19 +83,20 @@ export class TestGenerator {
   // For now, the goal is to construct as much requests as possible
   // By evaluating the responses we will filter them, ie basically if we dont get a `200 OK` we rule it out
   // In other words, we just test `accesses by mistake` and we do not test `inaccesses by mistake` (is this a real vulnerability?)
-  searchProperty({ state, properties }) {
+  searchProperties({ nodes, properties }) {
     const result = new Set(); // to avoid duplicates
     const visited = new WeakSet(); // to avoid infinite loops, memory leaks
-    const nodes = state.nodes; // to check, I removed a wrapper
+    const self = this;
 
     function visit(value, node) {
       if (properties.includes(value)) {
-        node._matchHTTPRequestData = {
+        node._priv = {
           properties,
           value,
-          ratio: "at least one value within this node matches at least one property extracted from a HTTP request"
+          ratio: "one or more values within this node matches one or more properties extracted from an HTTP request"
         }
         result.add(node);
+        self.stop = true;
         return;
       }
 
@@ -118,7 +124,7 @@ export class TestGenerator {
 
     const arr = Array.from(result);
     if (arr.length) {
-      console.log(arr);
+      log('[TEST GENERATOR] Nodes matches: ', arr);
     }
     return arr;
   }

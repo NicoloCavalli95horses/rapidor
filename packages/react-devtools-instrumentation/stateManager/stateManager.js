@@ -44,6 +44,11 @@ export class StateManager {
     });
   }
 
+  
+  // [TODO]: dont store two times the same event
+  // - check request/response identity
+  // - same for state snapshots?
+
   /**
    * Save serialized data
    * @param {data} Object data to save 
@@ -70,14 +75,25 @@ export class StateManager {
 
 
   async getStateByID(id) {
-    return await this.db.getStateRowByID(id);
+    return await this.db.getByID({ id, storeName: this.dbStores.STATE });
   }
 
 
 
-  async findState(predicate) {
-    log('[STATE MANAGER] getting DB rows');
-    return await this.db.findState(predicate);
+  async getHTTPeventByID(id) {
+    return await this.db.getByID({ id, storeName: this.dbStores.HTTP_EVENT });
+  }
+
+
+
+  async getNextHttpEvent(key) {
+    return this.db.getNextCursor(this.dbStores.HTTP_EVENT, key);
+  }
+
+
+
+  async getNextState(key) {
+    return this.db.getNextCursor(this.dbStores.STATE, key);
   }
 
 

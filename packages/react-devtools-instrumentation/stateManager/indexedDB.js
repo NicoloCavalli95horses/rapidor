@@ -90,75 +90,43 @@ export class IDBManager {
 
 
 
-  async getStateRowByID(id = 0) {
+  async getByID({ id = 0, storeName }) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
 
-    if (typeof id !== "number") {
-      throw new TypeError("ID must be a number");
-    }
-
-    const tx = this.db.transaction(IDBManager.STORES.STATE, "readonly");
-    const store = tx.objectStore(IDBManager.STORES.STATE);
+    const tx = this.db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
 
     const result = await new Promise((resolve, reject) => {
       const request = store.get(id);
-
       request.onsuccess = (e) => resolve(e.target.result);
       request.onerror = (e) => reject(e.target.error);
     });
 
     if (!result) {
-      throw new Error(`State with ID ${id} not found`);
+      throw new Error(`Object in ${storeName}, with id: ${id} not found`);
     }
 
     return result;
   }
 
 
+  // returns next row in given store name
+  async getNextCursor(storeName, lastKey = null) {
+    const tx = this.db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
 
-  async findState(predicate) {
-    if (!this.db) {
-      throw new Error("Database not initialized");
-    }
+    return await new Promise((resolve, reject) => {
+      const request = (lastKey !== null)
+        ? store.openCursor(IDBKeyRange.lowerBound(lastKey, true))
+        : store.openCursor();
 
-    const tx = this.db.transaction(IDBManager.STORES.STATE, "readonly");
-    const store = tx.objectStore(IDBManager.STORES.STATE);
-
-    return new Promise((resolve, reject) => {
-      const request = store.openCursor();
-
+      request.onsuccess = (e) => resolve(e.target.result); // cursor or null
       request.onerror = (e) => reject(e.target.error);
-
-      request.onsuccess = (e) => {
-        const cursor = e.target.result;
-
-        if (!cursor) {
-          // data is over, no matches
-          log('[DB] Data is over, exiting')
-          resolve(null);
-          return;
-        }
-
-        const state = cursor.value;
-
-        try {
-          const match = predicate(state);
-          if (match) {
-            log('[DB] match found')
-            resolve(match); // early exit
-            return;
-          } else {
-            log('[DB] next row...')
-            cursor.continue();
-          }
-        } catch (err) {
-          reject(err);
-        }
-      };
     });
   }
+
 
 
   // Returns true if at least one HTTP event have been registered
