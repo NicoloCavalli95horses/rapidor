@@ -30,7 +30,7 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
 }
 
 
-
+// [TODO]: would be nice to save the logs as a .txt file
 export function log(...args) {
   console.log('[INSTRUMENTATION]', ...args);
 }

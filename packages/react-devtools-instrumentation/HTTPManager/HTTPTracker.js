@@ -12,6 +12,11 @@ export class HTTPTracker {
     this.analyzer = new analyzeHTTP();
   }
 
+  static TYPES = {
+    FETCH: "FETCH_EVENT",
+    XML: "XML_EVENT"
+  }
+
 
 
   async init() {
@@ -70,7 +75,7 @@ export class HTTPTracker {
           }),
         };
 
-        self.analyzer.parseHTTP({ type: 'XML_EVENT', request, response });
+        self.analyzer.parseHTTP({ type: HTTPTracker.TYPES.XML, request, response });
       };
 
       this.addEventListener('load', handleResponse); // successful response
@@ -224,7 +229,7 @@ export class HTTPTracker {
             type: _res.headers.get('Content-Type')
           })
         };
-        self.analyzer.parseHTTP({ type: 'FETCH_EVENT', request, response });
+        self.analyzer.parseHTTP({ type: HTTPTracker.TYPES.FETCH, request, response });
         return res;
 
       } catch (error) {
@@ -234,7 +239,7 @@ export class HTTPTracker {
   }
 
 
-  
+
   async getFetchResponseHeaders(data) {
     const ret = {};
     data.forEach((value, name) => ret[name] = value);

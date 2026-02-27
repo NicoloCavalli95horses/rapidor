@@ -5,6 +5,7 @@ import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 import { emit } from '../eventBus.js';
 import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
+import { config } from '../config.js';
 
 
 
@@ -48,7 +49,7 @@ export class Bridge {
     const debouncedAnalysis = debounce((root) => {
       const graph = self.getStateGraph(root.current);
       emit({ type: 'STATE_UPDATE', payload: graph });
-    }, 1500);
+    }, config.debounceTimeMs);
 
     this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
       debouncedAnalysis(root);

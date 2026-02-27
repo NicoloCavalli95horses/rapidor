@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { emit } from '../eventBus.js';
+import { emit, events } from '../eventBus.js';
 
 
 //===================
@@ -37,7 +37,7 @@ export class analyzeHTTP {
     }
 
     emit({
-      type: "HTTP_EVENT", payload: {
+      type: events.HTTP_EVENT, payload: {
         type,
         request: { ...request, meta },
         response
@@ -58,7 +58,7 @@ export class analyzeHTTP {
   }
 
 
-  
+
   searchParamsToObj(searchParams) {
     const paramsMap = Array.from(searchParams).reduce((params, [key, val]) => params.set(key, val), new Map());
     return Object.fromEntries(paramsMap);

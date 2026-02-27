@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { eventBus } from "../eventBus.js";
+import { eventBus, events } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { hasOwnKeys, log, sendPostMessage } from "../utils.js";
 import { StateManager } from "../stateManager/stateManager.js";
@@ -17,8 +17,22 @@ export class TestGenerator {
 
   init() {
     eventBus
-      .pipe(filter(event => event.type === "HTTP_EVENT"))
-      .subscribe(event => this.onNetworkEvent(event));
+      .pipe(filter(e => e.type === events.DB_SUCCESS))
+      .subscribe(e => this.onDbSuccess(e.payload.type));
+  }
+
+
+
+  async onDbSuccess(type) {
+    // `HTTP events` can be stored before `state events`
+    // start the analysis only after the first state snapshots and only if (valid) HTTP events have been stored
+
+    if (type !== events.STATE_UPDATE) { return; }
+    const canStart = await this.stateManager.hasHTTPevents();
+    if (!canStart) { return; }
+    log('[TEST GENERATOR] start the test generation');
+
+
   }
 
   // every time we have an HTTP event, testGenerator performs a search on the EXISTING rows in IndexedDB
@@ -32,7 +46,7 @@ export class TestGenerator {
     const { request, response } = event.payload;
     const { fullPath, segments } = request.meta.path; // endpoint details {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
     if (segments.length) {
-      const result = await this.findComponent(segments);
+      // const result = await this.findComponent(segments);
     }
   }
 
