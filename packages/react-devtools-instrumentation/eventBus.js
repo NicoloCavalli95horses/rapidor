@@ -24,4 +24,5 @@ export const events = Object.freeze({
   STATE_UPDATE: "STATE_UPDATE",
   HTTP_EVENT: "HTTP_EVENT",
   DB_SUCCESS: "DB_SUCCESS",
+  GEN_REQ: "GENERATE_HTTP_REQUEST"
 });

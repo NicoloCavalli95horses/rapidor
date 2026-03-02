@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { log } from "../utils.js"
+import { log, copyObjKeys } from "../utils.js"
 
 
 
@@ -74,12 +74,12 @@ export class IDBManager {
 
 
 
-  saveState({ data, objectStore }) {
+  saveState({ data, storeName }) {
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(objectStore, "readwrite");
-      const store = tx.objectStore(objectStore);
+      const tx = this.db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
       const request = store.put(data); // primary key (id) is handled by indexedDB
-      request.onsuccess = () => resolve(objectStore);
+      request.onsuccess = () => resolve(storeName);
       request.onerror = (e) => {
         console.error("DB SAVE ERROR PAYLOAD:", data);
         console.error("DB ERROR:", e.target.error);
@@ -112,6 +112,7 @@ export class IDBManager {
   }
 
 
+
   // returns next row in given store name
   async getNextCursor(storeName, lastKey = null) {
     const tx = this.db.transaction(storeName, "readonly");
@@ -129,9 +130,38 @@ export class IDBManager {
 
 
 
+  async isDataStored({ payload, storeName, keys = [] }) {
+    let isStored = false;
+    let current = {};
+
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    while (true) {
+      current = await this.getNextCursor(storeName, current?.key);
+      if (!current) {
+        isStored = false;
+        break;
+      }
+
+      const storedData = copyObjKeys(current.value, keys);
+      const receivedData = copyObjKeys(payload, keys);
+
+      if (JSON.stringify(storedData) === JSON.stringify(receivedData)) {
+        isStored = true;
+        break;
+      }
+    }
+    
+    return isStored;
+  }
+
+
+
   // Returns true if at least one HTTP event have been registered
   // [TODO] filter considering likely useless HTTP events
-  async hasHttpEvent() {
+  async hasOneHttpEvent() {
     if (!this.db) {
       throw new Error("Database not initialized");
     }

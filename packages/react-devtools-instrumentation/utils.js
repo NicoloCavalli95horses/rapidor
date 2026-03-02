@@ -8,6 +8,16 @@ export function deepObjCopy(obj) {
 
 
 
+export function copyObjKeys(obj = {}, keys = []) {
+  return keys.reduce((acc, key) => {
+    if (Object.hasOwn(obj, key)) {
+      acc[key] = obj[key];
+    }
+    return acc;
+  }, {});
+}
+
+
 
 /**
  * @param {Object} message
