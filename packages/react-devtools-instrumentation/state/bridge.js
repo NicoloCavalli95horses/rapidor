@@ -32,7 +32,7 @@ export class Bridge {
       // `rendererInterface` exposes devtools utilities to get info about single components
       const rendererInterface = attach(this.#hook, rendererID, renderer, window);
       emit({ type: 'RENDERER', payload: rendererInterface });
-      log('[BRIDGE] Renderer attached');
+      log({module: 'bridge', msg: 'Renderer attached'});
     });
   }
 
@@ -56,7 +56,7 @@ export class Bridge {
       return original?.call(this, rendererID, root, ...rest);
     };
 
-    log('[BRIDGE] listening to fiber commits changes');
+    log({module: 'bridge', msg: 'listening to fiber commits changes'});
   }
 
 
@@ -115,8 +115,8 @@ export class Bridge {
         g.addNode({ graph, id, data: serializableData });
 
         if (parentId) {
-          // Add relation if parentID exists
           // [TODO]: add type: "render" relations (!)
+          // Add relation if parentID exists
           g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
         }
       }

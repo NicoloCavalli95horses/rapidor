@@ -6,6 +6,7 @@ import { filter } from 'rxjs/operators';
 import { hasOwnKeys, log, sendPostMessage } from "../utils.js";
 import { StateManager } from "../state/stateManager.js";
 import { RequestGenerator } from "./requestGenerator.js";
+import { config } from "../config.js";
 
 
 
@@ -37,7 +38,7 @@ export class AnalysisManager {
     const canStart = await this.stateManager.hasOneHttpEvent();
     if (!canStart) { return; }
 
-    log('[ANALYSIS MANAGER] starting the test generation...');
+    log({ module: 'analysis manager', msg: 'starting the test generation...' });
 
     this.stop = false;
     let currentHttpEvent = {};
@@ -74,7 +75,7 @@ export class AnalysisManager {
 
         const { nodes, relations } = currentSnapshot.value;
 
-        const res = await this.searchProperty({ nodes, property: segments[segments.length -1] });
+        const res = await this.searchProperty({ nodes, property: segments[segments.length - 1], snapshotKey: currentSnapshot.key });
 
         if (res.size) {
           const payload = {
@@ -87,12 +88,12 @@ export class AnalysisManager {
       }
     }
 
-    log('[ANALYSIS MANAGER] exit analysis')
+    log({ module: 'analysis manager', msg: 'exit analysis' });
   }
 
 
 
-  searchProperty({ nodes, property }) {
+  searchProperty({ nodes, property, snapshotKey }) {
     const results = new Set();
     const visited = new WeakSet();
 
@@ -101,9 +102,10 @@ export class AnalysisManager {
         node._results.push({
           path: [...path],
           value,
-          ratio: "a value within this node matches a segment extracted from an HTTP request"
+          ratio: "a value within this node matches a segment extracted from an HTTP request",
+          belongsToSnapshot: snapshotKey,
         });
-        
+
         results.add(node);
         return;
       }
@@ -125,7 +127,7 @@ export class AnalysisManager {
     }
 
     for (const node of Object.values(nodes)) {
-      if (node.tag != 5) { continue; } // HostComponent
+      if (!config.allowedNodeTag.includes(node.tag)) { continue; } // HostComponent
       node._results = [];
       visit({ value: node.props, node, path: ['props'] });
     }

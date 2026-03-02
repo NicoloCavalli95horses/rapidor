@@ -1,3 +1,14 @@
+//===================
+// Const
+//===================
+let logs = [];
+
+
+
+//===================
+// Functions
+//===================
+
 /**
  * Copy deeply nested object
  * @param {Object} obj
@@ -40,9 +51,47 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
 }
 
 
-// [TODO]: would be nice to save the logs as a .txt file
-export function log(...args) {
-  console.log('[INSTRUMENTATION]', ...args);
+export function log({module, type = 'info', msg}) {
+  console.log('[INSTRUMENTATION]', `[${module.toUpperCase()}]`, msg);
+  logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
+}
+
+
+
+function downloadLogs(content) {
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `logs_${Date.now()}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+
+export function showDownloadBtn(doc) {
+  function inject() {
+    const btn = doc.createElement("button");
+    btn.innerText = "Download logs";
+    btn.style.position = "fixed";
+    btn.style.top = "10px";
+    btn.style.right = "10px";
+    btn.style.zIndex = "999999";
+    btn.onclick = () => {
+      downloadLogs(logs);
+      logs = [];
+    };
+    doc.body.appendChild(btn);
+  }
+
+  if (doc.body) {
+    inject();
+  } else {
+    doc.addEventListener("DOMContentLoaded", inject);
+  }
 }
 
 

@@ -44,7 +44,7 @@ export class StateManager {
           break;
 
         default:
-          log('[STATE MANAGER] Received unknown event type', event.type);
+          log({ module: 'state manager', msg: `Received unknown event type: ${event.type}` });
       }
     });
   }
@@ -83,10 +83,10 @@ export class StateManager {
 
     try {
       await this.db.saveState({ data: payload, storeName });
-      log(`[STATE MANAGER] saved ${type} to DB`);
+      log({ module: 'state manager', msg: `saved ${type} to DB` });
       emit({ type: events.DB_SUCCESS, payload: { type } }); // this will start the state analysis if HTTP events occurred
     } catch (error) {
-      log(`[STATE MANAGER] impossible to save on DB: ${error}`);
+      log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
     }
   }
 

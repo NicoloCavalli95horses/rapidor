@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { log } from './utils.js';
+import { log, showDownloadBtn } from './utils.js';
 import { eventBus } from './eventBus.js';
 import { Bridge } from './state/bridge.js';
 import { StateManager } from './state/stateManager.js';
@@ -14,7 +14,10 @@ import { AnalysisManager } from './analysis/analysisManager.js';
 // Functions
 //===================
 export async function instrumentationMain() {
-  log('[INDEX] main module loaded from "packages/react-devtools-extensions/src/contentScripts/installHook.js"');
+  // Download log for further analysis
+  showDownloadBtn(document);
+
+  log({ module: 'index', msg: "main module loaded from 'packages/react-devtools-extensions/src/contentScripts/installHook.js'" });
 
   // Track HTTP messages
   const tracker = new HTTPTracker();

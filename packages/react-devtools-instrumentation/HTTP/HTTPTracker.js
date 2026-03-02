@@ -22,7 +22,7 @@ export class HTTPTracker {
   async init() {
     await this.captureXMLHttpRequest();
     await this.captureFetchRequest();
-    log('[HTTP tracker] initialized');
+    log({ module: 'HTTP tracker', msg: 'HTTP tracker initialized' });
   }
 
 
@@ -161,7 +161,7 @@ export class HTTPTracker {
     } catch (error) {
       ret.error = error;
       ret.rawBody = data;
-      log(`[HTTP tracker] [ERROR] Error parsing HTTP response body: ${error}.\nRaw response type: ${contentType}.\nRaw data: ${data}`);
+      log({ module: 'HTTP tracker', type: 'error', msg: `Error parsing HTTP response body: ${error}.\nRaw response type: ${contentType}.\nRaw data: ${data}` });
     }
 
     return ret;

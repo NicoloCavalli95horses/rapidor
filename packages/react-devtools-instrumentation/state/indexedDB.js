@@ -34,7 +34,7 @@ export class IDBManager {
       const request = window.indexedDB.open(this.name, this.version);
 
       request.onerror = (event) => {
-        log("IndexedDB error: ", event);
+        log({module: 'indexedDB', msg: 'IndexedDB error', type: 'error'});
         reject(event.target.error);
       };
 
@@ -58,7 +58,7 @@ export class IDBManager {
           httpEvent.createIndex("timestamp", "timestamp", { unique: false });
         }
 
-        log('[DB] IndexedDB initialized');
+        log({module: 'indexedDB', msg: 'IndexedDB initialized'});
       };
 
       request.onsuccess = (event) => {
