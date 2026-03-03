@@ -162,6 +162,7 @@
   },
   "packageManager": "yarn@1.22.22",
   "dependencies": {
+    "lodash": "^4.17.23",
     "rxjs": "^7.8.2"
   }
 }

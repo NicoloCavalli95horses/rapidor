@@ -32,7 +32,7 @@ export class Bridge {
       // `rendererInterface` exposes devtools utilities to get info about single components
       const rendererInterface = attach(this.#hook, rendererID, renderer, window);
       emit({ type: 'RENDERER', payload: rendererInterface });
-      log({module: 'bridge', msg: 'Renderer attached'});
+      log({ module: 'bridge', msg: 'Renderer attached' });
     });
   }
 
@@ -56,20 +56,11 @@ export class Bridge {
       return original?.call(this, rendererID, root, ...rest);
     };
 
-    log({module: 'bridge', msg: 'listening to fiber commits changes'});
+    log({ module: 'bridge', msg: 'listening to fiber commits changes' });
   }
 
 
-  // 1) Intermediate representation
-  // - the bridge should not be responsible of creating the graph, because we want to generalize the process to Angular, Vue, etc
-  // - At the same time, what we get from the React fiber is specific to React, and generating the graph require understanding the data schema provided by the framework
-  // - [TODO] We need an intermediate representation that close the gap between framework-specific data and framework-agnostic component graph
 
-  // 2) Storing DOM data
-  // - DOM data is already extracted here, because we cannot save DOM objects to a DB, they are not serializable
-  // - the mapping is currently weak, ie we trust too much the framework 
-  // - [TODO] find a way to map component props to closest DOM element in a reliable way
-  // - this mapping is critical and will be used to solve oracle problem
   getStateGraph(fiber) {
     const g = new Graph();
     const graph = g.createGraph();
@@ -103,20 +94,15 @@ export class Bridge {
           name: self.filterReactComponentName(node.type),
           key: node.key,
           props: self.filterReactProps(node.memoizedProps, visitedProps),
-          domState: self.getDOMInfo(domElement),
+          DOM: self.getDOMInfo(domElement),
           tag: node.tag,
         };
 
-        // Filter nodes here (?)
-        // PROS: - the bridge class has React-specific info here, eg. tag codes
-        //       - adding all the nodes led to a cleaner graph
-        // CONS: - not filtering the nodes is really expensive computationally
-        //       - if we filter nodes in the data retrieval phase, we will need to use framework-specific information elsewhere
-        g.addNode({ graph, id, data: serializableData });
-
+        if (config.allowedNodeTag.includes(node.tag)) {
+          g.addNode({ graph, id, data: serializableData });
+        }
+       
         if (parentId) {
-          // [TODO]: add type: "render" relations (!)
-          // Add relation if parentID exists
           g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
         }
       }
@@ -144,13 +130,15 @@ export class Bridge {
         width: rect.width,
         height: rect.height,
         inlineStyle: Object.fromEntries(Object.entries(node.style).filter(([_, value]) => value !== '')),
-        children: []
+        DOMchildren: []
       };
-
+      
+      // `node.children` is not a property we have from React
+      // DOM Children are derived using DOM apis (HTMLCOllection)
       for (const child of node.children) {
         const childData = visit(child);
         if (childData) {
-          current.children.push(childData);
+          current.DOMchildren.push(childData);
         };
       }
 
@@ -175,6 +163,7 @@ export class Bridge {
 
 
 
+  // traverse props object and return only serializable values
   filterReactProps(props, visited = new WeakSet()) {
     if (props === null || typeof props !== "object") {
       return props;
@@ -202,32 +191,5 @@ export class Bridge {
     }
 
     return obj;
-  }
-
-
-
-  // Tags are defined in ReactWorkTags.js
-  // Useful tags are found empirically
-  isUserComponent(tag) {
-    return (
-      // tag === 0 // FunctionComponent
-      // || tag === 1 // ClassComponent
-      tag === 5 // HostComponent
-      // tag === 11 // ForwardRef
-      // tag === 13 // SuspenseComponent
-      // || tag === 14 // MemoComponent
-      // || tag === 15 // SimpleMemoComponent
-      // || tag === 16 // LazyComponent
-      // || tag === 17 // IncompleteClassComponent
-      // || tag === 19 // SuspenseListComponent
-      // || tag === 21 // ScopeComponent
-      // || tag === 22 // OffscreenComponent
-      // || tag === 23 // LegacyHiddenComponent
-      // || tag === 24 // CacheComponent
-      // || tag === 25 // TracingMarkerComponent
-      // || tag === 28 // IncompleteFunctionComponent
-      // || tag === 30 // ViewTransitionComponent
-      // || tag === 31 // ActivityComponent
-    );
-  }
+  }  
 }

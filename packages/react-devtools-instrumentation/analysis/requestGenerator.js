@@ -19,30 +19,96 @@ export class RequestGenerator {
       .subscribe(e => this.handleGenerate(e.payload));
   }
 
-  handleGenerate(event) {
-    const { nodes, http } = event;
 
-    // for (let i = 0; i < nodes.length; i++) {
-    //   const node = nodes[i];
-    //   const _results = node._results;
-    //   for (let j = 0; j < _results.length; j++) {
-    //     const _result = _results[j];
-    //     // [to do...]
-    //   }
-    // }
 
-    // [TODO] here we have the component(s) involved in the HTTP requests
-    // 1) find siblings of the current component by using the given path
-    // 2) extract data from sibilngs by leveraging structural equivalence
-    // 3) analyze visual differences (DOM classes) and props differences (boolean, etc) in siblings
-    // 4) create requests by modifying only 1 field at the time
-    // 5) store new requests and responses
-    // 5) evaluate responses based on metamorphic relations
-
-    console.log(event);
+  async handleGenerate(event) {
+    const { results, http } = event;
+    const segments = await this.findAlternativeSegments(results);
+    const res = await this.buildRequests(http.request, segments);
+    console.log(res);
   }
 
-  async fetchRequest({ path, options = { method: "GET", body: '', headers: {} } }) {
+
+  async buildRequests(ref, segments) {
+    const commonRoot = this.removeLastSegment(ref.uri);
+    const method = ref.verb.toUpperCase();
+
+    const promises = segments.map((s) => {
+      const path = `${commonRoot}/${s}`;
+
+      const options = {
+        method,
+        ...(ref.headers && { headers: ref.headers }),
+        ...(
+          ["POST", "PUT", "PATCH"].includes(method) && ref.body
+            ? { body: ref.body }
+            : {}
+        )
+      };
+
+      return this.fetchRequest({ path, options });
+    });
+
+    return Promise.all(promises);
+  }
+
+
+
+  removeLastSegment(endpoint) {
+    const url = new URL(endpoint);
+    const segments = url.pathname.split('/').filter(Boolean);
+    segments.pop();
+    url.pathname = '/' + segments.join('/');
+    return url.toString();
+  }
+
+
+
+  async findAlternativeSegments(results) {
+    const segments = new Set();
+
+    for (const result of results) {
+      const node = await this.stateManager.getStateByID(result.rowId, result.nodeId);
+      const { path, value: match } = result;
+      const lastKey = path[path.length - 1];
+
+      const siblings = this.findRelevantArray(node, path, lastKey, match);
+      if (!siblings) { continue; }
+
+      for (const child of siblings) {
+        if (child?.[lastKey] != null) {
+          segments.add(child[lastKey]);
+        }
+      }
+    }
+
+    return [...segments];
+  }
+
+
+
+  findRelevantArray(root, path, lastKey, match) {
+    let current = root;
+
+    for (let i = 0; i < path.length; i++) {
+      if (current == null) { return null; }
+
+      const key = path[i];
+      current = current[key];
+
+      if (Array.isArray(current)) {
+        const found = current.some(
+          item => item?.[lastKey] === match
+        );
+
+        if (found) { return current; }
+      }
+    }
+
+    return null;
+  }
+
+  async fetchRequest({ path, options }) {
     try {
       const response = await fetch(path, options);
       if (!response.ok) {

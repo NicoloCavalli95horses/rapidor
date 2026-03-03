@@ -25,10 +25,10 @@ export class StateManager {
     eventBus.subscribe(async (event) => {
       switch (event.type) {
         case events.STATE_UPDATE:
-          // Save new state in any case?
-          // Difficult to compare state snapshots, DOM elements may now have different size due to screen resizing
-          // DOM information are necessary for the metamorphic relations and we need to store everything
-          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.STATE });
+          // High-entropy keys are used in props.value.location.key or navigator.location.key
+          // These create differences between stored object, so every page change produces a new state
+          // Shall we remove these keys before storing the objects (?) they seem unimportant for our goals
+          await this.handleUpdate({ event, storeName: this.dbStores.STATE, keys: ['nodes', 'relations'] });
           break;
 
         case events.HTTP_EVENT:
@@ -41,6 +41,7 @@ export class StateManager {
           break;
 
         case events.DB_SUCCESS:
+        case events.GEN_REQ:
           break;
 
         default:
@@ -92,14 +93,15 @@ export class StateManager {
 
 
 
-  async getStateByID(id) {
-    return await this.db.getByID({ id, storeName: this.dbStores.STATE });
+  async getStateByID(rowId, nodeId) {
+    const state = await this.db.getByID({ rowId, nodeId, storeName: this.dbStores.STATE });
+    return state.nodes[nodeId];
   }
 
 
 
-  async getHTTPeventByID(id) {
-    return await this.db.getByID({ id, storeName: this.dbStores.HTTP_EVENT });
+  async getHTTPeventByID(rowId, nodeId) {
+    return await this.db.getByID({ rowId, nodeId, storeName: this.dbStores.HTTP_EVENT });
   }
 
 

@@ -38,7 +38,7 @@ export class AnalysisManager {
     const canStart = await this.stateManager.hasOneHttpEvent();
     if (!canStart) { return; }
 
-    log({ module: 'analysis manager', msg: 'starting the test generation...' });
+    log({ module: 'analysis manager', msg: 'starting the analysis...' });
 
     this.stop = false;
     let currentHttpEvent = {};
@@ -75,11 +75,11 @@ export class AnalysisManager {
 
         const { nodes, relations } = currentSnapshot.value;
 
-        const res = await this.searchProperty({ nodes, property: segments[segments.length - 1], snapshotKey: currentSnapshot.key });
+        const res = await this.searchPropertyInNodes({ nodes, property: segments[segments.length - 1], rowId: currentSnapshot.key });
 
         if (res.size) {
           const payload = {
-            nodes: [...res],
+            results: [...res],
             http: currentHttpEvent.value
           };
 
@@ -93,20 +93,20 @@ export class AnalysisManager {
 
 
 
-  searchProperty({ nodes, property, snapshotKey }) {
+  searchPropertyInNodes({ nodes, property, rowId }) {
     const results = new Set();
     const visited = new WeakSet();
 
     function visit({ value, node, path }) {
       if (property === value) {
-        node._results.push({
+        results.add({
+          nodeId: node.id,
           path: [...path],
           value,
           ratio: "a value within this node matches a segment extracted from an HTTP request",
-          belongsToSnapshot: snapshotKey,
+          rowId,
         });
 
-        results.add(node);
         return;
       }
 
@@ -127,8 +127,6 @@ export class AnalysisManager {
     }
 
     for (const node of Object.values(nodes)) {
-      if (!config.allowedNodeTag.includes(node.tag)) { continue; } // HostComponent
-      node._results = [];
       visit({ value: node.props, node, path: ['props'] });
     }
 

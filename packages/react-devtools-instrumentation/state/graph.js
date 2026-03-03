@@ -54,19 +54,9 @@ export class Graph {
 
     graph.relations[fromId][type].add(toId);
 
-    // add parent node to ease data retrieval
-    if (type == "child") {
-      if (graph.nodes[toId]) {
-        // we assume that a node can have just 1 parent. Otherwise we can do:
-        // graph.nodes[toId].parents = new Set();
-        // graph.nodes[toId].parents.add(fromId);
-        graph.nodes[toId].parent = fromId;
-      } else {
-        console.error(`Node ${toId} does not exist`);
-      }
-    }
-    if (type === "render") {
-      // [TODO]
+    // add parent node to ease data retrieval (we assume that a node can have just 1 parent)
+    if (type == "child" && graph.nodes[toId]) {
+      graph.nodes[toId].parent = fromId;
     }
   }
 
@@ -80,7 +70,7 @@ export class Graph {
   }
 
 
-  
+
   // siblings: nodes that have the same parent as the given node
   // O(k) complexity (k = number of children)
   getSiblings({ graph, id }) {
