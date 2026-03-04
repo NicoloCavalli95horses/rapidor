@@ -90,8 +90,44 @@ export class IDBManager {
   }
 
 
+  async updateRow({ id, payload, storeName }) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
 
-  async getByID({ rowId, nodeId, storeName }) {
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+
+      tx.onerror = (e) => reject(e.target.error);
+      tx.onabort = (e) => reject(e.target.error);
+
+      const getRequest = store.get(id);
+
+      getRequest.onerror = (e) => reject(e.target.error);
+
+      getRequest.onsuccess = (e) => {
+        const existing = e.target.result;
+
+        if (!existing) {
+          reject(new Error(`Object in ${storeName} at id: ${id} not found`));
+          return;
+        }
+
+        const updated = {
+          ...existing,
+          ...payload,
+        };
+
+        store.put(updated, id);
+        resolve(updated);
+      };
+    });
+  }
+
+
+
+  async getByID({ id, storeName }) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
@@ -100,7 +136,7 @@ export class IDBManager {
     const store = tx.objectStore(storeName);
 
     const result = await new Promise((resolve, reject) => {
-      const request = store.get(rowId);
+      const request = store.get(id);
       request.onsuccess = (e) => resolve(e.target.result);
       request.onerror = (e) => reject(e.target.error);
     });

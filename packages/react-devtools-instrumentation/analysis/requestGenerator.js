@@ -1,9 +1,10 @@
 //===================
 // Import
 //===================
-import { eventBus, events } from "../eventBus.js";
+import { eventBus, events, emit } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
-
+import { ResponseEvaluator } from "./responseEvaluator.js";
+import { log } from "../utils.js";
 
 //===================
 // Functions
@@ -11,6 +12,7 @@ import { filter } from 'rxjs/operators';
 export class RequestGenerator {
   constructor(stateManager) {
     this.stateManager = stateManager;
+    this.evaluator = new ResponseEvaluator();
   }
 
   init() {
@@ -24,8 +26,8 @@ export class RequestGenerator {
   async handleGenerate(event) {
     const { results, http } = event;
     const segments = await this.findAlternativeSegments(results);
-    const res = await this.buildRequests(http.request, segments);
-    console.log(res);
+    // const res = await this.buildRequests(http.request, segments);
+    console.log(event, segments);
   }
 
 
@@ -36,14 +38,13 @@ export class RequestGenerator {
     const promises = segments.map((s) => {
       const path = `${commonRoot}/${s}`;
 
+      // flag this request in order not to analyze them as regular HTTP events
+      emit({ type: events.GEN_HTTP_EVENT_FLAG, payload: path});
+      
       const options = {
         method,
         ...(ref.headers && { headers: ref.headers }),
-        ...(
-          ["POST", "PUT", "PATCH"].includes(method) && ref.body
-            ? { body: ref.body }
-            : {}
-        )
+        ...(["POST", "PUT", "PATCH"].includes(method) && ref.body ? { body: ref.body } : {})
       };
 
       return this.fetchRequest({ path, options });
@@ -68,8 +69,7 @@ export class RequestGenerator {
     const segments = new Set();
 
     for (const result of results) {
-      const node = await this.stateManager.getStateByID(result.rowId, result.nodeId);
-      const { path, value: match } = result;
+      const { path, value: match, node } = result;
       const lastKey = path[path.length - 1];
 
       const siblings = this.findRelevantArray(node, path, lastKey, match);
@@ -117,7 +117,7 @@ export class RequestGenerator {
 
       return await response.json();
     } catch (error) {
-      console.error(error.message);
+      log({ module: 'request generator', type: 'error', msg: `Request ${path} failed with ${error.message}` });
     }
   }
 }

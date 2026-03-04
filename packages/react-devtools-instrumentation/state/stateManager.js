@@ -39,13 +39,6 @@ export class StateManager {
           // Hence, we don't store HTTP events twice and execute the analysis only once per event
           await this.handleUpdate({ event, storeName: this.dbStores.HTTP_EVENT, keys: ['request'] });
           break;
-
-        case events.DB_SUCCESS:
-        case events.GEN_REQ:
-          break;
-
-        default:
-          log({ module: 'state manager', msg: `Received unknown event type: ${event.type}` });
       }
     });
   }
@@ -94,14 +87,20 @@ export class StateManager {
 
 
   async getStateByID(rowId, nodeId) {
-    const state = await this.db.getByID({ rowId, nodeId, storeName: this.dbStores.STATE });
+    const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
     return state.nodes[nodeId];
   }
 
 
 
-  async getHTTPeventByID(rowId, nodeId) {
-    return await this.db.getByID({ rowId, nodeId, storeName: this.dbStores.HTTP_EVENT });
+  async updateHTTPevent({ id, payload }) {
+    return await this.db.updateRow({ id, payload, storeName: this.dbStores.HTTP_EVENT });
+  }
+
+
+
+  async getHTTPeventByID(rowId) {
+    return await this.db.getByID({ id: rowId, storeName: this.dbStores.HTTP_EVENT });
   }
 
 

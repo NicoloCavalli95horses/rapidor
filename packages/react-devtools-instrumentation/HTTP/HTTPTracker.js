@@ -7,6 +7,7 @@ import { log, deepObjCopy } from '../utils.js';
 import { analyzeHTTP } from './HTTPAnalyzer.js';
 
 
+
 export class HTTPTracker {
   constructor() {
     this.analyzer = new analyzeHTTP();
@@ -20,6 +21,8 @@ export class HTTPTracker {
 
 
   async init() {
+    this.analyzer.init();
+
     await this.captureXMLHttpRequest();
     await this.captureFetchRequest();
     log({ module: 'HTTP tracker', msg: 'HTTP tracker initialized' });

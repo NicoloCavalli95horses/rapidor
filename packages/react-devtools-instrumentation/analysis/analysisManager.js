@@ -18,6 +18,7 @@ export class AnalysisManager {
     this.stateManager = stateManager;
     this.stop = false;
     this.requestGenerator = new RequestGenerator(this.stateManager);
+    this.analysisCounter = 0;
   }
 
   init() {
@@ -33,7 +34,7 @@ export class AnalysisManager {
   async onDbSuccess(type) {
     // `HTTP events` can be stored before `state events`
     // start the analysis only after the first state snapshots
-    // and only if (valid) HTTP events have been stored
+    // and only if valid HTTP events are present
     if (type !== events.STATE_UPDATE) { return; }
     const canStart = await this.stateManager.hasOneHttpEvent();
     if (!canStart) { return; }
@@ -48,43 +49,52 @@ export class AnalysisManager {
       currentHttpEvent = await this.stateManager.getNextHttpEvent(currentHttpEvent?.key);
 
       if (!currentHttpEvent) {
+        // no more HTTP events
         this.stop = true;
         break;
       }
 
-      const { request, response } = currentHttpEvent.value;
+      const { request, response, done } = currentHttpEvent.value;
       const { fullPath, segments } = request.meta.path; // endpoint details {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
 
-      if (!segments.length) {
-        this.stop = true;
-        break;
+      if (done || !segments.length) {
+        // HTTP event already analized 
+        continue;
       }
 
       while (!this.stop) {
-        // if (this.results.size) {
-        //   // results are found in a snapshot, do not iterate over the next
-        //   break;
-        // }
-
         currentSnapshot = await this.stateManager.getNextState(currentSnapshot?.key);
 
         if (!currentSnapshot) {
-          // dont exit here, we want to try other stored HTTP events
+          // no more state events, break this loop and try other HTTP events
           break;
         }
 
+        this.analysisCounter++;
+        log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
+
         const { nodes, relations } = currentSnapshot.value;
 
-        const res = await this.searchPropertyInNodes({ nodes, property: segments[segments.length - 1], rowId: currentSnapshot.key });
+        const results = await this.searchPropertyInNodes({ nodes, property: segments[segments.length - 1], rowId: currentSnapshot.key });
 
-        if (res.size) {
-          const payload = {
-            results: [...res],
-            http: currentHttpEvent.value
-          };
-
-          emit({ type: events.GEN_REQ, payload });
+        if (results.size) {
+          emit({
+            type: events.GEN_REQ,
+            payload: {
+              results: [...results],
+              http: currentHttpEvent.value
+            }
+          });
+        } else {
+          log({ module: 'analysis manager', msg: 'no matches found' });
         }
+
+        // flag current HTTP event as done
+        const res = await this.stateManager.updateHTTPevent({
+          id: currentHttpEvent.key,
+          payload: { done: true }
+        });
+
       }
     }
 
@@ -105,6 +115,7 @@ export class AnalysisManager {
           value,
           ratio: "a value within this node matches a segment extracted from an HTTP request",
           rowId,
+          node,
         });
 
         return;
@@ -127,7 +138,9 @@ export class AnalysisManager {
     }
 
     for (const node of Object.values(nodes)) {
-      visit({ value: node.props, node, path: ['props'] });
+      if (config.allowedNodeTags.includes(node.tag)) {
+        visit({ value: node.props, node, path: ['props'] });
+      }
     }
 
     return results;
