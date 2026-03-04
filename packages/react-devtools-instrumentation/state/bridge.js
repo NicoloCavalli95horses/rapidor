@@ -77,8 +77,7 @@ export class Bridge {
         : (node.stateNode instanceof HTMLElement) ? node.stateNode
           : undefined;
 
-      // This data will be saved to IndexedDB which use a 'structured clone' algorithm
-      // Every value needs to be serialized (ie. no function, Node, Document, Window, DOM objects, Event, ...)
+      // data needs to be serialized (ie. no function, Node, Document, Window, DOM objects, Event, ...)
       const serializableData = {
         id,
         name: self.filterReactComponentName(node.type),

@@ -113,7 +113,7 @@ export class AnalysisManager {
           nodeId: node.id,
           path: [...path],
           value,
-          ratio: "a value within this node matches a segment extracted from an HTTP request",
+          ratio: "a value within this node matches a segment extracted from an HTTP request. This node has siblings",
           rowId,
           node,
         });
@@ -137,8 +137,9 @@ export class AnalysisManager {
       }
     }
 
+    // we specifically focus on list of elements, hence we consider only node with siblings
     for (const node of Object.values(nodes)) {
-      if (config.allowedNodeTags.includes(node.tag)) {
+      if (node.siblings?.length) {
         visit({ value: node.props, node, path: ['props'] });
       }
     }
