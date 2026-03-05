@@ -2,7 +2,8 @@
 export const config = Object.freeze({
   debounceTimeMs: 1000, // component state retrieval
   sessionID: crypto.randomUUID(), // ID of stored data
-  allowedNodeTags: [0,5,7], // whitelist of component types to scan
+  // allowedNodeTags: [5,7], // whitelist of component types to scan
+  // we save all the nodes and then analyze only nodes with siblings
 });
 
 

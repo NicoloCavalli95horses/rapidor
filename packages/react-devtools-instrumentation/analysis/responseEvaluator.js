@@ -1,7 +1,9 @@
 //===================
 // Import
 //===================
-
+import { eventBus, events, emit } from "../eventBus.js";
+import { filter } from 'rxjs/operators';
+import { log } from "../utils.js";
 
 
 //===================
@@ -12,6 +14,13 @@ export class ResponseEvaluator {
   }
 
   init() {
-   
+    eventBus
+      .pipe(filter(e => e.type === events.EVALUATE))
+      .subscribe(e => this.handleEvent(e.payload));
+  }
+
+
+  handleEvent(event) {
+    console.log(event);
   }
 }

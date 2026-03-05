@@ -107,6 +107,12 @@ export function isCloneable(obj) {
 
 
 
+export function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+
 export function payloadSize(obj) {
   const json = JSON.stringify(obj);
   const bytes = new TextEncoder().encode(json).length;

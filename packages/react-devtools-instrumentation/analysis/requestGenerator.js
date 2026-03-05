@@ -4,7 +4,7 @@
 import { eventBus, events, emit } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
-import { log } from "../utils.js";
+import { log, sleep } from "../utils.js";
 
 //===================
 // Functions
@@ -16,41 +16,61 @@ export class RequestGenerator {
   }
 
   init() {
+    this.evaluator.init();
+
     eventBus
       .pipe(filter(e => e.type === events.GEN_REQ))
-      .subscribe(e => this.handleGenerate(e.payload));
+      .subscribe(e => this.handleEvent(e.payload));
   }
 
 
 
-  async handleGenerate(event) {
-    const { results, http } = event;
-    const segments = await this.findAlternativeSegments(results);
-    // const res = await this.buildRequests(http.request, segments);
-    console.log(event, segments);
-  }
+  async handleEvent(event) {
+    const { matchingSets, http } = event;
+    const { request: referenceReq, response: referenceRes } = http;
+    log({ module: 'request generator', msg: 'received matches, building requests...' });
+    const self = this;
 
+    matchingSets.forEach(async (set) => {
+      set.forEach(async (node) => {
+        // if (node.isOriginalMatch) { return; }
 
-  async buildRequests(ref, segments) {
-    const commonRoot = this.removeLastSegment(ref.uri);
-    const method = ref.verb.toUpperCase();
+        const request = self.buildRequest(referenceReq, node.match);
+        const response = await self.executeRequest(request);
 
-    const promises = segments.map((s) => {
-      const path = `${commonRoot}/${s}`;
+        const payload = {
+          node,
+          referenceHttp: http,
+          newHttp: { request, response }
+        }
 
-      // flag this request in order not to analyze them as regular HTTP events
-      emit({ type: events.GEN_HTTP_EVENT_FLAG, payload: path});
-      
-      const options = {
-        method,
-        ...(ref.headers && { headers: ref.headers }),
-        ...(["POST", "PUT", "PATCH"].includes(method) && ref.body ? { body: ref.body } : {})
-      };
-
-      return this.fetchRequest({ path, options });
+        emit({ type: events.EVALUATE, payload });
+        sleep(200);
+      });
     });
+  }
 
-    return Promise.all(promises);
+
+
+  // build new request object given reference HTTP request
+  buildRequest(request, value) {
+    const method = request.verb.toUpperCase();
+    const path = (this.removeLastSegment(request.uri) + '/' + value).toString();
+    const options = {
+      method,
+      ...(request.headers && { headers: request.headers }),
+      ...(["POST", "PUT", "PATCH"].includes(method) && request.body ? { body: request.body } : {})
+    };
+
+    return { path, options };
+  }
+
+
+
+  async executeRequest(request) {
+    // flag the request in order not to process it as a regular HTTP event
+    emit({ type: events.GEN_HTTP_EVENT_FLAG, payload: request.path });
+    return await this.fetchRequest(request);
   }
 
 
@@ -64,49 +84,6 @@ export class RequestGenerator {
   }
 
 
-
-  async findAlternativeSegments(results) {
-    const segments = new Set();
-
-    for (const result of results) {
-      const { path, value: match, node } = result;
-      const lastKey = path[path.length - 1];
-
-      const siblings = this.findRelevantArray(node, path, lastKey, match);
-      if (!siblings) { continue; }
-
-      for (const child of siblings) {
-        if (child?.[lastKey] != null) {
-          segments.add(child[lastKey]);
-        }
-      }
-    }
-
-    return [...segments];
-  }
-
-
-
-  findRelevantArray(root, path, lastKey, match) {
-    let current = root;
-
-    for (let i = 0; i < path.length; i++) {
-      if (current == null) { return null; }
-
-      const key = path[i];
-      current = current[key];
-
-      if (Array.isArray(current)) {
-        const found = current.some(
-          item => item?.[lastKey] === match
-        );
-
-        if (found) { return current; }
-      }
-    }
-
-    return null;
-  }
 
   async fetchRequest({ path, options }) {
     try {

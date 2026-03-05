@@ -86,6 +86,7 @@ export class StateManager {
 
 
 
+  // returns node
   async getStateByID(rowId, nodeId) {
     const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
     return state.nodes[nodeId];
@@ -97,6 +98,26 @@ export class StateManager {
     return await this.db.updateRow({ id, payload, storeName: this.dbStores.HTTP_EVENT });
   }
 
+
+
+  async getAncestorDOM(rowId, parentId) {
+    let currentId = parentId;
+
+    while (currentId) {
+      const node = await this.getStateByID(rowId, currentId);
+      if (!node) { return; }
+      if (node.DOM) {
+        return {
+          ...node.DOM,
+          isAncestorDOM: true,
+          ancestorId: currentId
+        }
+      }
+      currentId = node.parent;
+    }
+
+    return;
+  }
 
 
   async getHTTPeventByID(rowId) {

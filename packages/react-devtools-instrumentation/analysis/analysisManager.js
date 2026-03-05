@@ -71,17 +71,24 @@ export class AnalysisManager {
         }
 
         this.analysisCounter++;
-        log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
+        // log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
 
-        const { nodes, relations } = currentSnapshot.value;
-
-        const results = await this.searchPropertyInNodes({ nodes, property: segments[segments.length - 1], rowId: currentSnapshot.key });
+        // searching for last segment in endpoint (eg. api/collection/id -> id)
+        // results = [ {node},{node} ] array of unique matching nodes
+        const results = this.searchPropertyInGraph({
+          graph: currentSnapshot.value,
+          key: currentSnapshot.key,
+          property: segments[segments.length - 1]
+        });
 
         if (results.size) {
+          // for each matching node, build sub-arrays with siblings and DOM references
+          // matchingSets = [ [{node},{node}]  [{node},{node}] ]
+          const matchingSets = await this.processResults([...results]);
           emit({
             type: events.GEN_REQ,
             payload: {
-              results: [...results],
+              matchingSets,
               http: currentHttpEvent.value
             }
           });
@@ -103,19 +110,22 @@ export class AnalysisManager {
 
 
 
-  searchPropertyInNodes({ nodes, property, rowId }) {
+  searchPropertyInGraph({ graph, key, property }) {
+    const { nodes, relations } = graph;
     const results = new Set();
     const visited = new WeakSet();
 
-    function visit({ value, node, path }) {
+    function visit({ value, path, node }) {
+
       if (property === value) {
         results.add({
-          nodeId: node.id,
+          node,
+          relations: relations[node.id],
+          rowId: key,
           path: [...path],
           value,
-          ratio: "a value within this node matches a segment extracted from an HTTP request. This node has siblings",
-          rowId,
-          node,
+          ratio: "a value within this node matches a segment extracted from an HTTP request",
+          isOriginalMatch: true
         });
 
         return;
@@ -128,23 +138,79 @@ export class AnalysisManager {
 
       if (Array.isArray(value)) {
         value.forEach((item, index) => {
-          visit({ value: item, node, path: [...path, index] });
+          visit({ value: item, path: [...path, index], node });
         });
       } else {
         Object.keys(value).forEach(key => {
-          visit({ value: value[key], node, path: [...path, key] });
+          visit({ value: value[key], path: [...path, key], node });
         });
       }
     }
 
+    const ids = new Set();
+
     // we specifically focus on list of elements, hence we consider only node with siblings
-    for (const node of Object.values(nodes)) {
-      if (node.siblings?.length) {
-        visit({ value: node.props, node, path: ['props'] });
+    for (const [id, relation] of Object.entries(relations)) {
+      if (Object.hasOwn(relation, 'sibling')) {
+        ids.add(id);
       }
     }
 
+    for (const id of ids) {
+      const node = nodes[id];
+      visit({ value: node, path: [], node });
+    }
+
     return results;
+  }
+
+
+  // for each nodes, get siblings and append DOM references 
+  async processResults(results) {
+    // [TODO] if the ancestor that has DOM info is common, we may save it just once, like {DOM: {}, matches:{}}
+    const matches = [];
+
+    for (const result of results) {
+      const nodes = [];
+      const { path, relations, value, node, rowId } = result;
+      const { sibling: siblingIds } = relations;
+
+      if (!node.DOM) {
+        node.DOM = await this.stateManager.getAncestorDOM(rowId, node.parent);
+      }
+
+      node.siblingIds = siblingIds;
+      nodes.push({ match: value, node });
+
+      for (const id of siblingIds) {
+        const siblingNode = await this.stateManager.getStateByID(rowId, id);
+
+        // take matching value from sibling node
+        const match = this.getValueAtPath(siblingNode, path);
+
+        if (!match) { continue; }
+
+        // find DOM references if not present
+        if (!siblingNode.DOM) {
+          siblingNode.DOM = await this.stateManager.getAncestorDOM(rowId, id);
+        }
+
+        siblingNode.siblingIds = [...siblingIds, node.id].filter(id => id !== siblingNode.id);
+        nodes.push({ match, node: siblingNode });
+      }
+      matches.push(nodes);
+    }
+
+    return matches;
+  }
+
+
+
+  getValueAtPath(obj, path) {
+    return path.reduce((acc, key) => {
+      if (acc === undefined || acc === null) { return undefined; }
+      return acc[key];
+    }, obj);
   }
 }
 

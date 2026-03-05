@@ -67,12 +67,12 @@ export class Bridge {
     const g = new Graph();
     const graph = g.createGraph();
     const self = this;
+    const visitedProps = new WeakSet();
 
-    function visit(node, parentId = null) {
+    function visit(node, parentId = null, visitedProps) {
       if (!node) { return; }
 
       const id = self.getNodeId(node);
-      const visitedProps = new WeakSet();
       const domElement = (node.stateNode?.containerInfo instanceof HTMLElement) ? node.stateNode.containerInfo
         : (node.stateNode instanceof HTMLElement) ? node.stateNode
           : undefined;
@@ -84,8 +84,7 @@ export class Bridge {
         key: node.key,
         props: self.getSerializableValues(node.memoizedProps, visitedProps),
         DOM: self.getDOMInfo(domElement),
-        tag: node.tag,
-        siblings: self.getSiblings(node),
+        tag: node.tag
       };
 
       g.addNode({ graph, id, data: serializableData });
@@ -94,11 +93,33 @@ export class Bridge {
         g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
       }
 
-      visit(node.child, id);
-      visit(node.sibling, parentId);
+      // collect children once
+      const children = [];
+      let child = node.child;
+
+      while (child) {
+        children.push(child);
+        child = child.sibling;
+      }
+
+      // add sibling relations
+      for (let i = 0; i < children.length; i++) {
+        for (let j = i + 1; j < children.length; j++) {
+          const id1 = self.getNodeId(children[i]);
+          const id2 = self.getNodeId(children[j]);
+
+          g.addRelation({ graph, fromId: id1, toId: id2, type: "sibling" });
+          g.addRelation({ graph, fromId: id2, toId: id1, type: "sibling" });
+        }
+      }
+
+      // visit children
+      for (const childNode of children) {
+        visit(childNode, id, visitedProps);
+      }
     }
 
-    visit(fiber);
+    visit(fiber, null, visitedProps);
     return graph;
   }
 
@@ -113,27 +134,6 @@ export class Bridge {
     }
 
     return id;
-  }
-
-
-
-  // get all the siblings, from the parent node
-  getSiblings(node) {
-    if (!node?.return?.child) {return [];}
-
-    const siblings = [];
-    const self = this;
-
-    let current = node.return.child;
-
-    while (current) {
-      if (current !== node) {
-        siblings.push(self.getNodeId(current));
-      }
-      current = current.sibling;
-    }
-
-    return siblings;
   }
 
 
@@ -185,6 +185,11 @@ export class Bridge {
 
 
   // traverse props object and return only serializable values
+  // [TODO] 
+  // special key (location, navigation, ?) presentS pseudo-random values that
+  // led us to save a new whole state snapshot for no reason. 
+  // - find exact differences between two snapshots considered inequal with JSON.strinfigy()
+  // - remove differences
   getSerializableValues(props, visited = new WeakSet()) {
     if (props === null || typeof props !== "object") {
       return props;
