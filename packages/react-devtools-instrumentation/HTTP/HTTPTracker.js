@@ -227,10 +227,7 @@ export class HTTPTracker {
         const response = {
           status: _res?.status,
           ...await self.getFetchResponseHeaders(_res?.headers),
-          ...await self.getResponseBody({
-            data: _res,
-            type: _res.headers.get('Content-Type')
-          })
+          ...await self.getResponseBody({ data: _res, type: _res.headers.get('Content-Type') })
         };
         self.analyzer.parseHTTP({ type: HTTPTracker.TYPES.FETCH, request, response });
         return res;

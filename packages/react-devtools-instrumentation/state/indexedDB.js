@@ -23,8 +23,29 @@ export class IDBManager {
     HTTP_EVENT: 'httpEvent',
   }
 
+
+
   async init() {
     this.db = await this.connectToDb();
+
+    for (const [key, val] of Object.entries(IDBManager.STORES)) {
+      await this.clearStore(this.name, val);
+    }
+  }
+
+
+
+  async clearStore(dbName, storeName) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    await new Promise((res, rej) => {
+      const tx = this.db.transaction(storeName, "readwrite");
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+      tx.objectStore(storeName).clear();
+    });
   }
 
 

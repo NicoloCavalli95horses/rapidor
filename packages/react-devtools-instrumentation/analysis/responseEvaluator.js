@@ -21,6 +21,8 @@ export class ResponseEvaluator {
 
 
   handleEvent(event) {
+    const { newHttp, referenceHttp } = event;
+    
     console.log(event);
   }
 }

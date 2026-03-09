@@ -31,17 +31,24 @@ export class RequestGenerator {
     log({ module: 'request generator', msg: 'received matches, building requests...' });
     const self = this;
 
-    matchingSets.forEach(async (set) => {
-      set.forEach(async (node) => {
-        // if (node.isOriginalMatch) { return; }
+    matchingSets.forEach(async ({ referenceNode, siblingNodes }) => {
+      siblingNodes.forEach(async (node) => {
+        if (node.isOriginalMatch) { return; } // do not replay the original
 
         const request = self.buildRequest(referenceReq, node.match);
         const response = await self.executeRequest(request);
 
         const payload = {
-          node,
-          referenceHttp: http,
-          newHttp: { request, response }
+          referenceHttp: {
+            request: http.request,
+            response: http.response,
+            node: referenceNode
+          },
+          newHttp: {
+            node,
+            request,
+            response
+          }
         }
 
         emit({ type: events.EVALUATE, payload });
@@ -85,6 +92,12 @@ export class RequestGenerator {
 
 
 
+  // [TODO] use XMLHttpRequest if the original req used this API
+  // X-Requested-With: XMLHttpRequest is an header that the browser adds automatically only in this case
+  // and may be missing if we just use fetch API
+  // [TODO] in fact, this should be handled by HTTPTracker.js
+  // we just send the request and the response should be tracked correctly and sent here via eventBus
+  // Simple solution: use functions from HTTPAnalyzer, that should be exportable
   async fetchRequest({ path, options }) {
     try {
       const response = await fetch(path, options);

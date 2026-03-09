@@ -119,13 +119,12 @@ export class AnalysisManager {
 
       if (property === value) {
         results.add({
-          node,
+          node: { ...node, isOriginalMatch: true },
           relations: relations[node.id],
           rowId: key,
           path: [...path],
           value,
           ratio: "a value within this node matches a segment extracted from an HTTP request",
-          isOriginalMatch: true
         });
 
         return;
@@ -171,16 +170,16 @@ export class AnalysisManager {
     const matches = [];
 
     for (const result of results) {
-      const nodes = [];
-      const { path, relations, value, node, rowId } = result;
+      const siblingNodes = [];
+      const { path, relations, value, node: referenceNode, rowId } = result;
       const { sibling: siblingIds } = relations;
 
-      if (!node.DOM) {
-        node.DOM = await this.stateManager.getAncestorDOM(rowId, node.parent);
+      if (!referenceNode.DOM) {
+        referenceNode.DOM = await this.stateManager.getAncestorDOM(rowId, referenceNode.parent);
       }
 
-      node.siblingIds = siblingIds;
-      nodes.push({ match: value, node });
+      referenceNode.siblingIds = siblingIds;
+      referenceNode.match = value;
 
       for (const id of siblingIds) {
         const siblingNode = await this.stateManager.getStateByID(rowId, id);
@@ -195,10 +194,11 @@ export class AnalysisManager {
           siblingNode.DOM = await this.stateManager.getAncestorDOM(rowId, id);
         }
 
-        siblingNode.siblingIds = [...siblingIds, node.id].filter(id => id !== siblingNode.id);
-        nodes.push({ match, node: siblingNode });
+        siblingNode.siblingIds = [...siblingIds, referenceNode.id].filter(id => id !== siblingNode.id);
+        siblingNode.match = match;
+        siblingNodes.push(siblingNode);
       }
-      matches.push(nodes);
+      matches.push({ referenceNode, siblingNodes });
     }
 
     return matches;

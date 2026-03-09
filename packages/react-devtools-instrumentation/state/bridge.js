@@ -6,6 +6,7 @@ import { emit } from '../eventBus.js';
 import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
+import { NavigationTracker } from './navigationTracker.js';
 
 
 
@@ -16,12 +17,15 @@ export class Bridge {
   constructor() {
     this.nodeMap = new WeakMap();
     this.idCounter = 0;
+    this.navigationTracker = new NavigationTracker();
   }
 
   #hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
 
   // Connect to React specific APIs
   init() {
+    this.navigationTracker.init();
+
     this.listenToFiberCommits();
     this.connectToRenderer();
   }
@@ -48,9 +52,14 @@ export class Bridge {
 
     // The component tree is updated very often
     // We listen to changes via `onCommitFiberRoot` event and save a snapshot only after 2000ms of idleness
+    // We do not perform two times the analysis on the same page
     const debouncedAnalysis = debounce((root) => {
-      const graph = self.getStateGraph(root.current);
-      emit({ type: 'STATE_UPDATE', payload: graph });
+      if (this.navigationTracker.hasAlreadyVisited()) {
+        log({ module: 'bridge', msg: 'page already visited, skipping analysis' });
+      } else {
+        const graph = self.getStateGraph(root.current);
+        emit({ type: 'STATE_UPDATE', payload: graph });
+      }
     }, config.debounceTimeMs);
 
     this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
@@ -68,6 +77,7 @@ export class Bridge {
     const graph = g.createGraph();
     const self = this;
     const visitedProps = new WeakSet();
+    this.resetIds();
 
     function visit(node, parentId = null, visitedProps) {
       if (!node) { return; }
@@ -138,6 +148,13 @@ export class Bridge {
 
 
 
+  resetIds() {
+    this.nodeMap = new WeakMap();
+    this.idCounter = 0;
+  }
+
+
+
   getDOMInfo(el) {
     function visit(node) {
       if (!node) { return; };
@@ -185,32 +202,27 @@ export class Bridge {
 
 
   // traverse props object and return only serializable values
-  // [TODO] 
-  // special key (location, navigation, ?) presentS pseudo-random values that
-  // led us to save a new whole state snapshot for no reason. 
-  // - find exact differences between two snapshots considered inequal with JSON.strinfigy()
-  // - remove differences
-  getSerializableValues(props, visited = new WeakSet()) {
-    if (props === null || typeof props !== "object") {
-      return props;
-    }
+  getSerializableValues(props, visited = new WeakSet(), parentKey = null) {
+    if (props === null || typeof props !== "object") { return props; }
+    if (visited.has(props)) { return; }
 
-    if (visited.has(props)) {
-      return;
-    }
     visited.add(props);
 
     const obj = Array.isArray(props) ? [] : {};
 
     for (const key of Reflect.ownKeys(props)) {
+      if (typeof key === "symbol") { continue; }
       const value = props[key];
 
-      if (!isSerializableValue(value)) {
+      if (!isSerializableValue(value)) { continue; }
+
+      // random key values inside location breaks snapshot equality
+      if (key === "key" && parentKey === "location") {
         continue;
       }
 
       if (typeof value === "object" && value !== null) {
-        obj[key] = this.getSerializableValues(value, visited);
+        obj[key] = this.getSerializableValues(value, visited, key);
       } else {
         obj[key] = value;
       }
