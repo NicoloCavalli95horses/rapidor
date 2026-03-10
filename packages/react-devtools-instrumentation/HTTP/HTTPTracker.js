@@ -198,30 +198,34 @@ export class HTTPTracker {
     const self = this;
 
     window.fetch = async function (...args) {
+      // Normalize the request object: this allows us to read `_requestId` from requestGenerator
+      const originalRequest = args[0] instanceof Request ? args[0] : new Request(...args);
+      const _requestId = originalRequest._requestId || crypto.randomUUID();
+
       try {
         const res = await originalFetch.apply(this, args);
         const _res = res.clone();
-        let headers = {};
-        let verb = 'GET';
+
+        const verb = originalRequest.method || 'GET';
+        const headers = {};
+        originalRequest.headers?.forEach((v, k) => { headers[k] = v; });
+
+
         let body = {};
 
-        if (args.length === 2) {
-          // if length is 1, no options are passed, ie. `fetch('api/resource')`
-          // we assume the request is GET and that there is no request body
-          headers = args[1]?.headers;
-          verb = args[1]?.method;
-          try {
-            body = JSON.parse(args[1]?.body)
-          } catch (err) {
-            body = args[1]?.body;
-          }
+        try {
+          const text = await originalRequest.clone().text();
+          body = text ? JSON.parse(text) : undefined;
+        } catch {
+          body = await originalRequest.clone().text();
         }
 
         const request = {
-          uri: decodeURIComponent(args[0]),
+          uri: originalRequest.url,
           verb,
           headers,
           body: self.getRequestBody({ data: body, headers }),
+          _requestId
         };
 
         const response = {
