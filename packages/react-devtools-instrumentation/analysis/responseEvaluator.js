@@ -32,19 +32,24 @@ export class ResponseEvaluator {
     const currIdx = candidate.node.siblingIdx;
     const DOM = reference.node.DOM;
     const DOMchildren = DOM?.DOMchildren;
+    const refResponse = reference.response;
+    const currResponse = candidate.response;
+
+    const resSimilarity = this.responseSimilarity({ refResponse, currResponse });
 
     if (Array.isArray(DOMchildren)) {
       const refDOM = DOMchildren[refIdx];
       const currDOM = DOMchildren[currIdx];
-      const similarity = this.evaluateDOM({ refDOM, currDOM });
+      const DOMsimilarity = this.evaluateDOM({ refDOM, currDOM });
 
       // if the DOM classes are not equal (over a certain threshold),
       // it means that we have received a 200 OK response using data extracted from a component,
       // which renders a different GUI element than what is done by a referenced component
       // We can leverage this finding to infer access control vulnerability
-      if (similarity.jaccard <= config.jaccardThr) {
-        log({ module: "response evaluator", msg: "an access control issue was found" });
-        emit({ type: events.REPORT, payload: { reference, candidate, similarity } });
+      if (DOMsimilarity.jaccard <= config.jaccardThr && resSimilarity.result) {
+        log({ module: "response evaluator", type: "warning", msg: "potential access control issue found" });
+        const similarity = { DOMsimilarity, resSimilarity }
+        emit({ type: events.REPORT, payload: { reference, candidate, similarity, ratio: 'potential access control vulnerability' } });
       }
     } else {
       // [TODO] sibling nodes with their own DOM elements
@@ -52,9 +57,37 @@ export class ResponseEvaluator {
   }
 
 
+  responseSimilarity({ refResponse, currResponse }) {
+    const compare = ['status', 'content-type', 'raw-type'];
+    const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
+    const refBodyLength = Number(refResponse['content-length']);
+    const currBodyLength = Number(currResponse['content-length']);
+    const isLengthSimilar = this.checkBodyLength(refBodyLength, currBodyLength);
+
+    // [TODO] calc response body similarity
+    const result = areFieldsEqual && isLengthSimilar;
+
+    return result ? {
+      result,
+      equalFields: compare,
+      bodyLength: { isLengthSimilar, refBodyLength, currBodyLength },
+      bodyContent: { } // [TODO]
+    } : {}
+  }
+
+
+
+  checkBodyLength(a, b) {
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) { return false; }
+    const thr = config.HTTPResBodyLengthDiffThr;
+    const ratio = b / a;
+    return ratio >= thr && ratio <= 1 / thr;
+  }
+
+
 
   evaluateDOM({ refDOM, currDOM }) {
-    const similarity = { ratio: "We build a chain of DOM classes from a common ancestor to the two final nodes and compare them using Jaccard similarity and an LCS algorithm" };
+    const similarity = { ratio: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes" };
     const refClasses = [];
     const currClasses = [];
 

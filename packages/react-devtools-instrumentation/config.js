@@ -5,7 +5,8 @@ export const config = Object.freeze({
   sessionID: crypto.randomUUID(), // ID of stored data
   // allowedNodeTags: [5,7], // whitelist of component types to scan
   // we save all the nodes and then analyze only nodes with siblings
-  jaccardThr: 0.5,
+  jaccardThr: 0.5, // similarity threshold considered in Jaccard's similarity index
+  HTTPResBodyLengthDiffThr: 0.5 // similarity thresholds considered in computing difference between HTTP response body length
 });
 
 

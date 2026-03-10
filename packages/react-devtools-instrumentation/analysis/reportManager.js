@@ -25,6 +25,7 @@ export class ReportManager {
   handleEvent(event) {
     log({ module: "report manager", msg: "building report..." });
     console.log(event);
+
     // [TODO] here we can:
     // - build and execute tests (eg, given this request and the similarity, this should fail, but it doesnt)
     // - return a JSON report

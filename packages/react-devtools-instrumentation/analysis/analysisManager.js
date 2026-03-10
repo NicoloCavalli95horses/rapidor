@@ -35,6 +35,8 @@ export class AnalysisManager {
   // start the analysis only after the first state snapshots
   // and only if valid HTTP events are present
   async onDbSuccess(type) {
+    // [TODO] for each new http event we should run an analysis, if a state exist
+    // Then, mark the event as done
     if (type !== events.STATE_UPDATE) { return; }
     const canStart = await this.stateManager.hasOneHttpEvent();
     if (!canStart) { return; }
@@ -61,6 +63,14 @@ export class AnalysisManager {
         this.analysisCounter++;
         // log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
         const results = this.searchPropertyInGraph({ graph: currentSnapshot.value, key: currentSnapshot.key, property: segments[segments.length - 1] });
+     
+        // [TODO]
+        // - currently, we find the component whose state matches the last segment in the endpoint (eg. /id)
+        // - this is usually a single component, that may have siblings
+        // - however, the same components may be used in other sets, with other siblings
+        // - we are not matching these components given that they have no direct relation with the data extracted from the endpoint
+        // - however, we can look for other instances of the same component. If these instances have siblings, here we go
+        // - can this be done from the Bridge (?)
 
         if (results.size) {
           const matchingSets = await this.processResults([...results]);
@@ -165,7 +175,7 @@ export class AnalysisManager {
         // take matching value from sibling node
         const match = this.getValueAtPath(siblingNode, path);
         if (!match || match === referenceMatch) {
-          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'sibling has the same value as the reference component' })
+          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'sibling has the same value as the reference component' });
           continue;
         }
 

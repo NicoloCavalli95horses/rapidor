@@ -1,4 +1,11 @@
 //===================
+// Import
+//===================
+import { config } from "./config.js";
+
+
+
+//===================
 // Const
 //===================
 let logs = [];
@@ -50,13 +57,14 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
   }
 }
 
-
+// type: info | error | warning
 export function log({module, type = 'info', msg}) {
   const color = {
     error: 'color: red',
     info: 'color: white',
+    warning: 'color: orange',
   }
-  console.log(`%c[INSTRUMENTATION] [${module.toUpperCase()}] ${msg}`, color[type]);
+  console.log(`%c[${config.toolName}] [${module.toUpperCase()}] ${msg}`, color[type]);
   logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
 }
 
