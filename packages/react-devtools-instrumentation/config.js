@@ -1,9 +1,11 @@
 // Global configuration
 export const config = Object.freeze({
+  toolName: 'RAPIDOR',
   debounceTimeMs: 1000, // component state retrieval
   sessionID: crypto.randomUUID(), // ID of stored data
   // allowedNodeTags: [5,7], // whitelist of component types to scan
   // we save all the nodes and then analyze only nodes with siblings
+  jaccardThr: 0.5,
 });
 
 

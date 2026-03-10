@@ -64,8 +64,10 @@ export class AnalysisManager {
 
         if (results.size) {
           const matchingSets = await this.processResults([...results]);
-          const payload = { matchingSets, http: currentHttpEvent.value };
-          emit({ type: events.GEN_REQ, payload });
+          if (matchingSets.length) {
+            const payload = { matchingSets, http: currentHttpEvent.value };
+            emit({ type: events.GEN_REQ, payload });
+          } 
         } else {
           log({ module: 'analysis manager', msg: 'no matches found' });
         }
@@ -145,7 +147,7 @@ export class AnalysisManager {
 
     for (const result of results) {
       const siblingNodes = [];
-      const { path, relations, value, node: referenceNode, rowId } = result;
+      const { path, relations, value: referenceMatch, node: referenceNode, rowId } = result;
       const { sibling: siblingIds, siblingIdx } = relations;
 
       if (!referenceNode.DOM) {
@@ -154,7 +156,7 @@ export class AnalysisManager {
 
       referenceNode.siblingIds = siblingIds;
       referenceNode.siblingIdx = siblingIdx;
-      referenceNode.match = value;
+      referenceNode.match = referenceMatch;
 
       for (const id of siblingIds) {
         const siblingNode = await this.stateManager.getNodeByID(rowId, id);
@@ -162,7 +164,10 @@ export class AnalysisManager {
 
         // take matching value from sibling node
         const match = this.getValueAtPath(siblingNode, path);
-        if (!match) { continue; }
+        if (!match || match === referenceMatch) {
+          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'sibling has the same value as the reference component' })
+          continue;
+        }
 
         // find DOM references if not present
         if (!siblingNode.DOM) {
@@ -174,7 +179,11 @@ export class AnalysisManager {
         siblingNode.match = match;
         siblingNodes.push(siblingNode);
       }
-      matches.push({ referenceNode, siblingNodes });
+
+      if (siblingNodes.length) {
+        // match is invalid if there are no siblings
+        matches.push({ referenceNode, siblingNodes });
+      }
     }
 
     return matches;

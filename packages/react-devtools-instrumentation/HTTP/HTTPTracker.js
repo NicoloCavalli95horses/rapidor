@@ -132,10 +132,12 @@ export class HTTPTracker {
     try {
       // JSON
       if (contentType.includes('json')) {
-        if (data instanceof Response) { // is a fetch response
-          ret.body = await data.clone().json();
+        if (data instanceof Response) { // using a Response object (Fetch case)
+          const text = await data.clone().text();
+          // JSON was declared, but we receive an empty body
+          ret.body = text.length ? JSON.parse(text) : null;
         } else if (typeof data === 'string') {
-          ret.body = JSON.parse(data); // XMLHttpRequest case
+          ret.body = data.length ? JSON.parse(data) : null; // XMLHttpRequest case
         } else if (typeof data === 'object') {
           ret.body = data;
         }

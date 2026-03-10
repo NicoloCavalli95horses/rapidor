@@ -52,7 +52,11 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
 
 
 export function log({module, type = 'info', msg}) {
-  console.log('[INSTRUMENTATION]', `[${module.toUpperCase()}]`, msg);
+  const color = {
+    error: 'color: red',
+    info: 'color: white',
+  }
+  console.log(`%c[INSTRUMENTATION] [${module.toUpperCase()}] ${msg}`, color[type]);
   logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
 }
 
@@ -77,8 +81,8 @@ export function showDownloadBtn(doc) {
     const btn = doc.createElement("button");
     btn.innerText = "Download logs";
     btn.style.position = "fixed";
-    btn.style.top = "10px";
-    btn.style.right = "10px";
+    btn.style.bottom = "10px";
+    btn.style.left = "10px";
     btn.style.zIndex = "999999";
     btn.onclick = () => {
       downloadLogs(logs);

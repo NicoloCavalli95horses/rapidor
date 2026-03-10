@@ -1,6 +1,7 @@
 //===================
 // Import
 //===================
+import { config } from "../config.js";
 import { log, copyObjKeys } from "../utils.js"
 import _ from "lodash";
 
@@ -10,7 +11,7 @@ import _ from "lodash";
 // Class
 //===================
 export class IDBManager {
-  constructor(name = "db", version = 1) {
+  constructor(name = `${config.toolName}_DB`, version = 1) {
     this.name = name;
     this.version = version;
     this.db = null;

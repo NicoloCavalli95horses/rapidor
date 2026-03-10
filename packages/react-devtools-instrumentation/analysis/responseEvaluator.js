@@ -4,6 +4,8 @@
 import { eventBus, events, emit } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { log } from "../utils.js";
+import { config } from "../config.js";
+import { ReportManager } from "./reportManager.js";
 
 
 //===================
@@ -11,9 +13,12 @@ import { log } from "../utils.js";
 //===================
 export class ResponseEvaluator {
   constructor() {
+    this.reportManger = new ReportManager();
   }
 
   init() {
+    this.reportManger.init();
+
     eventBus
       .pipe(filter(e => e.type === events.EVALUATE))
       .subscribe(e => this.handleEvent(e.payload));
@@ -25,9 +30,6 @@ export class ResponseEvaluator {
     const { reference, candidate } = event;
     const refIdx = reference.node.siblingIdx;
     const currIdx = candidate.node.siblingIdx;
-
-    // [TODO] the ancestor is common but we have two DOM objects in reference and candidate node
-    // - is this always the case or we may have sibling nodes with their own DOM elements?
     const DOM = reference.node.DOM;
     const DOMchildren = DOM?.DOMchildren;
 
@@ -36,22 +38,23 @@ export class ResponseEvaluator {
       const currDOM = DOMchildren[currIdx];
       const similarity = this.evaluateDOM({ refDOM, currDOM });
 
-      // if DOM classes are not equal (over a certain threshold)
-      // it means we received a 200 OK response using data extracted from a component
-      // who renders a different GUI compared to a reference component
-      // We can leverage this finding to infer IDOR vulnerability
-
-      console.log(similarity)
-      if (similarity.jaccard <= 0.5) {
-        alert('IDOR found!', event);
+      // if the DOM classes are not equal (over a certain threshold),
+      // it means that we have received a 200 OK response using data extracted from a component,
+      // which renders a different GUI element than what is done by a referenced component
+      // We can leverage this finding to infer access control vulnerability
+      if (similarity.jaccard <= config.jaccardThr) {
+        log({ module: "response evaluator", msg: "an access control issue was found" });
+        emit({ type: events.REPORT, payload: { reference, candidate, similarity } });
       }
+    } else {
+      // [TODO] sibling nodes with their own DOM elements
     }
   }
 
 
 
   evaluateDOM({ refDOM, currDOM }) {
-    const similarity = { value: null };
+    const similarity = { ratio: "We build a chain of DOM classes from a common ancestor to the two final nodes and compare them using Jaccard similarity and an LCS algorithm" };
     const refClasses = [];
     const currClasses = [];
 
@@ -76,6 +79,8 @@ export class ResponseEvaluator {
     similarity.orderSimilarity = this.orderedSimilarity(refClasses, currClasses)
     return similarity;
   }
+
+
 
 
   jaccardMultiset(a, b) {
