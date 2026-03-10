@@ -50,12 +50,12 @@ export class RequestGenerator {
         const response = await self.executeRequest(request, type);
 
         const payload = {
-          referenceHttp: {
+          reference: {
+            node: referenceNode,
             request: http.request,
-            response: http.response,
-            node: referenceNode
+            response: http.response
           },
-          newHttp: {
+          candidate: {
             node,
             request,
             response
@@ -118,16 +118,15 @@ export class RequestGenerator {
           resolve({ error: err });
         });
       } else if (type === "XML_EVENT") {
-        self.XMLrequest(request);
+        // [TODO] to test properly
+        const xhr = new XMLHttpRequest();
+        xhr._requestId = request._requestId;
+        xhr.open(request.method, request.url);
+        request.headers.forEach((value, key) => {
+          xhr.setRequestHeader(key, value);
+        });
+        xhr.send(request.body);
       }
     });
   }
-
-
-
-  XMLrequest(request) {
-    //[TODO]
-    return;
-  }
-
 }

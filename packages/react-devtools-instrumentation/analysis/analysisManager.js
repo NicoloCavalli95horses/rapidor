@@ -31,10 +31,10 @@ export class AnalysisManager {
 
 
 
+  // `HTTP events` can be stored before `state events`
+  // start the analysis only after the first state snapshots
+  // and only if valid HTTP events are present
   async onDbSuccess(type) {
-    // `HTTP events` can be stored before `state events`
-    // start the analysis only after the first state snapshots
-    // and only if valid HTTP events are present
     if (type !== events.STATE_UPDATE) { return; }
     const canStart = await this.stateManager.hasOneHttpEvent();
     if (!canStart) { return; }
@@ -47,61 +47,31 @@ export class AnalysisManager {
 
     while (!this.stop) {
       currentHttpEvent = await this.stateManager.getNextHttpEvent(currentHttpEvent?.key);
-
-      if (!currentHttpEvent) {
-        // no more HTTP events
-        this.stop = true;
-        break;
-      }
+      if (!currentHttpEvent) { this.stop = true; break; } // no more HTTP events
 
       const { request, response, done } = currentHttpEvent.value;
-      const { fullPath, segments } = request.meta.path; // endpoint details {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
+      const { fullPath, segments } = request.meta.path; // {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
 
-      if (done || !segments.length) {
-        // HTTP event already analized 
-        continue;
-      }
+      if (done || !segments.length) { continue; } // HTTP event already analized 
 
       while (!this.stop) {
         currentSnapshot = await this.stateManager.getNextState(currentSnapshot?.key);
-
-        if (!currentSnapshot) {
-          // no more state events, break this loop and try other HTTP events
-          break;
-        }
+        if (!currentSnapshot) { break; } // no more state events, break only this loop and try other HTTP events
 
         this.analysisCounter++;
         // log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
-
-        // searching for last segment in endpoint (eg. api/collection/id -> id)
-        // results = [ {node},{node} ] array of unique matching nodes
-        const results = this.searchPropertyInGraph({
-          graph: currentSnapshot.value,
-          key: currentSnapshot.key,
-          property: segments[segments.length - 1]
-        });
+        const results = this.searchPropertyInGraph({ graph: currentSnapshot.value, key: currentSnapshot.key, property: segments[segments.length - 1] });
 
         if (results.size) {
-          // for each matching node, build sub-arrays with siblings and DOM references
-          // matchingSets = [ [{node},{node}]  [{node},{node}] ]
           const matchingSets = await this.processResults([...results]);
-          emit({
-            type: events.GEN_REQ,
-            payload: {
-              matchingSets,
-              http: currentHttpEvent.value
-            }
-          });
+          const payload = { matchingSets, http: currentHttpEvent.value };
+          emit({ type: events.GEN_REQ, payload });
         } else {
           log({ module: 'analysis manager', msg: 'no matches found' });
         }
 
         // flag current HTTP event as done
-        const res = await this.stateManager.updateHTTPevent({
-          id: currentHttpEvent.key,
-          payload: { done: true }
-        });
-
+        const res = await this.stateManager.updateHTTPevent({ id: currentHttpEvent.key, payload: { done: true } });
       }
     }
 
@@ -109,7 +79,9 @@ export class AnalysisManager {
   }
 
 
-
+  // searching for property (eg. api/collection/id -> id) inside a graph
+  // returns array of matching nodes [ {node},{node} ]
+  // each node has: `path` (to the get the value), `relations`, snapshot `key`
   searchPropertyInGraph({ graph, key, property }) {
     const { nodes, relations } = graph;
     const results = new Set();
@@ -124,7 +96,7 @@ export class AnalysisManager {
           rowId: key,
           path: [...path],
           value,
-          ratio: "a value within this node matches a segment extracted from an HTTP request",
+          ratio: "a value within this node matches a segment extracted from an HTTP request. This is the first of many siblings that appear in the component tree",
         });
 
         return;
@@ -164,7 +136,9 @@ export class AnalysisManager {
   }
 
 
-  // for each nodes, get siblings and append DOM references 
+
+  // for each node, build sub-arrays with siblings and DOM references
+  // returns = [ [{node},{node}]  [{node},{node}] ]
   async processResults(results) {
     // [TODO] if the ancestor that has DOM info is common, we may save it just once, like {DOM: {}, matches:{}}
     const matches = [];
@@ -172,21 +146,22 @@ export class AnalysisManager {
     for (const result of results) {
       const siblingNodes = [];
       const { path, relations, value, node: referenceNode, rowId } = result;
-      const { sibling: siblingIds } = relations;
+      const { sibling: siblingIds, siblingIdx } = relations;
 
       if (!referenceNode.DOM) {
         referenceNode.DOM = await this.stateManager.getAncestorDOM(rowId, referenceNode.parent);
       }
 
       referenceNode.siblingIds = siblingIds;
+      referenceNode.siblingIdx = siblingIdx;
       referenceNode.match = value;
 
       for (const id of siblingIds) {
-        const siblingNode = await this.stateManager.getStateByID(rowId, id);
+        const siblingNode = await this.stateManager.getNodeByID(rowId, id);
+        const siblingRelations = await this.stateManager.getRelationsByID(rowId, id);
 
         // take matching value from sibling node
         const match = this.getValueAtPath(siblingNode, path);
-
         if (!match) { continue; }
 
         // find DOM references if not present
@@ -194,7 +169,8 @@ export class AnalysisManager {
           siblingNode.DOM = await this.stateManager.getAncestorDOM(rowId, id);
         }
 
-        siblingNode.siblingIds = [...siblingIds, referenceNode.id].filter(id => id !== siblingNode.id);
+        siblingNode.siblingIds = siblingRelations.sibling;
+        siblingNode.siblingIdx = siblingRelations.siblingIdx;
         siblingNode.match = match;
         siblingNodes.push(siblingNode);
       }

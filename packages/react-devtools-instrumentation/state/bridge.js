@@ -79,7 +79,7 @@ export class Bridge {
     const visitedProps = new WeakSet();
     this.resetIds();
 
-    function visit(node, parentId = null, visitedProps) {
+    function visit({ node, parentId = null, visitedProps, siblingIdx }) {
       if (!node) { return; }
 
       const id = self.getNodeId(node);
@@ -94,29 +94,31 @@ export class Bridge {
         key: node.key,
         props: self.getSerializableValues(node.memoizedProps, visitedProps),
         DOM: self.getDOMInfo(domElement),
-        tag: node.tag
+        tag: node.tag,
       };
 
       g.addNode({ graph, id, data: serializableData });
 
       if (parentId) {
-        g.addRelation({ graph, fromId: parentId, toId: id, type: "child" });
+        g.addRelation({ graph, fromId: parentId, toId: id, type: "child", siblingIdx });
       }
 
       // collect children once
       const children = [];
       let child = node.child;
+      let childIdx = 0;
 
       while (child) {
-        children.push(child);
+        children.push({ node: child, siblingIdx: childIdx });
         child = child.sibling;
+        childIdx++;
       }
 
       // add sibling relations
       for (let i = 0; i < children.length; i++) {
         for (let j = i + 1; j < children.length; j++) {
-          const id1 = self.getNodeId(children[i]);
-          const id2 = self.getNodeId(children[j]);
+          const id1 = self.getNodeId(children[i].node);
+          const id2 = self.getNodeId(children[j].node);
 
           g.addRelation({ graph, fromId: id1, toId: id2, type: "sibling" });
           g.addRelation({ graph, fromId: id2, toId: id1, type: "sibling" });
@@ -124,12 +126,12 @@ export class Bridge {
       }
 
       // visit children
-      for (const childNode of children) {
-        visit(childNode, id, visitedProps);
+      for (const { node, siblingIdx } of children) {
+        visit({ node, parentId: id, visitedProps, siblingIdx });
       }
     }
 
-    visit(fiber, null, visitedProps);
+    visit({ node: fiber, parentId: null, visitedProps, siblingIdx: 0 });
     return graph;
   }
 

@@ -85,11 +85,18 @@ export class StateManager {
   }
 
 
-
   // returns node
-  async getStateByID(rowId, nodeId) {
+  async getNodeByID(rowId, nodeId) {
     const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
     return state.nodes[nodeId];
+  }
+
+
+
+  // returns node relations
+  async getRelationsByID(rowId, nodeId) {
+    const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
+    return state.relations[nodeId];
   }
 
 
@@ -104,7 +111,7 @@ export class StateManager {
     let currentId = parentId;
 
     while (currentId) {
-      const node = await this.getStateByID(rowId, currentId);
+      const node = await this.getNodeByID(rowId, currentId);
       if (!node) { return; }
       if (node.DOM) {
         return {

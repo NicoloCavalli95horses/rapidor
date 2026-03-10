@@ -42,8 +42,9 @@ export class Graph {
    * @param fromId id of first node
    * @param toId id of second node
    * @param type type of relation (child, render) 
+   * @param siblingIdx index of sibling (first sibling has 0) 
    */
-  addRelation({ graph, fromId, toId, type }) {
+  addRelation({ graph, fromId, toId, type, siblingIdx }) {
     if (!graph.relations[fromId]) {
       graph.relations[fromId] = {};
     }
@@ -63,6 +64,7 @@ export class Graph {
     if (type == "child" && graph.nodes[toId]) {
       graph.nodes[toId].parent = fromId;
       graph.relations[toId].parent = fromId;
+      graph.relations[toId].siblingIdx = siblingIdx;
     }
   }
 

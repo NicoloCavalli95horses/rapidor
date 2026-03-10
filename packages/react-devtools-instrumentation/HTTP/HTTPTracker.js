@@ -60,7 +60,8 @@ export class HTTPTracker {
         uri: uri,
         verb: this._method,
         headers: this._requestHeaders,
-        body: self.getRequestBody({ data, headers: this._requestHeaders })
+        body: self.getRequestBody({ data, headers: this._requestHeaders }),
+        _requestId: this._requestId // from requestGenerator
       };
     };
 
