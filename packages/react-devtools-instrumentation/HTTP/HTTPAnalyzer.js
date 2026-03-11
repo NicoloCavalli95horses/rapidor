@@ -3,7 +3,7 @@
 //===================
 import { emit, eventBus, events } from '../eventBus.js';
 import { log } from '../utils.js';
-
+import { config } from '../config.js';
 
 
 //===================
@@ -21,8 +21,9 @@ export class analyzeHTTP {
   parseHTTP({ type, request, response }) {
     if (!response || !request) { return; }
 
-    const uri = this.getURI(request?.uri)
+    const uri = this.getURI(request?.uri);
     if (!uri) { return; }
+    if (!this.isAllowed(uri)) { return; }
 
     const protocol = uri.protocol;
     const port = uri.port;
@@ -49,6 +50,27 @@ export class analyzeHTTP {
         done: !!request._requestId,
       }
     });
+  }
+
+
+
+  // we accept the same domain and all its subdomains
+  isAllowed(uri) {
+    if (!config.domainRequestOnly) { return true; }
+    const receivedHost = new URL(uri).hostname;
+    const currentHost = window.location.hostname;
+    const baseDomain = this.getBaseDomain(currentHost);
+    const toKeep = receivedHost === baseDomain || receivedHost.endsWith(`.${baseDomain}`);
+    // console.log({ receivedHost, currentHost, baseDomain, toKeep });
+
+    return toKeep;
+  }
+
+
+
+  getBaseDomain(hostname) {
+    const parts = hostname.split('.');
+    return parts.slice(-2).join('.');
   }
 
 

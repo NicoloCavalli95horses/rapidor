@@ -47,9 +47,9 @@ export class ResponseEvaluator {
       // it means that we have received a 200 OK response using data extracted from a component,
       // which renders a different GUI element than what is done by a referenced component
       // We can leverage this finding to infer access control vulnerability
-      if (DOMsimilarity.jaccard <= config.jaccardThr && resSimilarity.result) {
+      if (DOMsimilarity.areDifferent && resSimilarity.areSimilar) {
+        const similarity = { DOMsimilarity, resSimilarity };
         log({ module: "response evaluator", type: "warning", msg: "potential access control issue found" });
-        const similarity = { DOMsimilarity, resSimilarity }
         emit({ type: events.REPORT, payload: { reference, candidate, similarity, ratio: 'potential access control vulnerability' } });
       }
     } else {
@@ -63,26 +63,65 @@ export class ResponseEvaluator {
     const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
     const refBodyLength = Number(refResponse['content-length']) || 0;
     const currBodyLength = Number(currResponse['content-length']) || 0;
-    const isLengthSimilar = (refBodyLength && currBodyLength) ? this.checkBodyLength(refBodyLength, currBodyLength) : true;
+    const isLengthSimilar = (refBodyLength && currBodyLength) ? this.checkIntSimilarity(refBodyLength, currBodyLength, config.resBodyThr) : true;
 
-    // [TODO] calc response body similarity
-    const result = areFieldsEqual && isLengthSimilar;
+    const refBody = refResponse.body;
+    const currBody = currResponse.body;
+    const hasBody = !!refBody && !!currBody;
+
+    const bodySimilarity = hasBody ? this.checkBodySimilarity(refBody, currBody) : {};
 
     return {
-      result,
-      equalFields: compare,
-      bodyLength: { isLengthSimilar, refBodyLength, currBodyLength },
-      bodyContent: {} // [TODO]
+      areSimilar: areFieldsEqual && isLengthSimilar && (hasBody ? bodySimilarity.isSimilar : true),
+      equalResponseFields: compare,
+      bodyLength: { isLengthSimilar, refBodyLength, currBodyLength, threshold: config.resBodyThr },
+      bodySimilarity,
+      ratio: "the similarity is calculated on body length and body content (Object keys)",
     }
   }
 
 
 
-  checkBodyLength(a, b) {
+  checkBodySimilarity(refBody, currBody) {
+    const refKeys = this.extractKeyPaths(refBody);
+    const currKeys = this.extractKeyPaths(currBody);
+
+    // Calc similarity on the length of the sets of keys
+    // We dont really care about the actual content, we just expect similar shapes
+    const threshold = config.resBodyThr;
+    const isSimilar = this.checkIntSimilarity(refKeys.length, currKeys.length, threshold);
+
+    return {
+      isSimilar,
+      refKeys,
+      currKeys,
+      threshold,
+    };
+  }
+
+
+
+  extractKeyPaths(obj, prefix = '') {
+    let paths = [];
+
+    for (const key in obj) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      paths.push(path);
+
+      if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+        paths = paths.concat(this.extractKeyPaths(obj[key], path));
+      }
+    }
+
+    return paths;
+  }
+
+
+
+  checkIntSimilarity(a, b, thr) {
     if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) { return false; }
-    const thr = config.HTTPResBodyLengthDiffThr;
     const ratio = b / a;
-    return ratio >= thr && ratio <= 1 / thr;
+    return (ratio >= thr) && (ratio <= 1 / thr);
   }
 
 
@@ -108,11 +147,15 @@ export class ResponseEvaluator {
     getClasses(refClasses, refDOM);
     getClasses(currClasses, currDOM);
 
+    const jaccard = this.jaccardMultiset(refClasses, currClasses);
+
     return {
-      jaccard: this.jaccardMultiset(refClasses, currClasses),
+      jaccard,
       orderSimilarity: this.orderedSimilarity(refClasses, currClasses),
       ratio: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
-      CSSclasses: { referenceNodeCSS: refClasses, candidateNodeCSS: currClasses }
+      CSSclasses: { referenceNodeCSS: refClasses, candidateNodeCSS: currClasses },
+      threshold: config.jaccardThr,
+      areDifferent: jaccard <= config.jaccardThr
     }
   }
 
@@ -139,7 +182,7 @@ export class ResponseEvaluator {
       union += Math.max(ca, cb);
     }
 
-    return union === 0 ? 1 : intersection / union;
+    return (union === 0) ? 1 : (intersection / union);
   }
 
 
