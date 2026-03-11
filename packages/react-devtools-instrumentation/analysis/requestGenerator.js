@@ -5,6 +5,9 @@ import { eventBus, events, emit } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
 import { log, sleep } from "../utils.js";
+import { config } from "../config.js";
+
+
 
 //===================
 // Functions
@@ -63,7 +66,7 @@ export class RequestGenerator {
         }
 
         emit({ type: events.EVALUATE, payload });
-        sleep(200);
+        await sleep(config.timeBetweenRequests);
       }
     }
   }
@@ -86,8 +89,6 @@ export class RequestGenerator {
   buildRequest({ reference, originalPath, newPath }) {
     const { uri, body, headers, verb } = reference;
     const method = verb.toUpperCase();
-    const _requestId = crypto.randomUUID(); // this is read by HTTPTracker so we can use its analysis
-
     const path = uri.replace(originalPath, newPath);
 
     const options = {
@@ -97,10 +98,10 @@ export class RequestGenerator {
     };
 
     const request = new Request(path, options);
-    request._requestId = _requestId;
-
-    return request
+    request._requestId = crypto.randomUUID(); // this is read by HTTPTracker so we can use its analysis
+    return request;
   }
+
 
 
   // execute the HTTP request, wait for the payload (req, res) from HTTPTRacker
@@ -112,12 +113,12 @@ export class RequestGenerator {
       // register the Promise in order to be resolved later
       this.pendingRequests.set(requestId, resolve);
 
-      if (type === "FETCH_EVENT") { // [TODO] a bit dirty, refactor with global events
+      if (type === events.FETCH_EVENT) {
         window.fetch(request).catch((err) => {
           this.pendingRequests.delete(requestId);
           resolve({ error: err });
         });
-      } else if (type === "XML_EVENT") {
+      } else if (type === events.XML_EVENT) {
         // [TODO] to test properly
         const xhr = new XMLHttpRequest();
         xhr._requestId = request._requestId;

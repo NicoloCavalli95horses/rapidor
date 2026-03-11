@@ -299,15 +299,14 @@ export class IDBManager {
 
 
 
-  // Returns true if at least one HTTP event have been registered
-  // [TODO] filter considering likely useless HTTP events
-  async hasOneHttpEvent() {
+  // Returns true if at least one raw is saved
+  async hasData(storeName) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
 
-    const tx = this.db.transaction(IDBManager.STORES.HTTP_EVENT, "readonly");
-    const store = tx.objectStore(IDBManager.STORES.HTTP_EVENT);
+    const tx = this.db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
 
     return new Promise((resolve, reject) => {
       const request = store.count();

@@ -52,6 +52,8 @@ export class StateManager {
    * @param {String} key the key whose value will be considered in filtering 
    */
   async handleUpdate({ event, storeName, keys }) {
+    if (event.payload.done) { return; } 
+
     const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys });
 
     if (!isStored) {
@@ -145,7 +147,14 @@ export class StateManager {
 
 
 
+  // [TODO] filter considering likely useless HTTP events
   async hasOneHttpEvent() {
-    return await this.db.hasOneHttpEvent();
+    return await this.db.hasData(this.dbStores.HTTP_EVENT);
+  }
+
+
+
+  async hasOneState() {
+    return await this.db.hasData(this.dbStores.STATE);
   }
 }

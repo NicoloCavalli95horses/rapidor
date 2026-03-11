@@ -5,24 +5,20 @@
 //==============================
 import { log, deepObjCopy } from '../utils.js';
 import { analyzeHTTP } from './HTTPAnalyzer.js';
+import { events } from '../eventBus.js';
 
 
-
+//==============================
+// Class
+//==============================
 export class HTTPTracker {
   constructor() {
     this.analyzer = new analyzeHTTP();
   }
 
-  static TYPES = {
-    FETCH: "FETCH_EVENT",
-    XML: "XML_EVENT"
-  }
-
 
 
   async init() {
-    this.analyzer.init();
-
     await this.captureXMLHttpRequest();
     await this.captureFetchRequest();
     log({ module: 'HTTP tracker', msg: 'HTTP tracker initialized' });
@@ -79,7 +75,7 @@ export class HTTPTracker {
           }),
         };
 
-        self.analyzer.parseHTTP({ type: HTTPTracker.TYPES.XML, request, response });
+        self.analyzer.parseHTTP({ type: events.XML_EVENT, request, response });
       };
 
       this.addEventListener('load', handleResponse); // successful response
@@ -203,7 +199,7 @@ export class HTTPTracker {
     window.fetch = async function (...args) {
       // Normalize the request object: this allows us to read `_requestId` from requestGenerator
       const originalRequest = args[0] instanceof Request ? args[0] : new Request(...args);
-      const _requestId = originalRequest._requestId || crypto.randomUUID();
+      const _requestId = originalRequest._requestId; // present only in generated requests
 
       try {
         const res = await originalFetch.apply(this, args);
@@ -236,7 +232,7 @@ export class HTTPTracker {
           ...await self.getFetchResponseHeaders(_res?.headers),
           ...await self.getResponseBody({ data: _res, type: _res.headers.get('Content-Type') })
         };
-        self.analyzer.parseHTTP({ type: HTTPTracker.TYPES.FETCH, request, response });
+        self.analyzer.parseHTTP({ type: events.FETCH_EVENT, request, response });
         return res;
 
       } catch (error) {

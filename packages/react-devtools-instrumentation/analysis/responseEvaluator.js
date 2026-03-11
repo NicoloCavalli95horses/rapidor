@@ -27,6 +27,7 @@ export class ResponseEvaluator {
 
   handleEvent(event) {
     log({ module: "response evaluator", msg: "starting evaluation..." });
+
     const { reference, candidate } = event;
     const refIdx = reference.node.siblingIdx;
     const currIdx = candidate.node.siblingIdx;
@@ -58,21 +59,21 @@ export class ResponseEvaluator {
 
 
   responseSimilarity({ refResponse, currResponse }) {
-    const compare = ['status', 'content-type', 'raw-type'];
+    const compare = ['status', 'raw-type']; // shall we just compare the existing fields (?)
     const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
-    const refBodyLength = Number(refResponse['content-length']);
-    const currBodyLength = Number(currResponse['content-length']);
-    const isLengthSimilar = this.checkBodyLength(refBodyLength, currBodyLength);
+    const refBodyLength = Number(refResponse['content-length']) || 0;
+    const currBodyLength = Number(currResponse['content-length']) || 0;
+    const isLengthSimilar = (refBodyLength && currBodyLength) ? this.checkBodyLength(refBodyLength, currBodyLength) : true;
 
     // [TODO] calc response body similarity
     const result = areFieldsEqual && isLengthSimilar;
 
-    return result ? {
+    return {
       result,
       equalFields: compare,
       bodyLength: { isLengthSimilar, refBodyLength, currBodyLength },
-      bodyContent: { } // [TODO]
-    } : {}
+      bodyContent: {} // [TODO]
+    }
   }
 
 
@@ -87,7 +88,6 @@ export class ResponseEvaluator {
 
 
   evaluateDOM({ refDOM, currDOM }) {
-    const similarity = { ratio: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes" };
     const refClasses = [];
     const currClasses = [];
 
@@ -108,9 +108,12 @@ export class ResponseEvaluator {
     getClasses(refClasses, refDOM);
     getClasses(currClasses, currDOM);
 
-    similarity.jaccard = this.jaccardMultiset(refClasses, currClasses);
-    similarity.orderSimilarity = this.orderedSimilarity(refClasses, currClasses)
-    return similarity;
+    return {
+      jaccard: this.jaccardMultiset(refClasses, currClasses),
+      orderSimilarity: this.orderedSimilarity(refClasses, currClasses),
+      ratio: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
+      CSSclasses: { referenceNodeCSS: refClasses, candidateNodeCSS: currClasses }
+    }
   }
 
 

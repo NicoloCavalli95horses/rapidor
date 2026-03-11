@@ -6,7 +6,6 @@ import { emit } from '../eventBus.js';
 import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
-import { NavigationTracker } from './navigationTracker.js';
 
 
 
@@ -14,14 +13,15 @@ import { NavigationTracker } from './navigationTracker.js';
 // Class
 //===================
 export class Bridge {
-  constructor() {
+  constructor(navigationTracker) {
     this.nodeMap = new WeakMap();
     this.idCounter = 0;
-    this.navigationTracker = new NavigationTracker();
+    this.navigationTracker = navigationTracker;
   }
 
+  
   #hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-
+  
   // Connect to React specific APIs
   init() {
     this.navigationTracker.init();
