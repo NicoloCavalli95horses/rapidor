@@ -48,6 +48,8 @@ export class AnalysisManager {
     let currentHttpEvent = {};
     let currentSnapshot = {};
 
+    emit({ type: events.ANALYSIS_IN_PROGRESS, payload: true })
+
     while (!this.stop) {
       currentHttpEvent = await this.stateManager.getNextHttpEvent(currentHttpEvent?.key);
 
@@ -57,44 +59,51 @@ export class AnalysisManager {
         break;
       }
 
-      const { request, response, done } = currentHttpEvent.value;
+      const http = currentHttpEvent.value;
+      const httpKey = currentHttpEvent.key;
+      const { request, response, doneOn, ignore } = http;
       const { fullPath, segments } = request.meta.path; // {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
+      const property = segments[segments.length - 1];
 
-      if (done || !segments.length) { continue; } // HTTP event already analized 
+      if (ignore) { continue; } // HTTP event already analized 
 
       while (!this.stop) {
         currentSnapshot = await this.stateManager.getNextState(currentSnapshot?.key);
         if (!currentSnapshot) { break; } // no more state events, break only this loop and try other HTTP events
 
+        const graph = currentSnapshot.value;
+        const snapshotKey = currentSnapshot.key;
+
+        if (doneOn.has(snapshotKey)) { continue; }
+
         // this.analysisCounter++;
-        // log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${currentHttpEvent.key} and state key:${currentSnapshot.key}` })
-        
-        const results = this.searchPropertyInGraph({ graph: currentSnapshot.value, key: currentSnapshot.key, property: segments[segments.length - 1] });
+        // log({ module: 'analysis manager', msg: `analysis ${this.analysisCounter}, with HTTP event key:${httpKey} and state key:${currentSnapshot.key}` })
+
+        const results = this.searchPropertyInGraph({ graph, key: snapshotKey, property });
 
         // [TODO]
         // - currently, we find the component whose state matches the last segment in the endpoint (eg. /id)
-        // - this is usually a single component, that may have siblings
-        // - however, the same components may be used in other sets, with other siblings
-        // - we are not matching these components given that they have no direct relation with the data extracted from the endpoint
-        // - however, we can look for other instances of the same component. If these instances have siblings, here we go
-        // - can this be done from the Bridge (?)
+        // - this is usually a unique component, that may have siblings
+        // - however, the same components may be used elsewhere in the app, with other siblings
+        // - we are not matching these other components, given that they have no direct relation with the data extracted from the endpoint
 
         if (results.size) {
           const matchingSets = await this.processResults([...results]);
           if (matchingSets.length) {
-            const payload = { matchingSets, http: currentHttpEvent.value };
+            const payload = { matchingSets, http };
             emit({ type: events.GEN_REQ, payload });
           }
         } else {
           log({ module: 'analysis manager', msg: 'no matches found' });
         }
 
-        // flag current HTTP event as done
-        await this.stateManager.updateHTTPevent({ id: currentHttpEvent.key, payload: { done: true } });
+        doneOn.add(snapshotKey); // flag current HTTP event as done for this snapshot
+        await this.stateManager.updateHTTPevent({ id: httpKey, payload: { doneOn } });
       }
     }
 
     log({ module: 'analysis manager', msg: 'exit analysis' });
+    emit({ type: events.ANALYSIS_IN_PROGRESS, payload: false })
   }
 
 
@@ -183,7 +192,7 @@ export class AnalysisManager {
         const match = this.getValueAtPath(siblingNode, path);
 
         if (!match || match == referenceMatch) {
-          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'sibling has the same value as the reference component' });
+          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'a sibling was found, but it has the same value as the reference component' });
           continue;
         }
 
@@ -211,7 +220,7 @@ export class AnalysisManager {
 
   getValueAtPath(obj, path) {
     return path.reduce((acc, key) => {
-      if (acc === undefined || acc === null) { return undefined; }
+      if (acc === undefined || acc === null) { return; }
       return acc[key];
     }, obj);
   }

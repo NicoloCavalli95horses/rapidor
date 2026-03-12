@@ -55,6 +55,7 @@ export class ResponseEvaluator {
     } else {
       // [TODO] sibling nodes with their own DOM elements
     }
+    log({ module: "response evaluator", msg: "exit evaluation" });
   }
 
 

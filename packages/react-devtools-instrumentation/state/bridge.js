@@ -19,9 +19,9 @@ export class Bridge {
     this.navigationTracker = navigationTracker;
   }
 
-  
+
   #hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-  
+
   // Connect to React specific APIs
   init() {
     this.navigationTracker.init();
@@ -51,14 +51,15 @@ export class Bridge {
     const self = this;
 
     // The component tree is updated very often
-    // We listen to changes via `onCommitFiberRoot` event and save a snapshot only after 2000ms of idleness
-    // We do not perform two times the analysis on the same page
+    // We listen to changes via `onCommitFiberRoot` event and save a snapshot:
+    // - after 2000ms of idleness, on the same page, or on new pages
+    // - not when we re-visit a visited page
     const debouncedAnalysis = debounce((root) => {
-      if (this.navigationTracker.hasAlreadyVisited()) {
-        log({ module: 'bridge', msg: 'page already visited, skipping analysis' });
-      } else {
+      if (this.navigationTracker.canProcessPage()) {
         const graph = self.getStateGraph(root.current);
         emit({ type: 'STATE_UPDATE', payload: graph });
+      } else {
+        log({ module: 'bridge', msg: 'skipping analysis' });
       }
     }, config.debounceTimeMs);
 

@@ -8,15 +8,17 @@ import { StateManager } from './state/stateManager.js';
 import { HTTPTracker } from './HTTP/HTTPTracker.js';
 import { AnalysisManager } from './analysis/analysisManager.js';
 import { NavigationTracker } from './state/navigationTracker.js';
+import { DOMhandler } from './DOM/DOMhandler.js';
 
 
 //===================
 // Functions
 //===================
 export async function instrumentationMain() {
-  // Download log for further analysis
-  showDownloadBtn(document);
-
+  // DOM handler
+  const DOM = new DOMhandler();
+  DOM.init();
+  
   log({ module: 'index', msg: "main module loaded from 'packages/react-devtools-extensions/src/contentScripts/installHook.js'" });
 
   // Navigation tracker

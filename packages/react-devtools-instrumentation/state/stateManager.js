@@ -147,7 +147,6 @@ export class StateManager {
 
 
 
-  // [TODO] filter considering likely useless HTTP events
   async hasOneHttpEvent() {
     return await this.db.hasData(this.dbStores.HTTP_EVENT);
   }

@@ -8,18 +8,13 @@ import { config } from "./config.js";
 //===================
 // Const
 //===================
-let logs = [];
+export const logs = [];
 
 
 
 //===================
 // Functions
 //===================
-
-/**
- * Copy deeply nested object
- * @param {Object} obj
- */
 export function deepObjCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
@@ -66,44 +61,6 @@ export function log({module, type = 'info', msg}) {
   }
   console.log(`%c[${config.toolName}] [${module.toUpperCase()}] ${msg}`, color[type]);
   logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
-}
-
-
-
-function downloadLogs(content) {
-  const blob = new Blob([content], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `logs_${Date.now()}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-
-
-export function showDownloadBtn(doc) {
-  function inject() {
-    const btn = doc.createElement("button");
-    btn.innerText = "Download logs";
-    btn.style.position = "fixed";
-    btn.style.bottom = "10px";
-    btn.style.left = "10px";
-    btn.style.zIndex = "999999";
-    btn.onclick = () => {
-      downloadLogs(logs);
-      logs = [];
-    };
-    doc.body.appendChild(btn);
-  }
-
-  if (doc.body) {
-    inject();
-  } else {
-    doc.addEventListener("DOMContentLoaded", inject);
-  }
 }
 
 

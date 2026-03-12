@@ -136,11 +136,7 @@ export class IDBManager {
           return;
         }
 
-        const updated = {
-          ...existing,
-          ...payload,
-        };
-
+        const updated = {...existing, ...payload};
         store.put(updated, id);
         resolve(updated);
       };

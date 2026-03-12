@@ -47,7 +47,8 @@ export class analyzeHTTP {
         type,
         request: { ...request, meta },
         response,
-        done: !!request._requestId,
+        doneOn: new Set(),
+        ignore: !!request._requestId,
       }
     });
   }
