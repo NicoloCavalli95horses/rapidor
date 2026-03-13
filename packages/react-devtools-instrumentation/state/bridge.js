@@ -15,8 +15,12 @@ import { config } from '../config.js';
 export class Bridge {
   constructor(navigationTracker) {
     this.nodeMap = new WeakMap();
-    this.idCounter = 0;
+    this.nodeId = 0;
     this.navigationTracker = navigationTracker;
+
+    this.componentIndex = new Map(); // componentId -> Set<nodeId>
+    this.componentTypes = new WeakMap(); // componentType -> componentId
+    this.componentId = 0;
   }
 
 
@@ -57,7 +61,6 @@ export class Bridge {
     const debouncedAnalysis = debounce((root) => {
       // [TODO] prune new graph from same page considering only differences to prev graph
       if (this.navigationTracker.canProcessPage()) {
-        // console.log(root.current)
         const graph = self.getStateGraph(root.current);
         emit({ type: 'STATE_UPDATE', payload: graph });
       } else {
@@ -94,7 +97,11 @@ export class Bridge {
         : (node.stateNode instanceof HTMLElement) ? node.stateNode
           : undefined;
 
-      // data needs to be serialized (ie. no function, Node, Document, Window, DOM objects, Event, ...)
+      // id of specific React component, used to identify istances
+      const componentId = self.getComponentTypeId(node.elementType ?? node.type);
+      self.updateComponentIndex(componentId, id);
+
+      // data needs to be serialized (we rule out functions, Node, Document, Window, DOM objects)
       const serializableData = {
         id,
         name: self.filterReactComponentName(node.type),
@@ -102,6 +109,7 @@ export class Bridge {
         props: self.getSerializableValues(node.memoizedProps, visitedProps),
         DOM: self.getDOMInfo(domElement),
         tag: node.tag,
+        componentId
       };
 
       g.addNode({ graph, id, data: serializableData });
@@ -139,7 +147,40 @@ export class Bridge {
     }
 
     visit({ node: fiber, parentId: null, visitedProps, siblingIdx: 0 });
+
+    // add list of istances to graph
+    const componentIndex = {};
+    for (const [componentId, nodeIds] of this.componentIndex) {
+      componentIndex[componentId] = Array.from(nodeIds);
+    }
+    graph.componentIndex = componentIndex;
+
     return graph;
+  }
+
+
+
+  // update the index of components
+  updateComponentIndex(componentId, nodeId) {
+    if (componentId != null) {
+      if (!this.componentIndex.has(componentId)) {
+        this.componentIndex.set(componentId, new Set());
+      }
+      this.componentIndex.get(componentId).add(nodeId);
+    }
+  }
+
+
+  // returns an id that is mapped to the component type
+  // this is required to find istances of the same component other than its siblings
+  getComponentTypeId(type) {
+    if (!type || typeof type === "string") { return; }
+
+    if (!this.componentTypes.has(type)) {
+      this.componentId++;
+      this.componentTypes.set(type, this.componentId);
+    }
+    return this.componentTypes.get(type);
   }
 
 
@@ -148,7 +189,7 @@ export class Bridge {
     let id = this.nodeMap.get(node);
 
     if (!id) {
-      id = `node-${this.idCounter++}`;
+      id = `node-${this.nodeId++}`;
       this.nodeMap.set(node, id);
     }
 
@@ -159,7 +200,7 @@ export class Bridge {
 
   resetIds() {
     this.nodeMap = new WeakMap();
-    this.idCounter = 0;
+    this.nodeId = 0;
   }
 
 

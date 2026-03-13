@@ -72,16 +72,18 @@ export class Worker {
 
         const results = this.searchPropertyInGraph({ graph, key: snapshotKey, property });
 
-        // [TODO]
-        // - currently, we find the component whose state matches the last segment in the endpoint (eg. /id)
-        // - this is usually a unique component, that may have siblings
-        // - however, the same components may be used elsewhere in the app, with other siblings
-        // - we are not matching these other components, given that they have no direct relation with the data extracted from the endpoint
-
         if (results.size) {
-          const matchingSets = await this.processResults([...results]);
+          const res = [...results];
+          const matchingSets = await this.processResults(res);
           if (matchingSets.length) {
             emit({ type: events.GEN_REQ, payload: { matchingSets, http } });
+
+            // there is a match: explore instances of the matching node other than siblings
+            for (let i = 0; i < res.length; i++) {
+              const node = res[i].node;
+              const instances = await this.stateManager.getInstancesOfComponent(snapshotKey, node.componentId);
+              // console.log({instances});              
+            }
           }
         } else {
           log({ module: 'analysis manager', msg: 'no matches found' });
@@ -107,7 +109,7 @@ export class Worker {
     payload.progress.totStates = totStates;
     payload.progress.value = this.analysisCounter;
 
-    console.log({ current: payload.progress.value, total: totalOperations, totHTTPevents, totStates })
+    // console.log({ current: payload.progress.value, total: totalOperations, totHTTPevents, totStates })
 
     if (payload.progress.value == totalOperations) {
       payload.on_progress = false;
