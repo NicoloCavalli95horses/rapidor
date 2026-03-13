@@ -25,7 +25,7 @@ export class DOMhandler {
         if (e.type === events.ANALYSIS_IN_PROGRESS) {
           this.updateProgressBar({ payload: e.payload, els });
         } else if (e.type === events.REPORT) {
-          // this.showWarning(els);
+          this.showWarning(els);
         }
       });
     });

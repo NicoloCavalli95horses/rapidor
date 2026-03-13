@@ -171,11 +171,12 @@ export class Bridge {
   }
 
 
+
   // returns an id that is mapped to the component type
   // this is required to find istances of the same component other than its siblings
   getComponentTypeId(type) {
-    if (!type || typeof type === "string") { return; }
-
+    if (typeof type !== "object" || type === null) { return; }
+    
     if (!this.componentTypes.has(type)) {
       this.componentId++;
       this.componentTypes.set(type, this.componentId);
