@@ -52,7 +52,7 @@ export class StateManager {
    * @param {String} key the key whose value will be considered in filtering 
    */
   async handleUpdate({ event, storeName, keys }) {
-    if (event.payload.done) { return; } 
+    if (event.payload.done) { return; }
 
     const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys });
 
@@ -147,13 +147,25 @@ export class StateManager {
 
 
 
+  async getTotalHttpEvent() {
+    return await this.db.countData(this.dbStores.HTTP_EVENT);
+  }
+
+
+
+  async getTotalStates() {
+    return await this.db.countData(this.dbStores.STATE);
+  }
+
+
+
   async hasOneHttpEvent() {
-    return await this.db.hasData(this.dbStores.HTTP_EVENT);
+    return await this.db.countData(this.dbStores.HTTP_EVENT, (c) => c > 0);
   }
 
 
 
   async hasOneState() {
-    return await this.db.hasData(this.dbStores.STATE);
+    return await this.db.countData(this.dbStores.STATE, (c) => c > 0);
   }
 }

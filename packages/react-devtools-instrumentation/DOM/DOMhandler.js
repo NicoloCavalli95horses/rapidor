@@ -12,15 +12,22 @@ import { showDownloadBtn, logs } from "../utils.js";
 // Functions
 //===================
 export class DOMhandler {
+  constructor() {
+    this.keepOverlay = false;
+  } 
 
   init() {
     this.onDOMReady(() => {
-      const bg = this.createBackground();
+      const els = this.createBackground();
       this.showDownloadBtn();
 
-      eventBus
-        .pipe(filter(e => e.type === events.ANALYSIS_IN_PROGRESS))
-        .subscribe(e => this.toggleBg(e.payload, bg));
+      eventBus.subscribe((e) => {
+        if (e.type === events.ANALYSIS_IN_PROGRESS) {
+          this.updateProgressBar({ payload: e.payload, els });
+        } else if (e.type === events.REPORT) {
+          // this.showWarning(els);
+        }
+      });
     });
   }
 
@@ -37,8 +44,8 @@ export class DOMhandler {
 
 
   createBackground() {
-    const el = document.createElement("div");
-    el.style.cssText = `
+    const bg = document.createElement("div");
+    bg.style.cssText = `
       width:100vw;
       height:100vh;
       background-color:rgba(0,0,0,0.85);
@@ -48,23 +55,63 @@ export class DOMhandler {
       left:0;
       display:none;
       pointer-events:none;
+    `;
+
+    document.body.appendChild(bg);
+
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = `
+      display:flex;
       align-items:center;
       justify-content:center;
+      height: 100vh;
+      flex-direction: column;
     `;
+
+    bg.appendChild(wrapper);
 
     const h1 = document.createElement("h1");
     h1.style.color = "white";
     h1.textContent = "Analysis in progress...";
 
-    el.appendChild(h1);
-    document.body.appendChild(el);
-    return el;
+    const h2 = document.createElement("h2");
+    h2.style.color = "orange";
+
+    const p = document.createElement("p");
+    p.style.color = "white";
+
+    const pr = document.createElement("progress");
+    pr.value = 0;
+    pr.max = 100;
+    pr.style.width = "400px";
+    pr.style.height = "50px";
+
+    wrapper.appendChild(h1);
+    wrapper.appendChild(p);
+    wrapper.appendChild(pr);
+    wrapper.appendChild(h2);
+
+    return { bg, h1, h2, p, pr };
   }
 
 
 
-  toggleBg(payload, el) {
-    el.style.display = payload ? "flex" : "none";
+  updateProgressBar({ payload, els }) {
+    const { bg, p, pr } = els;
+    const { max, value, totHTTPevents, totStates } = payload.progress;
+    p.textContent = `${value} out of ${max} (HTTP events: ${totHTTPevents}, states: ${totStates})`;
+    pr.value = value;
+    pr.max = max;
+    bg.style.display = (payload.on_progress || this.keepOverlay) ? "block" : "none";
+  }
+
+
+
+  showWarning(els) {
+    const { bg, h2 } = els;
+    bg.style.display = "block";
+    h2.textContent = "Potential access control issue found ⚠️​";
+    this.keepOverlay = true;
   }
 
 

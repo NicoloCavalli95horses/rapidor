@@ -55,7 +55,9 @@ export class Bridge {
     // - after 2000ms of idleness, on the same page, or on new pages
     // - not when we re-visit a visited page
     const debouncedAnalysis = debounce((root) => {
+      // [TODO] prune new graph from same page considering only differences to prev graph
       if (this.navigationTracker.canProcessPage()) {
+        // console.log(root.current)
         const graph = self.getStateGraph(root.current);
         emit({ type: 'STATE_UPDATE', payload: graph });
       } else {
@@ -72,7 +74,11 @@ export class Bridge {
   }
 
 
-
+  // [TODO] we need to create cluster of components
+  // - save the type of each node in a weak map (id, type) > type is a fn
+  // - if a new node matches an existing saved type, it means that we are observing a different istance of the same component
+  // - we can save this relation as "istances": [node-id]
+  // - this will allow us to handle the Promova scenario
   getStateGraph(fiber) {
     const g = new Graph();
     const graph = g.createGraph();

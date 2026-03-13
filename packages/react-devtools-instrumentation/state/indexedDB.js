@@ -136,7 +136,7 @@ export class IDBManager {
           return;
         }
 
-        const updated = {...existing, ...payload};
+        const updated = { ...existing, ...payload };
         store.put(updated, id);
         resolve(updated);
       };
@@ -295,8 +295,8 @@ export class IDBManager {
 
 
 
-  // Returns true if at least one raw is saved
-  async hasData(storeName) {
+  // Returns number of saved data with the possibility of applying an external fn (eg. count > n)
+  async countData(storeName, condition) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
@@ -308,7 +308,13 @@ export class IDBManager {
       const request = store.count();
 
       request.onsuccess = () => {
-        resolve(request.result > 0);
+        const count = request.result;
+
+        if (condition) {
+          resolve(condition(count));
+        } else {
+          resolve(count);
+        }
       };
 
       request.onerror = (e) => {
