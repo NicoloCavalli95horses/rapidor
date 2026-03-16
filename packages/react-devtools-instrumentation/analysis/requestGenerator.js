@@ -47,8 +47,6 @@ export class RequestGenerator {
 
       for (let i = 0; i < siblingNodes.length; i++) {
         const node = siblingNodes[i];
-        if (node.isOriginalMatch) { return; } // do not replay the original
-
         const request = self.buildRequest({ reference: referenceReq, originalPath, newPath: node.match });
         const response = await self.executeRequest(request, type);
 

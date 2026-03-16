@@ -77,11 +77,7 @@ export class Bridge {
   }
 
 
-  // [TODO] we need to create cluster of components
-  // - save the type of each node in a weak map (id, type) > type is a fn
-  // - if a new node matches an existing saved type, it means that we are observing a different istance of the same component
-  // - we can save this relation as "istances": [node-id]
-  // - this will allow us to handle the Promova scenario
+
   getStateGraph(fiber) {
     const g = new Graph();
     const graph = g.createGraph();
@@ -175,7 +171,7 @@ export class Bridge {
   // returns an id that is mapped to the component type
   // this is required to find istances of the same component other than its siblings
   getComponentTypeId(type) {
-    if (typeof type !== "object" || type === null) { return; }
+    if (typeof type !== "function") { return; }
     
     if (!this.componentTypes.has(type)) {
       this.componentId++;

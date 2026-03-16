@@ -103,9 +103,8 @@ export class StateManager {
 
 
 
-  async getInstancesOfComponent(rowId, componentId) {
+  async getIdsOfInstances(rowId, componentId) {
     const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
-    console.log(state, componentId)
     return state.componentIndex[componentId];
   }
 

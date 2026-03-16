@@ -1,11 +1,11 @@
-import {instrumentationMain} from '../../../react-devtools-instrumentation/index.js';
-import {installHook} from 'react-devtools-shared/src/hook';
+import { instrumentationMain } from '../../../react-devtools-instrumentation/index.js';
+import { installHook } from 'react-devtools-shared/src/hook';
 import {
   getIfReloadedAndProfiling,
   getProfilingSettings,
 } from 'react-devtools-shared/src/utils';
-import {postMessage} from './messages';
-import {createReactRendererListener} from './reactBuildType';
+import { postMessage } from './messages';
+import { createReactRendererListener } from './reactBuildType';
 
 let resolveHookSettingsInjection: (settings: DevToolsHookSettings) => void;
 let resolveComponentFiltersInjection: (filters: Array<ComponentFilter>) => void;
@@ -22,7 +22,7 @@ function messageListener(event: UnknownMessageEvent) {
     if (payload.handshake) {
       postMessage({
         source: 'react-devtools-hook-installer',
-        payload: {handshake: true},
+        payload: { handshake: true },
       });
     } else if (payload.hookSettings) {
       window.removeEventListener('message', messageListener);
@@ -34,19 +34,18 @@ function messageListener(event: UnknownMessageEvent) {
 
 // Avoid double execution
 if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
-  const hookSettingsPromise = new Promise<DevToolsHookSettings>(resolve => {
+  const hookSettingsPromise = new Promise(resolve => {
     resolveHookSettingsInjection = resolve;
   });
-  const componentFiltersPromise = new Promise<Array<ComponentFilter>>(
-    resolve => {
-      resolveComponentFiltersInjection = resolve;
-    },
+  const componentFiltersPromise = new Promise(resolve => {
+    resolveComponentFiltersInjection = resolve;
+  }
   );
 
   window.addEventListener('message', messageListener);
   postMessage({
     source: 'react-devtools-hook-installer',
-    payload: {handshake: true},
+    payload: { handshake: true },
   });
 
   const shouldStartProfiling = getIfReloadedAndProfiling();

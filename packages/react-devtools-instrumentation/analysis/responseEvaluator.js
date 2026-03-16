@@ -31,17 +31,15 @@ export class ResponseEvaluator {
     const { reference, candidate } = event;
     const refIdx = reference.node.siblingIdx;
     const currIdx = candidate.node.siblingIdx;
-    const DOM = reference.node.DOM;
-    const DOMchildren = DOM?.DOMchildren;
+    const refDOM = reference.node.DOM?.DOMchildren;
+    const currDOM = candidate.node.DOM?.DOMchildren;
     const refResponse = reference.response;
     const currResponse = candidate.response;
 
     const resSimilarity = this.responseSimilarity({ refResponse, currResponse });
 
-    if (Array.isArray(DOMchildren)) {
-      const refDOM = DOMchildren[refIdx];
-      const currDOM = DOMchildren[currIdx];
-      const DOMsimilarity = this.evaluateDOM({ refDOM, currDOM });
+    if (Array.isArray(refDOM) && Array.isArray(currDOM)) {
+      const DOMsimilarity = this.evaluateDOM({ refDOM: refDOM[refIdx], currDOM: currDOM[currIdx] });
 
       // if the DOM classes are not equal (over a certain threshold),
       // it means that we have received a 200 OK response using data extracted from a component,

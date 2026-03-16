@@ -66,24 +66,16 @@ export class Worker {
 
         this.updateDOM({ totStates, totHTTPevents });
 
-        if (doneOn.has(snapshotKey)) {
-          continue;
-        }
+        if (doneOn.has(snapshotKey)) { continue; }
 
-        const results = this.searchPropertyInGraph({ graph, key: snapshotKey, property });
+        // find components that have the property and that have siblings
+        const matches = this.getMatches({ graph, key: snapshotKey, property }); // [ {node1}, {node2} ]
 
-        if (results.size) {
-          const res = [...results];
-          const matchingSets = await this.processResults(res);
+        if (matches.length) {
+          const matchingSets = await this.processResults(matches); // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
+
           if (matchingSets.length) {
             emit({ type: events.GEN_REQ, payload: { matchingSets, http } });
-
-            // there is a match: explore instances of the matching node other than siblings
-            for (let i = 0; i < res.length; i++) {
-              const node = res[i].node;
-              const instances = await this.stateManager.getInstancesOfComponent(snapshotKey, node.componentId);
-              // console.log({instances});              
-            }
           }
         } else {
           log({ module: 'analysis manager', msg: 'no matches found' });
@@ -120,27 +112,44 @@ export class Worker {
 
 
 
-  // searching for property (eg. api/collection/id -> id) inside a graph
-  // returns array of matching nodes [ {node},{node} ]
+  // Returns array of matching nodes [ {node},{node} ]
   // each node has: `path` (to the get the value), `relations`, snapshot `key`
-  searchPropertyInGraph({ graph, key, property }) {
+  getMatches({ graph, key, property }) {
     const { nodes, relations } = graph;
-    const results = new Set();
-    const visited = new WeakSet();
+    const matches = [];
+    const ids = new Set();
 
-    function visit({ value, path, node }) {
+    for (const [id, relation] of Object.entries(relations)) {
+      // we specifically focus on list of elements, hence we consider only node with siblings
+      if (!Object.hasOwn(relation, 'sibling')) { continue; }
 
-      if (property === value) {
-        results.add({
-          node: { ...node, isOriginalMatch: true },
-          relations: relations[node.id],
+      const node = nodes[id];
+      const match = this.getMatchingNode({ value: node, toFind: property });
+
+      if (match && !ids.has(node.id)) {
+        matches.push({
+          node,
+          relations: relation,
           rowId: key,
-          path: [...path],
-          value,
           ratio: "a value within this node matches a segment extracted from an HTTP request. This is the first of many siblings that appear in the component tree",
+          ...match
         });
 
-        return;
+        ids.add(node.id);
+      }
+    }
+
+    return matches;
+  }
+
+
+
+  getMatchingNode({ value, path = [], toFind }) {
+    const visited = new WeakSet();
+
+    function visit({ value, path }) {
+      if (value === toFind) {
+        return { path: [...path], value };
       }
 
       if (!value || typeof value !== "object") { return; }
@@ -149,31 +158,19 @@ export class Worker {
       visited.add(value);
 
       if (Array.isArray(value)) {
-        value.forEach((item, index) => {
-          visit({ value: item, path: [...path, index], node });
-        });
+        for (let i = 0; i < value.length; i++) {
+          const result = visit({ value: value[i], path: [...path, i] });
+          if (result) { return result; }
+        }
       } else {
-        Object.keys(value).forEach(key => {
-          visit({ value: value[key], path: [...path, key], node });
-        });
+        for (const k of Object.keys(value)) {
+          const result = visit({ value: value[k], path: [...path, k] });
+          if (result) { return result; }
+        }
       }
     }
 
-    const ids = new Set();
-
-    // we specifically focus on list of elements, hence we consider only node with siblings
-    for (const [id, relation] of Object.entries(relations)) {
-      if (Object.hasOwn(relation, 'sibling')) {
-        ids.add(id);
-      }
-    }
-
-    for (const id of ids) {
-      const node = nodes[id];
-      visit({ value: node, path: [], node });
-    }
-
-    return results;
+    return visit({ value, path });
   }
 
 
@@ -181,43 +178,34 @@ export class Worker {
   // for each node, build sub-arrays with siblings and DOM references
   // returns = [ [{node},{node}]  [{node},{node}] ]
   async processResults(results) {
-    // [TODO] if the ancestor that has DOM info is common, we may save it just once, like {DOM: {}, matches:{}}
     const matches = [];
+    const self = this;
 
     for (const result of results) {
       const siblingNodes = [];
       const { path, relations, value: referenceMatch, node: referenceNode, rowId } = result;
-      const { sibling: siblingIds, siblingIdx } = relations;
+      let { sibling, siblingIdx } = relations;
+      await prepareNode({ node: referenceNode, rowId, siblingIds: sibling, siblingIdx, match: referenceMatch });
 
-      if (!referenceNode.DOM) {
-        referenceNode.DOM = await this.stateManager.getAncestorDOM(rowId, referenceNode.parent);
+      // consider other istances of reference node that are NOT among its siblings
+      // we can append these istances as artificial siblings to continue the analysis
+      if (referenceNode.componentId) {
+        const istancesIds = await this.expandSiblingIds({ componentId: referenceNode.componentId, referenceIds: [referenceNode.id, ...sibling], rowId });
+        sibling = [...sibling, ...istancesIds];
       }
 
-      referenceNode.siblingIds = siblingIds;
-      referenceNode.siblingIdx = siblingIdx;
-      referenceNode.match = referenceMatch;
-
-      for (const id of siblingIds) {
-        const siblingNode = await this.stateManager.getNodeByID(rowId, id);
-        const siblingRelations = await this.stateManager.getRelationsByID(rowId, id);
-
-        // take matching value from sibling node
-        const match = this.getValueAtPath(siblingNode, path);
+      for (const id of sibling) {
+        const node = await this.stateManager.getNodeByID(rowId, id);
+        const relations = await this.stateManager.getRelationsByID(rowId, id);
+        const match = this.getValueAtPath(node, path);
 
         if (!match || match == referenceMatch) {
           log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'a sibling was found, but it has the same value as the reference component' });
           continue;
         }
 
-        // find DOM references if not present
-        if (!siblingNode.DOM) {
-          siblingNode.DOM = await this.stateManager.getAncestorDOM(rowId, id);
-        }
-
-        siblingNode.siblingIds = siblingRelations.sibling;
-        siblingNode.siblingIdx = siblingRelations.siblingIdx;
-        siblingNode.match = match;
-        siblingNodes.push(siblingNode);
+        await prepareNode({ node, rowId, siblingIds: relations.sibling, siblingIdx: relations.siblingIdx, match });
+        siblingNodes.push(node);
       }
 
       if (siblingNodes.length) {
@@ -227,6 +215,26 @@ export class Worker {
     }
 
     return matches;
+
+
+    async function prepareNode({ node, rowId, siblingIds, siblingIdx, match }) {
+      if (!node.DOM) {
+        node.DOM = await self.stateManager.getAncestorDOM(rowId, node.id);
+      }
+      node.siblingIds = siblingIds;
+      node.siblingIdx = siblingIdx;
+      node.match = match;
+    }
+  }
+
+
+
+  // expand the list of siblings ids considering other istances of the component that are not among the siblings
+  // return expanded list of ids
+  async expandSiblingIds({ componentId, referenceIds, rowId }) {
+    const instancesIds = await this.stateManager.getIdsOfInstances(rowId, componentId);
+    const refSet = new Set(referenceIds);
+    return instancesIds.filter(id => !refSet.has(id));
   }
 
 

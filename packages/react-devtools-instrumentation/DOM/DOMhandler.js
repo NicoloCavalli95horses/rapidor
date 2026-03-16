@@ -14,7 +14,8 @@ import { showDownloadBtn, logs } from "../utils.js";
 export class DOMhandler {
   constructor() {
     this.keepOverlay = false;
-  } 
+    this.bacCounter = 0;
+  }
 
   init() {
     this.onDOMReady(() => {
@@ -45,18 +46,36 @@ export class DOMhandler {
 
   createBackground() {
     const bg = document.createElement("div");
+    const x = document.createElement("div");
+    x.style.cssText = `
+      position: fixed;
+      right: 10px;
+      top: 10px;
+      width: 40px;
+      height: 40px;
+      cursor: pointer;
+      display: grid;
+      place-content: center;
+      z-index: 999999;
+    `;
     bg.style.cssText = `
       width:100vw;
       height:100vh;
       background-color:rgba(0,0,0,0.85);
-      z-index:9999;
+      z-index:999998;
       position:fixed;
       top:0;
       left:0;
       display:none;
-      pointer-events:none;
     `;
 
+    x.textContent = "❌";
+    x.addEventListener("click", () => {
+      this.keepOverlay = false;
+      bg.style.display = "none";
+    });
+
+    bg.appendChild(x);
     document.body.appendChild(bg);
 
     const wrapper = document.createElement("div");
@@ -97,21 +116,25 @@ export class DOMhandler {
 
 
   updateProgressBar({ payload, els }) {
-    const { bg, p, pr } = els;
+    const { bg, h1, p, pr } = els;
     const { max, value, totHTTPevents, totStates } = payload.progress;
     p.textContent = `${value} out of ${max} (HTTP events: ${totHTTPevents}, states: ${totStates})`;
     pr.value = value;
     pr.max = max;
+    if (value === max) {
+      h1.textContent = 'Analysis completed';
+    }
     bg.style.display = (payload.on_progress || this.keepOverlay) ? "block" : "none";
   }
 
 
 
   showWarning(els) {
+    this.bacCounter++;
+    this.keepOverlay = true;
     const { bg, h2 } = els;
     bg.style.display = "block";
-    h2.textContent = "Potential access control issue found ⚠️​";
-    this.keepOverlay = true;
+    h2.textContent = `${this.bacCounter} potential access control issue found ⚠️​`;
   }
 
 
