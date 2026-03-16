@@ -4,37 +4,47 @@ import {
   getIfReloadedAndProfiling,
   getProfilingSettings,
 } from 'react-devtools-shared/src/utils';
+import {postMessage} from './messages';
+import {createReactRendererListener} from './reactBuildType';
 
-let resolveHookSettingsInjection;
+let resolveHookSettingsInjection: (settings: DevToolsHookSettings) => void;
+let resolveComponentFiltersInjection: (filters: Array<ComponentFilter>) => void;
 
-function messageListener(event: MessageEvent) {
+function messageListener(event: UnknownMessageEvent) {
   if (event.source !== window) {
     return;
   }
 
-  if (event.data.source === 'react-devtools-hook-settings-injector') {
+  if (event.data.source === 'react-devtools-settings-injector') {
+    const payload = event.data.payload;
     // In case handshake message was sent prior to hookSettingsInjector execution
     // We can't guarantee order
-    if (event.data.payload.handshake) {
-      window.postMessage({
+    if (payload.handshake) {
+      postMessage({
         source: 'react-devtools-hook-installer',
         payload: {handshake: true},
       });
-    } else if (event.data.payload.settings) {
+    } else if (payload.hookSettings) {
       window.removeEventListener('message', messageListener);
-      resolveHookSettingsInjection(event.data.payload.settings);
+      resolveHookSettingsInjection(payload.hookSettings);
+      resolveComponentFiltersInjection(payload.componentFilters);
     }
   }
 }
 
 // Avoid double execution
 if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
-  const hookSettingsPromise = new Promise(resolve => {
+  const hookSettingsPromise = new Promise<DevToolsHookSettings>(resolve => {
     resolveHookSettingsInjection = resolve;
   });
+  const componentFiltersPromise = new Promise<Array<ComponentFilter>>(
+    resolve => {
+      resolveComponentFiltersInjection = resolve;
+    },
+  );
 
   window.addEventListener('message', messageListener);
-  window.postMessage({
+  postMessage({
     source: 'react-devtools-hook-installer',
     payload: {handshake: true},
   });
@@ -44,6 +54,7 @@ if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
   // Can't delay hook installation, inject settings lazily
   installHook(
     window,
+    componentFiltersPromise,
     hookSettingsPromise,
     shouldStartProfiling,
     profilingSettings,
@@ -52,18 +63,7 @@ if (!window.hasOwnProperty('__REACT_DEVTOOLS_GLOBAL_HOOK__')) {
   // Detect React
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__.on(
     'renderer',
-    function ({reactBuildType}) {
-      window.postMessage(
-        {
-          source: 'react-devtools-hook',
-          payload: {
-            type: 'react-renderer-attached',
-            reactBuildType,
-          },
-        },
-        '*',
-      );
-    },
+    createReactRendererListener(window),
   );
 }
 
