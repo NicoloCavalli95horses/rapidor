@@ -121,9 +121,7 @@ export class DOMhandler {
     p.textContent = `${value} out of ${max} (HTTP events: ${totHTTPevents}, states: ${totStates})`;
     pr.value = value;
     pr.max = max;
-    if (value === max) {
-      h1.textContent = 'Analysis completed';
-    }
+    h1.textContent = value === max ? "Analysis completed" : "Analysis in progress...";
     bg.style.display = (payload.on_progress || this.keepOverlay) ? "block" : "none";
   }
 

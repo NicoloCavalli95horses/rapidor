@@ -54,22 +54,18 @@ export class Bridge {
     const original = this.#hook?.onCommitFiberRoot;
     const self = this;
 
-    // The component tree is updated very often
-    // We listen to changes via `onCommitFiberRoot` event and save a snapshot:
-    // - after 2000ms of idleness, on the same page, or on new pages
-    // - not when we re-visit a visited page
     const debouncedAnalysis = debounce((root) => {
       // [TODO] prune new graph from same page considering only differences to prev graph
       if (this.navigationTracker.canProcessPage()) {
         const graph = self.getStateGraph(root.current);
         emit({ type: 'STATE_UPDATE', payload: graph });
       } else {
-        log({ module: 'bridge', msg: 'skipping analysis' });
+        log({ module: 'bridge', msg: 'state snapshot already taken, skipping' });
       }
     }, config.debounceTimeMs);
 
     this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
-      debouncedAnalysis(root);
+      if (root) { debouncedAnalysis(root); }
       return original?.call(this, rendererID, root, ...rest);
     };
 
@@ -172,7 +168,7 @@ export class Bridge {
   // this is required to find istances of the same component other than its siblings
   getComponentTypeId(type) {
     if (typeof type !== "function") { return; }
-    
+
     if (!this.componentTypes.has(type)) {
       this.componentId++;
       this.componentTypes.set(type, this.componentId);

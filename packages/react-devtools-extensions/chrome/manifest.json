@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "RAPIDOR (instrumented React DevTools)",
-  "description": "Adds React debugging tools to the Chrome Developer Tools.",
+  "name": "RAPIDOR (React App IDOR)",
+  "description": "A React framework instrumentation to test for access control vulnerabilities (IDOR/BOLA/MFLAC)",
   "version": "7.0.1",
   "version_name": "7.0.1",
   "minimum_chrome_version": "114",

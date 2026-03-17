@@ -32,7 +32,6 @@ export class AnalysisManager {
 
   async onDbSuccess() {
     if (!this.running) {
-      log({ module: 'analysis manager', msg: 'starting worker' });
       this.startWorker();
     }
   }

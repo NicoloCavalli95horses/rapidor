@@ -39,6 +39,14 @@ const contentScriptsToInject = [
     matches: ['<all_urls>'],
     persistAcrossSessions: true,
     runAt: 'document_start',
+  },
+  {
+    id: '@react-devtools/instrumentation',
+    js: ['build/instrumentation.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.MAIN,
   }
 ];
 

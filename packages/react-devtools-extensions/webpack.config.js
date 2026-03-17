@@ -69,6 +69,7 @@ module.exports = {
     main: './src/main/index.js',
     panel: './src/panel.js',
     proxy: './src/contentScripts/proxy.js',
+    instrumentation: '../react-devtools-instrumentation/index.js',
     prepareInjection: './src/contentScripts/prepareInjection.js',
     installHook: './src/contentScripts/installHook.js',
     hookSettingsInjector: './src/contentScripts/hookSettingsInjector.js',

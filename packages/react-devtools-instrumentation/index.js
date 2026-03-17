@@ -40,3 +40,8 @@ export async function instrumentationMain() {
   const analysisManager = new AnalysisManager(stateManager);
   analysisManager.init();
 }
+
+
+(async () => {
+  await instrumentationMain();
+})();
