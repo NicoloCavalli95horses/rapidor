@@ -95,6 +95,7 @@ export class ResponseEvaluator {
       refKeys,
       currKeys,
       threshold,
+      calculatedRatio: currKeys.length / refKeys.length,
     };
   }
 

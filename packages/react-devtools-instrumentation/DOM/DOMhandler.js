@@ -102,8 +102,11 @@ export class DOMhandler {
     const pr = document.createElement("progress");
     pr.value = 0;
     pr.max = 100;
-    pr.style.width = "400px";
-    pr.style.height = "50px";
+    pr.style.cssText = `
+      width: 400px;
+      height: 50px;
+      pointer-events:none;
+    `;
 
     wrapper.appendChild(h1);
     wrapper.appendChild(p);

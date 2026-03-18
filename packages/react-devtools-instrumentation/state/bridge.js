@@ -6,7 +6,7 @@ import { emit } from '../eventBus.js';
 import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
-
+import { initialize } from '../../react-devtools-inline/src/backend.js';
 
 
 //===================
@@ -24,26 +24,10 @@ export class Bridge {
   }
 
 
-  #hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-
   // Connect to React specific APIs
   init() {
     this.navigationTracker.init();
-
     this.listenToFiberCommits();
-    this.connectToRenderer();
-  }
-
-
-
-  // Returns the rendererInterface object with functions to inspect specific components
-  connectToRenderer() {
-    this.#hook?.on('renderer', ({ renderer, reactBuildType, rendererID }) => {
-      // `rendererInterface` exposes devtools utilities to get info about single components
-      const rendererInterface = attach(this.#hook, rendererID, renderer, window);
-      emit({ type: 'RENDERER', payload: rendererInterface });
-      log({ module: 'bridge', msg: 'Renderer attached' });
-    });
   }
 
 
@@ -51,7 +35,8 @@ export class Bridge {
   // Returns snapshots of the current state of the component tree
   // The state is updated automatically by React
   listenToFiberCommits() {
-    const original = this.#hook?.onCommitFiberRoot;
+    const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    if (!hook) { return; }
     const self = this;
 
     const debouncedAnalysis = debounce((root) => {
@@ -64,10 +49,30 @@ export class Bridge {
       }
     }, config.debounceTimeMs);
 
-    this.#hook.onCommitFiberRoot = function (rendererID, root, ...rest) {
-      if (root) { debouncedAnalysis(root); }
-      return original?.call(this, rendererID, root, ...rest);
-    };
+    // save original reference
+    let current = hook.onCommitFiberRoot;
+
+    function wrap(fn) {
+      return function (rendererID, root, ...args) {
+        if (root) { debouncedAnalysis(root); }
+        return fn?.apply(this, [rendererID, root, ...args]);
+      };
+    }
+
+    current = wrap(current);
+
+    // modify object method
+    Object.defineProperty(hook, 'onCommitFiberRoot', {
+      configurable: true,
+      get() {
+        return current;
+      },
+      // if someone attempts to wrap this function, it will receive
+      // the wrapped version and not the original one
+      set(fn) {
+        current = wrap(fn);
+      }
+    });
 
     log({ module: 'bridge', msg: 'listening to fiber commits changes' });
   }

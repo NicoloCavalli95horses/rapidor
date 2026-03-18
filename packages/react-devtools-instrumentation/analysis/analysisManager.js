@@ -31,17 +31,20 @@ export class AnalysisManager {
 
 
   async onDbSuccess() {
-    if (!this.running) {
-      this.startWorker();
+    if (this.running) { return; }
+    this.running = true;
+
+    try {
+      await this.startWorker();
+    } finally {
+      this.running = false;
     }
   }
 
 
 
-  // we start the worker just one time, it will keep looping
-  // and reading new HTTP events and states as they come
+  // process until empty, then sleep until next event
   async startWorker() {
-    this.running = true;
     const hasOneHttpEvent = await this.stateManager.hasOneHttpEvent();
     const hasOneState = await this.stateManager.hasOneState();
 
@@ -51,7 +54,5 @@ export class AnalysisManager {
     } else {
       log({ module: 'analysis manager', msg: 'nothing to analyze yet' });
     }
-
-    this.running = false;
   }
 }
