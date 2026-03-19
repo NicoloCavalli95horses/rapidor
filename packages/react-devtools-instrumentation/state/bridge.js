@@ -13,10 +13,11 @@ import { initialize } from '../../react-devtools-inline/src/backend.js';
 // Class
 //===================
 export class Bridge {
-  constructor(navigationTracker) {
+  constructor(navigationTracker, stateManager) {
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
     this.navigationTracker = navigationTracker;
+    this.stateManager = stateManager;
 
     this.componentIndex = new Map(); // componentId -> Set<nodeId>
     this.componentTypes = new WeakMap(); // componentType -> componentId
@@ -38,28 +39,19 @@ export class Bridge {
     const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     if (!hook) { return; }
     const self = this;
+    let current = hook.onCommitFiberRoot; // save original reference
+    current = wrap(current);
 
-    const debouncedAnalysis = debounce((root) => {
-      // [TODO] prune new graph from same page considering only differences to prev graph
-      if (this.navigationTracker.canProcessPage()) {
-        const graph = self.getStateGraph(root.current);
-        emit({ type: 'STATE_UPDATE', payload: graph });
-      } else {
-        log({ module: 'bridge', msg: 'state snapshot already taken, skipping' });
-      }
+    const debouncedProcess = debounce(async (root) => {
+      await self.handleStateGraph(root.current);
     }, config.debounceTimeMs);
-
-    // save original reference
-    let current = hook.onCommitFiberRoot;
 
     function wrap(fn) {
       return function (rendererID, root, ...args) {
-        if (root) { debouncedAnalysis(root); }
+        if (root) { debouncedProcess(root); }
         return fn?.apply(this, [rendererID, root, ...args]);
       };
     }
-
-    current = wrap(current);
 
     // modify object method
     Object.defineProperty(hook, 'onCommitFiberRoot', {
@@ -75,6 +67,28 @@ export class Bridge {
     });
 
     log({ module: 'bridge', msg: 'listening to fiber commits changes' });
+  }
+
+
+
+  async handleStateGraph(fiber) {
+    if (!this.navigationTracker.canProcessPage()) {
+      log({ module: 'bridge', msg: 'state snapshot already taken on this page, skipping' });
+      return;
+    }
+
+    // [TODO] prune new graph from same page considering new nodes
+    let prunedGraph = undefined;
+    const url = this.navigationTracker.getCurrent();
+    const newGraph = this.getStateGraph(fiber);
+    // const lastGraph = await this.stateManager.getLastStateOfUrl(url);
+
+    // if (lastGraph) {
+    // prunedGraph = this.getPrunedGraph(newGraph, lastGraph);
+    // }
+
+    const payload = prunedGraph || newGraph;
+    emit({ type: 'STATE_UPDATE', payload });
   }
 
 
@@ -172,12 +186,31 @@ export class Bridge {
   // returns an id that is mapped to the component type
   // this is required to find istances of the same component other than its siblings
   getComponentTypeId(type) {
-    if (typeof type !== "function") { return; }
+    if (type == null) { return; }
+    let componentFn = undefined;
+
+    if (typeof type === "object" && type.$$typeof) {
+      const tag = type.$$typeof;
+
+      if (tag === Symbol.for("react.memo")) {
+        componentFn = type.type; // function
+      } else if (tag === Symbol.for("react.forward_ref")) {
+        componentFn = type.render; // function
+      } else if (tag === Symbol.for("react.provider") || tag === Symbol.for("react.consumer")) {
+        componentFn = type._context; // object
+      } else if (tag === Symbol.for("react.context")) {
+        componentFn = type; // object
+      }
+    }
+
+    const valid = ["function"].includes(typeof type) || componentFn;
+    if (!valid) { return; }
 
     if (!this.componentTypes.has(type)) {
       this.componentId++;
       this.componentTypes.set(type, this.componentId);
     }
+
     return this.componentTypes.get(type);
   }
 

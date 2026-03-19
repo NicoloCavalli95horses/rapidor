@@ -32,6 +32,8 @@ export class IDBManager {
     for (const [key, val] of Object.entries(IDBManager.STORES)) {
       await this.clearStore(this.name, val);
     }
+
+    log({ module: 'indexed db', msg: 'IndexedDB initialized' });
   }
 
 
@@ -57,7 +59,7 @@ export class IDBManager {
       const request = window.indexedDB.open(this.name, this.version);
 
       request.onerror = (event) => {
-        log({ module: 'indexedDB', msg: 'IndexedDB error', type: 'error' });
+        log({ module: 'indexed db', msg: 'IndexedDB error', type: 'error' });
         reject(event.target.error);
       };
 
@@ -68,20 +70,19 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
           const state = db.createObjectStore(IDBManager.STORES.STATE, { autoIncrement: true }); // primary key (id) handled by indexedDB
 
-          state.createIndex("sessionId", "sessionId", { unique: false }); // indexName (index name), keyPath (property of the saved object), options
+          // state.createIndex("sessionId", "sessionId", { unique: false }); // indexName (index name), keyPath (property of the saved object), options
           state.createIndex("url", "url", { unique: false });
-          state.createIndex("timestamp", "timestamp", { unique: false });
+          // state.createIndex("timestamp", "timestamp", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true });
 
           httpEvent.createIndex("type", "type", { unique: false });
-          httpEvent.createIndex("sessionId", "sessionId", { unique: false });
-          httpEvent.createIndex("timestamp", "timestamp", { unique: false });
+          // httpEvent.createIndex("timestamp", "timestamp", { unique: false });
+          httpEvent.createIndex("ignore", "ignore", { unique: false });
+          httpEvent.createIndex("url", "url", { unique: false });
         }
-
-        log({ module: 'indexedDB', msg: 'IndexedDB initialized' });
       };
 
       request.onsuccess = (event) => {
@@ -110,6 +111,7 @@ export class IDBManager {
       };
     });
   }
+
 
 
   async updateRow({ id, payload, storeName }) {
@@ -141,6 +143,30 @@ export class IDBManager {
         resolve(updated);
       };
     });
+  }
+
+
+
+  async getWithIndex({ storeName, index, query, all=true }) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    const tx = this.db.transaction(storeName, "readonly");
+    const store = tx.objectStore(storeName);
+    const indexDb = store.index(index);
+
+    const result = await new Promise((resolve, reject) => {
+      const request = all ? indexDb.getAll(query) : indexDb.get(query);
+      request.onsuccess = (e) => resolve(e.target.result);
+      request.onerror = (e) => reject(e.target.error);
+    });
+
+    if (!result) {
+      throw new Error(`Object in ${storeName} at id: ${id} not found`);
+    }
+
+    return result;
   }
 
 

@@ -16,7 +16,6 @@ import { config } from "../config.js";
 export class Worker {
   constructor(stateManager) {
     this.stateManager = stateManager;
-    this.stop = false;
     this.requestGenerator = new RequestGenerator(this.stateManager);
     this.analysisCounter = 0;
   }
@@ -29,16 +28,14 @@ export class Worker {
 
 
   async startAnalysis() {
-    this.stop = false;
     this.analysisCounter = 0;
     let httpEvent = {};
 
-    while (!this.stop) { // HTTP events loop
+    while (true) { // HTTP events loop
       httpEvent = await this.stateManager.getNextHttpEvent(httpEvent?.key);
 
       if (!httpEvent) {
         log({ module: 'analysis manager', msg: 'no more HTTP events' });
-        this.stop = true;
         break;
       }
 
@@ -74,7 +71,7 @@ export class Worker {
         if (matches.length) {
           const matchingSets = await this.processResults(matches); // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
 
-          if (matchingSets.length) {
+          if (matchingSets?.length) {
             emit({ type: events.GEN_REQ, payload: { matchingSets, http } });
           }
         } else {
@@ -176,7 +173,7 @@ export class Worker {
 
 
   // for each node, build sub-arrays with siblings and DOM references
-  // returns = [ [{node},{node}]  [{node},{node}] ]
+  // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
   async processResults(results) {
     const matches = [];
     const self = this;

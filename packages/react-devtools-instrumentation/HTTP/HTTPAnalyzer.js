@@ -48,7 +48,7 @@ export class analyzeHTTP {
         request: { ...request, meta },
         response,
         doneOn: new Set(),
-        ignore: !!request._requestId,
+        ignore: request._requestId ? 1 : 0, // apparently, booleans are not valid keys in indexedDB https://stackoverflow.com/questions/13672906/indexeddb-boolean-index
       }
     });
   }
@@ -61,7 +61,7 @@ export class analyzeHTTP {
     const receivedHost = new URL(uri).hostname;
     const currentHost = window.location.hostname;
     const baseDomain = this.getBaseDomain(currentHost);
-    const toKeep = receivedHost === baseDomain || receivedHost.endsWith(`.${baseDomain}`);
+    const toKeep = (receivedHost === baseDomain) || receivedHost.endsWith(`.${baseDomain}`);
     // console.log({ receivedHost, currentHost, baseDomain, toKeep });
 
     return toKeep;

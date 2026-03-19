@@ -52,8 +52,6 @@ export class StateManager {
    * @param {String} key the key whose value will be considered in filtering 
    */
   async handleUpdate({ event, storeName, keys }) {
-    if (event.payload.done) { return; }
-
     const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys });
 
     if (!isStored) {
@@ -175,5 +173,20 @@ export class StateManager {
 
   async hasOneState() {
     return await this.db.countData(this.dbStores.STATE, (c) => c > 0);
+  }
+
+
+
+  async getIgnoredHTTPEvents() {
+    return await this.db.getWithIndex({ storeName: this.dbStores.HTTP_EVENT, index: 'ignore', query: 1 });
+  }
+
+
+
+  async getLastStateOfUrl(url) {
+    const hasState = await this.hasOneState();
+    if (!hasState) { return; }
+    const matches = await this.db.getWithIndex({ storeName: this.dbStores.STATE, index: url });
+    console.log(matches);
   }
 }

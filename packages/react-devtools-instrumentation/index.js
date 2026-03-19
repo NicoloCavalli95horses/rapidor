@@ -33,7 +33,7 @@ export async function instrumentationMain() {
   await stateManager.init();
 
   // Connect to framework-specific APIs and listen to component tree changes
-  const bridge = new Bridge(navigationTracker);
+  const bridge = new Bridge(navigationTracker, stateManager);
   bridge.init();
 
   // Listen to HTTP events, search for similar data in other istances of components, generate and evaluate tests
