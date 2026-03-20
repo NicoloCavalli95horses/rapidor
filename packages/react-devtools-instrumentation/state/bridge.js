@@ -78,16 +78,7 @@ export class Bridge {
     }
 
     // [TODO] prune new graph from same page considering new nodes
-    let prunedGraph = undefined;
-    const url = this.navigationTracker.getCurrent();
-    const newGraph = this.getStateGraph(fiber);
-    // const lastGraph = await this.stateManager.getLastStateOfUrl(url);
-
-    // if (lastGraph) {
-    // prunedGraph = this.getPrunedGraph(newGraph, lastGraph);
-    // }
-
-    const payload = prunedGraph || newGraph;
+    const payload = this.getStateGraph(fiber);
     emit({ type: 'STATE_UPDATE', payload });
   }
 

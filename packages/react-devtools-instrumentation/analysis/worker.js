@@ -31,21 +31,29 @@ export class Worker {
     this.analysisCounter = 0;
     let httpEvent = {};
 
-    while (true) { // HTTP events loop
+    httpEventLoop: while (true) { // HTTP events loop
       httpEvent = await this.stateManager.getNextHttpEvent(httpEvent?.key);
 
       if (!httpEvent) {
         log({ module: 'analysis manager', msg: 'no more HTTP events' });
-        break;
+        break httpEventLoop;
       }
 
+      const totHTTPevents = await this.stateManager.getTotalHttpEvent();
+      const totStates = await this.stateManager.getTotalStates();
+     
       const http = httpEvent.value;
       const httpKey = httpEvent.key;
       const { request, response, doneOn, ignore } = http;
-      const { fullPath, segments } = request.meta.path; // {fullPath: 'api/images/red/...', segments: ['api', 'images', ...]}
-      const property = segments[segments.length - 1];
-      const totHTTPevents = await this.stateManager.getTotalHttpEvent();
-      const totStates = await this.stateManager.getTotalStates();
+      const property = request.meta.path.property;
+      const isFile = request.meta.isFileByMime;
+
+      if (isFile) {
+        // rule out files because we cannot solve the oracle problem in this scenario
+        this.updateDOM({ totStates, totHTTPevents, increment: totStates });
+        continue;
+      }
+
       let snapshot = {};
 
       if (ignore) {
@@ -54,9 +62,9 @@ export class Worker {
         continue;
       }
 
-      while (true) { // state loop
+      stateLoop: while (true) {
         snapshot = await this.stateManager.getNextState(snapshot?.key);
-        if (!snapshot) { break; } // no more state events, break only this loop and try other HTTP events
+        if (!snapshot) { break stateLoop; } // no more state events, break only this loop and try other HTTP events
 
         const graph = snapshot.value;
         const snapshotKey = snapshot.key;
@@ -184,7 +192,7 @@ export class Worker {
       let { sibling, siblingIdx } = relations;
       await prepareNode({ node: referenceNode, rowId, siblingIds: sibling, siblingIdx, match: referenceMatch });
 
-      // consider other istances of reference node that are NOT among its siblings
+      // consider other istances of the reference node that are NOT among its siblings
       // we can append these istances as artificial siblings to continue the analysis
       if (referenceNode.componentId) {
         const istancesIds = await this.expandSiblingIds({ componentId: referenceNode.componentId, referenceIds: [referenceNode.id, ...sibling], rowId });

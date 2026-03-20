@@ -57,6 +57,8 @@ export class DOMhandler {
       display: grid;
       place-content: center;
       z-index: 999999;
+      font-size: 26px;
+      color:white;
     `;
     bg.style.cssText = `
       width:100vw;
@@ -69,7 +71,7 @@ export class DOMhandler {
       display:none;
     `;
 
-    x.textContent = "❌";
+    x.textContent = "x";
     x.addEventListener("click", () => {
       this.keepOverlay = false;
       bg.style.display = "none";

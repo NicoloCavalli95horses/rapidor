@@ -6,6 +6,22 @@ import { log } from '../utils.js';
 import { config } from '../config.js';
 
 
+
+//===================
+// Const
+//===================
+const FILE_MIME_HINTS = [
+  'blob',
+  'arraybuffer',
+  'image/',
+  'audio/',
+  'video/',
+  'application/pdf',
+  'application/octet-stream',
+  'application/zip'
+];
+
+
 //===================
 // Functions
 //===================
@@ -25,6 +41,9 @@ export class analyzeHTTP {
     if (!uri) { return; }
     if (!this.isAllowed(uri)) { return; }
 
+    const contentType = response.type || response.rawType;
+    const isFileByMime = FILE_MIME_HINTS.some(t => contentType.includes(t));
+
     const protocol = uri.protocol;
     const port = uri.port;
     const rawQueries = uri.search; // ?page=1order=asc...
@@ -32,6 +51,12 @@ export class analyzeHTTP {
     const hostname = uri.hostname;
     const fullPath = decodeURIComponent(uri.pathname); // path name can be encoded
     const segments = fullPath.split('/').filter(Boolean);
+    let property = segments.slice(-1).pop();
+    const extension = this.getExtension(property);
+
+    if (extension) {
+      property = property.split('.')[0];
+    }
 
     const meta = {
       protocol,
@@ -39,7 +64,8 @@ export class analyzeHTTP {
       rawQueries,
       params,
       hostname,
-      path: { fullPath, segments },
+      isFileByMime,
+      path: { fullPath, segments, property, extension },
     }
 
     emit({
@@ -51,6 +77,13 @@ export class analyzeHTTP {
         ignore: request._requestId ? 1 : 0, // apparently, booleans are not valid keys in indexedDB https://stackoverflow.com/questions/13672906/indexeddb-boolean-index
       }
     });
+  }
+
+
+  getExtension(filename) {
+    const lastDot = filename.lastIndexOf('.');
+    if (lastDot === -1) { return; }
+    return filename.slice(lastDot).toLowerCase(); // with the dot
   }
 
 
