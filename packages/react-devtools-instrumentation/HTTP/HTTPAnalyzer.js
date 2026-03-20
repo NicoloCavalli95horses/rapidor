@@ -58,6 +58,13 @@ export class analyzeHTTP {
       property = property.split('.')[0];
     }
 
+    // [TODO] `property` is the last part of the URL by default
+    // However, sometimes this is not the part we need to fuzz
+    // would be nice to design a system that infers the part to be fuzzed
+    // by comparing past requests and checking the part that changes
+    // > In Busuu, we have `/api/.../id1` and `api/.../id2`
+    // > In Memrise, we have `/api/.../grammar/chat` and `/api/.../role-play/chat`
+
     const meta = {
       protocol,
       port,

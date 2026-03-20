@@ -25,19 +25,11 @@ export class StateManager {
     eventBus.subscribe(async (event) => {
       switch (event.type) {
         case events.STATE_UPDATE:
-          // High-entropy keys are used in props.value.location.key or navigator.location.key
-          // These create differences between stored object, so every page change produces a new state
-          // Shall we remove these keys before storing the objects (?) they seem unimportant for our goals
-          await this.handleUpdate({ event, storeName: this.dbStores.STATE, keys: ['nodes', 'relations'] });
+          await this.handleStateUpdate(event);
           break;
 
         case events.HTTP_EVENT:
-          // Theoretically, we cannot assume that the answer from the web server will be always the same
-          // Data could be updated or deleted, even for GET requests
-          // However, we are interested in "data access" more than "data content"
-          // So logically if a GET request was accepted before, it must be accepted again if no major changes occur
-          // Hence, we don't store HTTP events twice and execute the analysis only once per event
-          await this.handleUpdate({ event, storeName: this.dbStores.HTTP_EVENT, keys: ['request'] });
+          await this.handleHTTPUpdate(event);
           break;
       }
     });
@@ -45,14 +37,26 @@ export class StateManager {
 
 
 
-  /**
-   * Filter objects to store
-   * @param {String} event 
-   * @param {String} storeName 
-   * @param {String} key the key whose value will be considered in filtering 
-   */
-  async handleUpdate({ event, storeName, keys }) {
-    const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys });
+  async handleStateUpdate(event) {
+    const { payload: data, type } = event;
+    const storeName = this.dbStores.STATE;
+    const isStored = await this.db.existsByIndex({ storeName, index: 'fingerprint', query: data.fingerprint });
+
+    console.log({ isStored })
+
+    if (!isStored) {
+      await this.saveToDb({ data, type, storeName });
+    }
+  }
+
+
+
+  async handleHTTPUpdate(event) {
+    // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
+    // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
+    // Hence, we don't store HTTP events twice and execute the analysis only once per event
+    const storeName = this.dbStores.HTTP_EVENT;
+    const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys: ['request'] });
 
     if (!isStored) {
       await this.saveToDb({ data: event.payload, type: event.type, storeName });
@@ -154,39 +158,30 @@ export class StateManager {
 
 
   async getTotalHttpEvent() {
-    return await this.db.countData(this.dbStores.HTTP_EVENT);
+    return await this.db.countData({ storeName: this.dbStores.HTTP_EVENT });
   }
 
 
 
   async getTotalStates() {
-    return await this.db.countData(this.dbStores.STATE);
+    return await this.db.countData({ storeName: this.dbStores.STATE });
   }
 
 
 
   async hasOneHttpEvent() {
-    return await this.db.countData(this.dbStores.HTTP_EVENT, (c) => c > 0);
+    return await this.db.hasAny({ storeName: this.dbStores.HTTP_EVENT });
   }
 
 
 
   async hasOneState() {
-    return await this.db.countData(this.dbStores.STATE, (c) => c > 0);
+    return await this.db.hasAny({ storeName: this.dbStores.STATE });
   }
 
 
 
   async getIgnoredHTTPEvents() {
-    return await this.db.getWithIndex({ storeName: this.dbStores.HTTP_EVENT, index: 'ignore', query: 1 });
-  }
-
-
-
-  async getLastStateOfUrl(url) {
-    const hasState = await this.hasOneState();
-    if (!hasState) { return; }
-    const matches = await this.db.getWithIndex({ storeName: this.dbStores.STATE, index: url });
-    console.log(matches);
+    return await this.db.getAllByIndex({ storeName: this.dbStores.HTTP_EVENT, index: 'ignore', query: 1 });
   }
 }

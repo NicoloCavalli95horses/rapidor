@@ -13,10 +13,9 @@ import { initialize } from '../../react-devtools-inline/src/backend.js';
 // Class
 //===================
 export class Bridge {
-  constructor(navigationTracker, stateManager) {
+  constructor(stateManager) {
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
-    this.navigationTracker = navigationTracker;
     this.stateManager = stateManager;
 
     this.componentIndex = new Map(); // componentId -> Set<nodeId>
@@ -27,7 +26,6 @@ export class Bridge {
 
   // Connect to React specific APIs
   init() {
-    this.navigationTracker.init();
     this.listenToFiberCommits();
   }
 
@@ -72,12 +70,6 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
-    if (!this.navigationTracker.canProcessPage()) {
-      log({ module: 'bridge', msg: 'state snapshot already taken on this page, skipping' });
-      return;
-    }
-
-    // [TODO] prune new graph from same page considering new nodes
     const payload = this.getStateGraph(fiber);
     emit({ type: 'STATE_UPDATE', payload });
   }
@@ -157,7 +149,17 @@ export class Bridge {
     }
     graph.componentIndex = componentIndex;
 
+    // calculate graph fingerprint
+    graph.fingerprint = this.getFingerprint(graph);
+
     return graph;
+  }
+
+
+
+  getFingerprint(graph) {
+    //[TODO]
+    return true;
   }
 
 

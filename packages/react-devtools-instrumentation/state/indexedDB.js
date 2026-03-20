@@ -25,6 +25,9 @@ export class IDBManager {
   }
 
 
+  // ====================================
+  // Init
+  // ====================================
 
   async init() {
     this.db = await this.connectToDb();
@@ -72,6 +75,7 @@ export class IDBManager {
 
           // state.createIndex("sessionId", "sessionId", { unique: false }); // indexName (index name), keyPath (property of the saved object), options
           state.createIndex("url", "url", { unique: false });
+          state.createIndex("fingerprint", "fingerprint", { unique: false });
           // state.createIndex("timestamp", "timestamp", { unique: false });
         }
 
@@ -98,6 +102,10 @@ export class IDBManager {
 
 
 
+  // ====================================
+  // Create
+  // ====================================
+
   saveState({ data, storeName }) {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(storeName, "readwrite");
@@ -113,6 +121,9 @@ export class IDBManager {
   }
 
 
+  // ====================================
+  // Update
+  // ====================================
 
   async updateRow({ id, payload, storeName }) {
     if (!this.db) {
@@ -147,20 +158,80 @@ export class IDBManager {
 
 
 
-  async getWithIndex({ storeName, index, query, all=true }) {
+  // ====================================
+  // Delete
+  // ====================================
+
+  // [TODO]
+
+
+
+  // ====================================
+  // Read
+  // ====================================
+  async query({ storeName, index = null, method = 'get', query = undefined }) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
 
     const tx = this.db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
-    const indexDb = store.index(index);
+    const target = index ? store.index(index) : store;
 
-    const result = await new Promise((resolve, reject) => {
-      const request = all ? indexDb.getAll(query) : indexDb.get(query);
-      request.onsuccess = (e) => resolve(e.target.result);
-      request.onerror = (e) => reject(e.target.error);
+    return new Promise((resolve, reject) => {
+      let request;
+
+      switch (method) {
+        case 'get':
+          request = target.get(query);
+          break;
+
+        case 'getAll':
+          request = target.getAll(query);
+          break;
+
+        case 'count':
+          request = (query !== undefined) ? target.count(query) : target.count();
+          break;
+
+        default:
+          return reject(new Error(`Unsupported method: ${method}`));
+      }
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
     });
+  }
+
+
+
+  // Index-based reads
+  // ====================================
+
+  async getAllByIndex({ storeName, index, query }) {
+    return this.query({ storeName, index, query, method: 'getAll' });
+  }
+
+
+
+  async getOneByIndex({ storeName, index, query }) {
+    return this.query({ storeName, index, query, method: 'get' });
+  }
+
+
+
+  async existsByIndex({ storeName, index, query }) {
+    const count = await this.query({ storeName, index, query, method: 'count' });
+    return count > 0;
+  }
+
+
+
+  // Store-based reads
+  // ====================================
+
+  async getByID({ storeName, id }) {
+    const result = await this.query({ storeName, method: 'get', query: id });
 
     if (!result) {
       throw new Error(`Object in ${storeName} at id: ${id} not found`);
@@ -171,28 +242,23 @@ export class IDBManager {
 
 
 
-  async getByID({ id, storeName }) {
-    if (!this.db) {
-      throw new Error("Database not initialized");
-    }
-
-    const tx = this.db.transaction(storeName, "readonly");
-    const store = tx.objectStore(storeName);
-
-    const result = await new Promise((resolve, reject) => {
-      const request = store.get(id);
-      request.onsuccess = (e) => resolve(e.target.result);
-      request.onerror = (e) => reject(e.target.error);
-    });
-
-    if (!result) {
-      throw new Error(`Object in ${storeName} at id: ${id} not found`);
-    }
-
-    return result;
+  // Returns number of saved data with the possibility of applying an external fn (eg. count > n)
+  async countData({ storeName }) {
+    return await this.query({ storeName, method: 'count' });
   }
 
 
+
+  async hasAny({ storeName }) {
+    const count = await this.query({ storeName, method: 'count' });
+    return count > 0;
+  }
+
+
+
+  // ====================================
+  // Utils
+  // ====================================
 
   // returns next row in given store name
   async getNextCursor(storeName, lastKey = null) {
@@ -317,35 +383,5 @@ export class IDBManager {
 
     walk(obj1, obj2);
     return differences;
-  }
-
-
-
-  // Returns number of saved data with the possibility of applying an external fn (eg. count > n)
-  async countData(storeName, condition) {
-    if (!this.db) {
-      throw new Error("Database not initialized");
-    }
-
-    const tx = this.db.transaction(storeName, "readonly");
-    const store = tx.objectStore(storeName);
-
-    return new Promise((resolve, reject) => {
-      const request = store.count();
-
-      request.onsuccess = () => {
-        const count = request.result;
-
-        if (condition) {
-          resolve(condition(count));
-        } else {
-          resolve(count);
-        }
-      };
-
-      request.onerror = (e) => {
-        reject(e.target.error);
-      };
-    });
   }
 }
