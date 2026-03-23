@@ -2,11 +2,10 @@
 // Import
 //===================
 import { eventBus, emit, events } from "../eventBus.js";
-import { filter } from 'rxjs/operators';
-import { log, sendPostMessage } from "../utils.js";
+import { log } from "../utils.js";
 import { IDBManager } from "./indexedDB.js";
 import { config } from "../config.js";
-
+import { NavigationTracker } from "./navigationTracker.js";
 
 
 //===================
@@ -17,47 +16,46 @@ export class StateManager {
   constructor() {
     this.db = new IDBManager();
     this.dbStores = IDBManager.STORES;
+    this.navigationTracker = new NavigationTracker();
   }
 
   async init() {
     await this.db.init();
 
     eventBus.subscribe(async (event) => {
-      switch (event.type) {
-        case events.STATE_UPDATE:
-          await this.handleStateUpdate(event);
-          break;
-
-        case events.HTTP_EVENT:
-          await this.handleHTTPUpdate(event);
-          break;
+      if (event.type === events.STATE_UPDATE) {
+        await this.handleUpdate(event, this.dbStores.STATE);
+      } else if (event.type === events.HTTP_EVENT) {
+        // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
+        // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
+        // Hence, we don't store HTTP events twice and execute the analysis only once per event
+        await this.handleUpdate(event, this.dbStores.HTTP_EVENT);
       }
     });
   }
 
 
 
-  async handleStateUpdate(event) {
-    const storeName = this.dbStores.STATE;
-    const isStored = await this.db.isDataStored({ payload: event.payload, storeName });
+  async handleUpdate(event, storeName) {
+    const { isStored } = await this.db.isDataStored({ payload: event.payload, storeName });
 
-    if (!isStored) {
-      await this.saveToDb({ data: event.payload, type: event.type, storeName });
+    if (isStored) {
+      log({ module: 'state manager', msg: `HTTP event already saved to DB, skipping` });
+      return;
     }
+
+    const data = await this.prepareData(event.payload);
+    await this.saveToDb({ data, type: event.type, storeName });
   }
 
 
 
-  async handleHTTPUpdate(event) {
-    // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
-    // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
-    // Hence, we don't store HTTP events twice and execute the analysis only once per event
-    const storeName = this.dbStores.HTTP_EVENT;
-    const isStored = await this.db.isDataStored({ payload: event.payload, storeName });
-
-    if (!isStored) {
-      await this.saveToDb({ data: event.payload, type: event.type, storeName });
-    }
+  async prepareData(data) {
+    // direct mutation O(1) is more efficient than using spread notation O(n), which iterate on data
+    data.navigationInfo = await this.getNavigationInfo();
+    data.sessionID = config.sessionID;
+    data.timestamp = Date.now();
+    return data;
   }
 
 
@@ -69,21 +67,35 @@ export class StateManager {
    * @param {String} storeName store name 
    */
   async saveToDb({ data, type, storeName }) {
-    const payload = {
-      ...data,
-      sessionId: config.sessionID,
-      url: window.location.href,
-      timestamp: Date.now()
-    };
-
     try {
-      await this.db.saveState({ data: payload, storeName });
+      const res = await this.db.saveState({ data, storeName });
       log({ module: 'state manager', msg: `saved ${type} to DB` });
       emit({ type: events.DB_SUCCESS, payload: { type } }); // this will start the state analysis if HTTP events occurred
+      return res;
     } catch (error) {
       log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
     }
   }
+
+
+
+  async getNavigationInfo() {
+    const storeName = this.dbStores.NAV;
+    const url = this.navigationTracker.getNavigationState();
+    const { isStored, key } = await this.db.isDataStored({ payload: { fingerprint: url }, storeName });
+
+    if (isStored) {
+      return { url, idx: key };
+    }
+
+    try {
+      const { key } = await this.saveToDb({ data: { fingerprint: url }, type: events.NAV, storeName });
+      return { url, idx: key };
+    } catch (error) {
+      log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
+    }
+  }
+
 
 
   // returns node

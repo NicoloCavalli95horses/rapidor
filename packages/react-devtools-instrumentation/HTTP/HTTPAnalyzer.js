@@ -129,7 +129,7 @@ export class analyzeHTTP {
     if (!uri) { return; }
 
     try {
-      return new URL(uri, window?.location?.origin);
+      return new URL(uri, window?.location?.href);
     } catch (e) {
       return;
     }

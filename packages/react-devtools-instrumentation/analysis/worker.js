@@ -41,10 +41,10 @@ export class Worker {
 
       const totHTTPevents = await this.stateManager.getTotalHttpEvent();
       const totStates = await this.stateManager.getTotalStates();
-     
+
       const http = httpEvent.value;
       const httpKey = httpEvent.key;
-      const { request, response, doneOn, ignore } = http;
+      const { request, response, doneOn, ignore, navigationInfo: httpNavInfo } = http;
       const property = request.meta.path.property;
       const isFile = request.meta.isFileByMime;
 
@@ -66,15 +66,15 @@ export class Worker {
         snapshot = await this.stateManager.getNextState(snapshot?.key);
         if (!snapshot) { break stateLoop; } // no more state events, break only this loop and try other HTTP events
 
-        const graph = snapshot.value;
+        const { nodes, relations, navigationInfo: stateNavInfo } = snapshot.value;
         const snapshotKey = snapshot.key;
 
         this.updateDOM({ totStates, totHTTPevents });
 
-        if (doneOn.has(snapshotKey)) { continue; }
+        if (doneOn.has(snapshotKey) || !this.isInAnalysisWindow(httpNavInfo.idx, stateNavInfo.idx)) { continue; }
 
-        // find components that have the property and that have siblings
-        const matches = this.getMatches({ graph, key: snapshotKey, property }); // [ {node1}, {node2} ]
+          // find components that have the property and that have siblings
+          const matches = this.getMatches({ nodes, relations, key: snapshotKey, property }); // [ {node1}, {node2} ]
 
         if (matches.length) {
           const matchingSets = await this.processResults(matches); // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
@@ -92,6 +92,17 @@ export class Worker {
     }
 
     log({ module: 'analysis manager', msg: 'exit analysis' });
+  }
+
+
+
+  isInAnalysisWindow(id1, id2) {
+    const isValid = Math.abs(id1 - id2) <= config.maxPagesPerHTTPEvent;
+    if (!isValid) {
+      log({ module: 'analysis manager', msg: 'HTTP event out of analysis window, analysis skipped' });
+      // [TODO] delete old http event (?)
+    }
+    return isValid;
   }
 
 
@@ -119,8 +130,7 @@ export class Worker {
 
   // Returns array of matching nodes [ {node},{node} ]
   // each node has: `path` (to the get the value), `relations`, snapshot `key`
-  getMatches({ graph, key, property }) {
-    const { nodes, relations } = graph;
+  getMatches({ nodes, relations, key, property }) {
     const matches = [];
     const ids = new Set();
 

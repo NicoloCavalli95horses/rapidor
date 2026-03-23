@@ -21,6 +21,7 @@ export class IDBManager {
   static STORES = {
     STATE: 'state',
     HTTP_EVENT: 'httpEvent',
+    NAV: 'navigation',
   }
 
 
@@ -29,28 +30,10 @@ export class IDBManager {
   // ====================================
 
   async init() {
+    await this.deleteDB(this.name);
+
     this.db = await this.connectToDb();
-
-    for (const [key, val] of Object.entries(IDBManager.STORES)) {
-      await this.clearStore(this.name, val);
-    }
-
     log({ module: 'indexed db', msg: 'IndexedDB initialized' });
-  }
-
-
-
-  async clearStore(dbName, storeName) {
-    if (!this.db) {
-      throw new Error("Database not initialized");
-    }
-
-    await new Promise((res, rej) => {
-      const tx = this.db.transaction(storeName, "readwrite");
-      tx.oncomplete = res;
-      tx.onerror = () => rej(tx.error);
-      tx.objectStore(storeName).clear();
-    });
   }
 
 
@@ -82,6 +65,10 @@ export class IDBManager {
           httpEvent.createIndex("ignore", "ignore", { unique: false });
           httpEvent.createIndex("fingerprint", "fingerprint", { unique: false });
         }
+
+        if (!db.objectStoreNames.contains(IDBManager.STORES.NAV)) {
+          const nav = db.createObjectStore(IDBManager.STORES.NAV, { autoIncrement: true });
+        }
       };
 
       request.onsuccess = (event) => {
@@ -106,7 +93,7 @@ export class IDBManager {
       const tx = this.db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
       const request = store.put(data); // primary key (id) is handled by indexedDB
-      request.onsuccess = () => resolve(storeName);
+      request.onsuccess = (e) => resolve({ key: e.target.result, storeName });
       request.onerror = (e) => {
         console.error("DB SAVE ERROR PAYLOAD:", data);
         console.error("DB ERROR:", e.target.error);
@@ -157,7 +144,29 @@ export class IDBManager {
   // Delete
   // ====================================
 
-  // [TODO]
+  async deleteDB(name) {
+    return new Promise((resolve, reject) => {
+      const req = window.indexedDB.deleteDatabase(name);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => console.error("Error during DB deletion");
+    });
+  }
+
+
+
+  async clearStore(dbName, storeName) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    await new Promise((res, rej) => {
+      const tx = this.db.transaction(storeName, "readwrite");
+      tx.oncomplete = res;
+      tx.onerror = () => rej(tx.error);
+      tx.objectStore(storeName).clear();
+    });
+  }
 
 
 
@@ -294,7 +303,7 @@ export class IDBManager {
       // log({module: 'indexed DB', msg: `differences between stored objects: ${JSON.stringify(diff)}`})
     }
 
-    return isStored;
+    return { isStored, key: current?.key };
   }
 
 

@@ -25,7 +25,7 @@ export class AnalysisManager {
 
     eventBus
       .pipe(filter(e => e.type === events.DB_SUCCESS))
-      .subscribe(e => this.onDbSuccess(e.payload.type));
+      .subscribe(e => this.onDbSuccess());
   }
 
 
