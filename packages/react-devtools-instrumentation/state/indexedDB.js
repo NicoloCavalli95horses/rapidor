@@ -3,7 +3,6 @@
 //===================
 import { config } from "../config.js";
 import { log, copyObjKeys } from "../utils.js"
-import _ from "lodash";
 
 
 
@@ -72,20 +71,16 @@ export class IDBManager {
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
           const state = db.createObjectStore(IDBManager.STORES.STATE, { autoIncrement: true }); // primary key (id) handled by indexedDB
-
-          // state.createIndex("sessionId", "sessionId", { unique: false }); // indexName (index name), keyPath (property of the saved object), options
           state.createIndex("url", "url", { unique: false });
           state.createIndex("fingerprint", "fingerprint", { unique: false });
-          // state.createIndex("timestamp", "timestamp", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true });
 
           httpEvent.createIndex("type", "type", { unique: false });
-          // httpEvent.createIndex("timestamp", "timestamp", { unique: false });
           httpEvent.createIndex("ignore", "ignore", { unique: false });
-          httpEvent.createIndex("url", "url", { unique: false });
+          httpEvent.createIndex("fingerprint", "fingerprint", { unique: false });
         }
       };
 
@@ -242,7 +237,6 @@ export class IDBManager {
 
 
 
-  // Returns number of saved data with the possibility of applying an external fn (eg. count > n)
   async countData({ storeName }) {
     return await this.query({ storeName, method: 'count' });
   }
@@ -277,7 +271,7 @@ export class IDBManager {
 
 
 
-  async isDataStored({ payload, storeName, keys = [] }) {
+  async isDataStored({ payload, storeName }) {
     let isStored = false;
     let current = {};
 
@@ -292,10 +286,7 @@ export class IDBManager {
         break;
       }
 
-      const storedData = copyObjKeys(current.value, keys);
-      const receivedData = copyObjKeys(payload, keys);
-
-      if (_.isEqual(storedData, receivedData)) {
+      if (current.value.fingerprint === payload.fingerprint) {
         isStored = true;
         break;
       }
@@ -305,6 +296,7 @@ export class IDBManager {
 
     return isStored;
   }
+
 
 
   checkDifferences(obj1, obj2) {

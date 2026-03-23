@@ -70,13 +70,13 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
-    const payload = this.getStateGraph(fiber);
+    const payload = await this.getStateGraph(fiber);
     emit({ type: 'STATE_UPDATE', payload });
   }
 
 
 
-  getStateGraph(fiber) {
+  async getStateGraph(fiber) {
     const g = new Graph();
     const graph = g.createGraph();
     const self = this;
@@ -150,16 +150,32 @@ export class Bridge {
     graph.componentIndex = componentIndex;
 
     // calculate graph fingerprint
-    graph.fingerprint = this.getFingerprint(graph);
+    graph.fingerprint = await this.getFingerprint(graph);
 
     return graph;
   }
 
 
 
-  getFingerprint(graph) {
-    //[TODO]
-    return true;
+  // feature-based (shape-based) fingerprint: we create a graph id considering its shape
+  // in this way we can efficiently compare two graphs
+  async getFingerprint(graph) {
+    const nodeLabels = Object.values(graph.nodes).map(n => `${n.id}:${n.componentId}:${n.tag}`).sort();
+    const edgeLabels = Object.values(graph.relations).map(n => `${n.parent}:${n.child}:${n.sibling}:${n.siblingIdx}`).sort();
+    const signature = JSON.stringify({ nodeLabels, edgeLabels });
+    return await this.digestMessage(signature);
+  }
+
+
+
+  async digestMessage(message) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(message);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("");
   }
 
 

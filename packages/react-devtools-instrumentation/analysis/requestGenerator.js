@@ -6,7 +6,7 @@ import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
 import { log, sleep } from "../utils.js";
 import { config } from "../config.js";
-
+import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 
 
 //===================
@@ -17,6 +17,7 @@ export class RequestGenerator {
     this.stateManager = stateManager;
     this.evaluator = new ResponseEvaluator();
     this.pendingRequests = new Map();
+    this.HTTPAnalyzer = new analyzeHTTP();
   }
 
   init() {
@@ -48,6 +49,10 @@ export class RequestGenerator {
       for (let i = 0; i < siblingNodes.length; i++) {
         const node = siblingNodes[i];
         const request = self.buildRequest({ reference: referenceReq, originalPath, newPath: node.match });
+        if (await self.alreadyDone(request)) {
+          log({ module: 'request generator', msg: 'new request already sent' });
+          continue;
+        }
         const response = await self.executeRequest(request, type);
 
         const payload = {
@@ -67,6 +72,17 @@ export class RequestGenerator {
         await sleep(config.timeBetweenRequests);
       }
     }
+  }
+
+  
+
+  async alreadyDone(request) {
+    const uri = this.HTTPAnalyzer.getURI(request.url);
+    const method = request.method;
+    const fullPath = decodeURIComponent(uri.pathname);
+    const fingerprint = this.HTTPAnalyzer.getFingerprint(fullPath, method);
+    const res = await this.stateManager.hasAlreadyDoneRequest(fingerprint);
+    return res;
   }
 
 

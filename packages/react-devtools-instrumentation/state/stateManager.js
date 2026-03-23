@@ -38,14 +38,11 @@ export class StateManager {
 
 
   async handleStateUpdate(event) {
-    const { payload: data, type } = event;
     const storeName = this.dbStores.STATE;
-    const isStored = await this.db.existsByIndex({ storeName, index: 'fingerprint', query: data.fingerprint });
-
-    console.log({ isStored })
+    const isStored = await this.db.isDataStored({ payload: event.payload, storeName });
 
     if (!isStored) {
-      await this.saveToDb({ data, type, storeName });
+      await this.saveToDb({ data: event.payload, type: event.type, storeName });
     }
   }
 
@@ -56,7 +53,7 @@ export class StateManager {
     // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
     // Hence, we don't store HTTP events twice and execute the analysis only once per event
     const storeName = this.dbStores.HTTP_EVENT;
-    const isStored = await this.db.isDataStored({ payload: event.payload, storeName, keys: ['request'] });
+    const isStored = await this.db.isDataStored({ payload: event.payload, storeName });
 
     if (!isStored) {
       await this.saveToDb({ data: event.payload, type: event.type, storeName });
@@ -165,6 +162,12 @@ export class StateManager {
 
   async getTotalStates() {
     return await this.db.countData({ storeName: this.dbStores.STATE });
+  }
+
+
+
+  async hasAlreadyDoneRequest(fingerprint) {
+    return await this.db.existsByIndex({ storeName: this.dbStores.HTTP_EVENT, index: 'fingerprint', query: fingerprint });
   }
 
 

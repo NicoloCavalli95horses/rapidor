@@ -53,6 +53,7 @@ export class analyzeHTTP {
     const segments = fullPath.split('/').filter(Boolean);
     let property = segments.slice(-1).pop();
     const extension = this.getExtension(property);
+    const fingerprint = this.getFingerprint(fullPath, request.verb);
 
     if (extension) {
       property = property.split('.')[0];
@@ -82,9 +83,17 @@ export class analyzeHTTP {
         response,
         doneOn: new Set(),
         ignore: request._requestId ? 1 : 0, // apparently, booleans are not valid keys in indexedDB https://stackoverflow.com/questions/13672906/indexeddb-boolean-index
+        fingerprint,
       }
     });
   }
+
+
+
+  getFingerprint(fullPath, method) {
+    return `${method.toLowerCase()}:${fullPath}`;
+  }
+
 
 
   getExtension(filename) {
