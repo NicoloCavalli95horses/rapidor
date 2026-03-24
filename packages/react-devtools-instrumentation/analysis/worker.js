@@ -71,7 +71,7 @@ export class Worker {
 
         this.updateDOM({ totStates, totHTTPevents });
 
-        if (doneOn.has(snapshotKey) || !this.isInAnalysisWindow(httpNavInfo.idx, stateNavInfo.idx)) { continue; }
+        if (doneOn.has(snapshotKey) || !this.isInAnalysisWindow(httpNavInfo?.idx, stateNavInfo?.idx)) { continue; }
 
           // find components that have the property and that have siblings
           const matches = this.getMatches({ nodes, relations, key: snapshotKey, property }); // [ {node1}, {node2} ]
@@ -97,6 +97,7 @@ export class Worker {
 
 
   isInAnalysisWindow(id1, id2) {
+    if (!id1 || !id2) { return false; }
     const isValid = Math.abs(id1 - id2) <= config.maxPagesPerHTTPEvent;
     if (!isValid) {
       log({ module: 'analysis manager', msg: 'HTTP event out of analysis window, analysis skipped' });

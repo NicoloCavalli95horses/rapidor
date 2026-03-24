@@ -60,14 +60,13 @@ export class IDBManager {
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true });
-
           httpEvent.createIndex("type", "type", { unique: false });
           httpEvent.createIndex("ignore", "ignore", { unique: false });
           httpEvent.createIndex("fingerprint", "fingerprint", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.NAV)) {
-          const nav = db.createObjectStore(IDBManager.STORES.NAV, { autoIncrement: true });
+          db.createObjectStore(IDBManager.STORES.NAV, { autoIncrement: true });
         }
       };
 
@@ -280,7 +279,7 @@ export class IDBManager {
 
 
 
-  async isDataStored({ payload, storeName }) {
+  async isDataStored({ payload, storeName, id }) {
     let isStored = false;
     let current = {};
 
@@ -295,7 +294,7 @@ export class IDBManager {
         break;
       }
 
-      if (current.value.fingerprint === payload.fingerprint) {
+      if (id ? (current.value[id] === payload[id]) : current.value === payload) {
         isStored = true;
         break;
       }

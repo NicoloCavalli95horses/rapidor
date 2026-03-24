@@ -3,7 +3,7 @@
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 import { emit } from '../eventBus.js';
-import { debounce, log, sendPostMessage, isSerializableValue } from '../utils.js';
+import { debounce, log, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
 import { initialize } from '../../react-devtools-inline/src/backend.js';
@@ -37,30 +37,29 @@ export class Bridge {
     const hook = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
     if (!hook) { return; }
     const self = this;
-    let current = hook.onCommitFiberRoot; // save original reference
-    current = wrap(current);
+    let original = hook.onCommitFiberRoot; // save original reference
+    original = wrap(original);
 
-    const debouncedProcess = debounce(async (root) => {
-      await self.handleStateGraph(root.current);
+    const debouncedProcess = debounce(async (fiber) => {
+      await self.handleStateGraph(fiber);
     }, config.debounceTimeMs);
 
     function wrap(fn) {
       return function (rendererID, root, ...args) {
-        if (root) { debouncedProcess(root); }
+        if (root && root?.current) { debouncedProcess(root.current); }
         return fn?.apply(this, [rendererID, root, ...args]);
       };
     }
 
-    // modify object method
     Object.defineProperty(hook, 'onCommitFiberRoot', {
       configurable: true,
       get() {
-        return current;
+        return original;
       },
       // if someone attempts to wrap this function, it will receive
       // the wrapped version and not the original one
       set(fn) {
-        current = wrap(fn);
+        original = wrap(fn);
       }
     });
 

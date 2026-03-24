@@ -53,7 +53,7 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
 }
 
 // type: info | error | warning
-export function log({module, type = 'info', msg}) {
+export function log({ module, type = 'info', msg }) {
   const color = {
     error: 'color: red',
     info: 'color: white',
@@ -115,13 +115,20 @@ export function hasOwnKeys(value) {
 // Returns a wrapper function that check when fn is executed
 export function debounce(fn, delay) {
   let timer = null;
+  let running = false;
+
   return function (...args) {
-    if (timer) {
-      clearTimeout(timer);
-    };
-    timer = setTimeout(() => {
-      // preserve the context of 'this' and the original args
-      fn.apply(this, args);
+    if (timer) { clearTimeout(timer); }
+
+    timer = setTimeout(async () => {
+      if (running) { return; }
+
+      running = true;
+      try {
+        await fn.apply(this, args);
+      } finally {
+        running = false;
+      }
     }, delay);
   };
 }

@@ -5,7 +5,7 @@ import { eventBus, emit, events } from "../eventBus.js";
 import { log } from "../utils.js";
 import { IDBManager } from "./indexedDB.js";
 import { config } from "../config.js";
-import { NavigationTracker } from "./navigationTracker.js";
+
 
 
 //===================
@@ -16,7 +16,6 @@ export class StateManager {
   constructor() {
     this.db = new IDBManager();
     this.dbStores = IDBManager.STORES;
-    this.navigationTracker = new NavigationTracker();
   }
 
   async init() {
@@ -30,6 +29,8 @@ export class StateManager {
         // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
         // Hence, we don't store HTTP events twice and execute the analysis only once per event
         await this.handleUpdate(event, this.dbStores.HTTP_EVENT);
+      } else if (event.type === events.NAV) {
+        await this.saveToDb({ data: event.payload, type: events.NAV, storeName: this.dbStores.NAV });
       }
     });
   }
@@ -37,10 +38,10 @@ export class StateManager {
 
 
   async handleUpdate(event, storeName) {
-    const { isStored } = await this.db.isDataStored({ payload: event.payload, storeName });
+    const { isStored } = await this.db.isDataStored({ payload: event.payload, storeName, id: 'fingerprint' });
 
     if (isStored) {
-      log({ module: 'state manager', msg: `HTTP event already saved to DB, skipping` });
+      log({ module: 'state manager', msg: `event already saved to DB, skipping` });
       return;
     }
 
@@ -81,19 +82,9 @@ export class StateManager {
 
   async getNavigationInfo() {
     const storeName = this.dbStores.NAV;
-    const url = this.navigationTracker.getNavigationState();
-    const { isStored, key } = await this.db.isDataStored({ payload: { fingerprint: url }, storeName });
-
-    if (isStored) {
-      return { url, idx: key };
-    }
-
-    try {
-      const { key } = await this.saveToDb({ data: { fingerprint: url }, type: events.NAV, storeName });
-      return { url, idx: key };
-    } catch (error) {
-      log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
-    }
+    const url =  decodeURIComponent(window.location.href);
+    const { isStored, key: idx } = await this.db.isDataStored({ payload: url, storeName });
+    return isStored ? { url, idx } : {};
   }
 
 

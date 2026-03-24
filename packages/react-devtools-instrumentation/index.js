@@ -8,6 +8,7 @@ import { StateManager } from './state/stateManager.js';
 import { HTTPTracker } from './HTTP/HTTPTracker.js';
 import { AnalysisManager } from './analysis/analysisManager.js';
 import { DOMhandler } from './DOM/DOMhandler.js';
+import { NavigationTracker } from "./state/navigationTracker.js";
 
 
 //===================
@@ -27,6 +28,10 @@ export async function instrumentationMain() {
   // Get and save GUI state
   const stateManager = new StateManager();
   await stateManager.init();
+
+  // Navigation tracker
+  const navTracker = new NavigationTracker();
+  navTracker.init();
 
   // Connect to framework-specific APIs and listen to component tree changes
   const bridge = new Bridge(stateManager);
