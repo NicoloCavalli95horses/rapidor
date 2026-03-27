@@ -4,6 +4,7 @@
 import { emit, events } from '../eventBus.js';
 import { log } from '../utils.js';
 import { config } from '../config.js';
+import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 
 
 
@@ -18,6 +19,7 @@ import { config } from '../config.js';
 // > In Pimsleur, we go from `/MiniLearn` to `/MiniLearn/MiniLesson?id=112...`
 export class NavigationTracker {
   constructor() {
+    this.HTTPanalyzer = new analyzeHTTP();
   }
 
   init() {
@@ -45,10 +47,17 @@ export class NavigationTracker {
     });
   }
 
-  
+
 
   update() {
-    const url = decodeURIComponent(window.location.href);
-    emit({ type: events.NAV, payload: url });
+    const uri = decodeURIComponent(window.location.href);
+    emit({ type: events.NAV, payload: uri });
+
+    // In SPA, routing changes can occur without HTTP requests being executed
+    // We treat new URLs as GET requests: the new route may have queryParameters that may be important to fuzz
+    this.HTTPanalyzer.parseHTTP({
+      request: { uri, verb: 'GET' },
+      response: {} // if empty, will be filled with the matching state snapshot, ie. the first available graph for the provided URI (if any)
+    });
   }
 }

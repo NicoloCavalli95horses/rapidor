@@ -25,6 +25,7 @@ export class ResponseEvaluator {
   }
 
 
+  // [TODO] new strategy: compare callstacks after click events on siblings 
   handleEvent(event) {
     log({ module: "response evaluator", msg: "starting evaluation..." });
 
@@ -37,7 +38,7 @@ export class ResponseEvaluator {
     const currResponse = candidate.response;
 
     const resSimilarity = this.responseSimilarity({ refResponse, currResponse });
-
+    
     if (Array.isArray(refDOM) && Array.isArray(currDOM)) {
       const DOMsimilarity = this.evaluateDOM({ refDOM: refDOM[refIdx], currDOM: currDOM[currIdx] });
 

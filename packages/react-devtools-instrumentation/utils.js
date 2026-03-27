@@ -150,20 +150,19 @@ export function isSerializableValue(value) {
     return Number.isFinite(value);
   }
 
-  if (t !== "object") {
-    return false;
-  }
-
-  // block large host objects
-  if (value === window || value === document || value === location) {
-    return false;
-  }
-
-  // accept array
   if (Array.isArray(value)) {
     return true;
   }
 
-  // accept plain object
-  return Object.getPrototypeOf(value) === Object.prototype;
+  if (t === "object") {
+    if (value === null) { return true; }
+    if (Array.isArray(value)) { return true; }
+
+    // block large host objects
+    if (value === window || value === document || value === location) {
+      return false;
+    }
+
+    return true;
+  }
 }

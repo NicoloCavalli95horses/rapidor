@@ -39,25 +39,27 @@ export class RequestGenerator {
 
   async handleEvent(event) {
     const { matchingSets, http } = event;
-    const { request: referenceReq, response: referenceRes, type } = http;
+    const { request: referenceReq, response: referenceRes, type } = http; // [TODO] if response is empty, look at the first available graph matching the nav id
     log({ module: 'request generator', msg: 'received matches, building requests...' });
     const self = this;
 
-    for (const { referenceNode, siblingNodes } of matchingSets) {
-      const originalPath = referenceNode.match;
+    for (const { referenceNode, candidateNodes } of matchingSets) {
+      for (let i = 0; i < candidateNodes.length; i++) {
+        const candidate = candidateNodes[i];
+        const node = candidate.node;
+        const request = self.buildRequest({ reference: referenceReq, target: candidate.target });
 
-      for (let i = 0; i < siblingNodes.length; i++) {
-        const node = siblingNodes[i];
-        const request = self.buildRequest({ reference: referenceReq, originalPath, newPath: node.match });
         if (await self.alreadyDone(request)) {
           log({ module: 'request generator', msg: 'new request already sent' });
           continue;
         }
         const response = await self.executeRequest(request, type);
+        // [TODO] if response is 40X, and we have query parameters, try mutating the `location.href` instead
+        // In SPA the routing is handled by the front-end and we may have valid URLs displaying premium resources even without contacting the server
 
         const payload = {
           reference: {
-            node: referenceNode,
+            node: referenceNode.node,
             request: http.request,
             response: http.response
           },
@@ -79,7 +81,7 @@ export class RequestGenerator {
   async alreadyDone(request) {
     const uri = this.HTTPAnalyzer.getURI(request.url);
     const method = request.method;
-    const fullPath = decodeURIComponent(uri.pathname);
+    const fullPath = decodeURIComponent(uri.href);
     const fingerprint = this.HTTPAnalyzer.getFingerprint(fullPath, method);
     const res = await this.stateManager.hasAlreadyDoneRequest(fingerprint);
     return res;
@@ -100,10 +102,11 @@ export class RequestGenerator {
 
 
   // build new request object given reference HTTP request
-  buildRequest({ reference, originalPath, newPath }) {
-    const { uri, body, headers, verb } = reference;
+  buildRequest({ reference, target }) {
+    const { uri, body, headers, verb, analysis } = reference;
     const method = verb.toUpperCase();
-    const path = uri.replace(originalPath, newPath);
+    const parts = analysis.toEvaluate.property.parts;
+    const path = (target.parts[0] + target.value + (target.parts[1] ? target.parts[1] : '')).toString().trim();
 
     const options = {
       method,

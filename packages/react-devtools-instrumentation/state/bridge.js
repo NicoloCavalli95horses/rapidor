@@ -79,10 +79,9 @@ export class Bridge {
     const g = new Graph();
     const graph = g.createGraph();
     const self = this;
-    const visitedProps = new WeakSet();
     this.resetIds();
 
-    function visit({ node, parentId = null, visitedProps, siblingIdx }) {
+    function visit({ node, parentId = null, siblingIdx }) {
       if (!node) { return; }
 
       const id = self.getNodeId(node);
@@ -99,7 +98,7 @@ export class Bridge {
         id,
         name: self.filterReactComponentName(node.type),
         key: node.key,
-        props: self.getSerializableValues(node.memoizedProps, visitedProps),
+        props: self.getSerializableValues(node.memoizedProps),
         DOM: self.getDOMInfo(domElement),
         tag: node.tag,
         componentId
@@ -135,11 +134,11 @@ export class Bridge {
 
       // visit children
       for (const { node, siblingIdx } of children) {
-        visit({ node, parentId: id, visitedProps, siblingIdx });
+        visit({ node, parentId: id, siblingIdx });
       }
     }
 
-    visit({ node: fiber, parentId: null, visitedProps, siblingIdx: 0 });
+    visit({ node: fiber, parentId: null, siblingIdx: 0 });
 
     // add list of istances to graph
     const componentIndex = {};
@@ -181,12 +180,11 @@ export class Bridge {
 
   // update the index of components
   updateComponentIndex(componentId, nodeId) {
-    if (componentId != null) {
-      if (!this.componentIndex.has(componentId)) {
-        this.componentIndex.set(componentId, new Set());
-      }
-      this.componentIndex.get(componentId).add(nodeId);
+    if (!Number.isInteger(componentId)) { return; }
+    if (!this.componentIndex.has(componentId)) {
+      this.componentIndex.set(componentId, new Set());
     }
+    this.componentIndex.get(componentId).add(nodeId);
   }
 
 
@@ -240,6 +238,9 @@ export class Bridge {
   resetIds() {
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
+    this.componentIndex = new Map();
+    this.componentTypes = new WeakMap();
+    this.componentId = 0;
   }
 
 
@@ -291,32 +292,30 @@ export class Bridge {
 
 
   // traverse props object and return only serializable values
-  getSerializableValues(props, visited = new WeakSet(), parentKey = null) {
-    if (props === null || typeof props !== "object") { return props; }
-    if (visited.has(props)) { return; }
+  getSerializableValues(obj, path, parentKey = null) {
+    if (!path) { path = new Set(); }
+    if (obj === null || typeof obj !== "object") { return obj; }
+    if (path.has(obj)) { return "[circular]"; }
 
-    visited.add(props);
+    path.add(obj);
 
-    const obj = Array.isArray(props) ? [] : {};
+    const result = Array.isArray(obj) ? [] : {};
 
-    for (const key of Reflect.ownKeys(props)) {
+    for (const key of Reflect.ownKeys(obj)) {
       if (typeof key === "symbol") { continue; }
-      const value = props[key];
-
+      const value = obj[key];
       if (!isSerializableValue(value)) { continue; }
 
       // random key values inside location breaks snapshot equality
-      if (key === "key" && parentKey === "location") {
-        continue;
-      }
+      if (key === "key" && parentKey === "location") { continue; }
 
       if (typeof value === "object" && value !== null) {
-        obj[key] = this.getSerializableValues(value, visited, key);
+        result[key] = this.getSerializableValues(value, path, key);
       } else {
-        obj[key] = value;
+        result[key] = value;
       }
     }
 
-    return obj;
+    return result;
   }
 }

@@ -1,3 +1,6 @@
+![RAPIDOR](./assets/RAPIDOR.png "RAPIDOR")
+
+
 # RAPIDOR (React APP IDOR)
 
 RAPIDOR (React Application IDOR) is a browser extension that performs runtime instrumentation of React applications to help QA engineers and security testers identify potential Broken Access Control (BAC) vulnerabilities. Insecure Direct Object Reference (IDOR) is a common subclass of BAC, where resources requiring higher privileges are exposed to lower-privileged users.

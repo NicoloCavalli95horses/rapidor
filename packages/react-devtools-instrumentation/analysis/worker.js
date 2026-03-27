@@ -44,12 +44,12 @@ export class Worker {
 
       const http = httpEvent.value;
       const httpKey = httpEvent.key;
-      const { request, response, doneOn, ignore, navigationInfo: httpNavInfo } = http;
-      const property = request.meta.path.property;
-      const isFile = request.meta.isFileByMime;
+      const { request, doneOn, ignore, navigationInfo: httpNavInfo } = http;
+      const property = request.analysis.toEvaluate.property;
+      const queryParams = request.analysis.toEvaluate.queryParams;
+      const properties = [property, ...queryParams];
 
-      if (isFile) {
-        // rule out files because we cannot solve the oracle problem in this scenario
+      if (!property && !queryParams.length) {
         this.updateDOM({ totStates, totHTTPevents, increment: totStates });
         continue;
       }
@@ -66,25 +66,20 @@ export class Worker {
         snapshot = await this.stateManager.getNextState(snapshot?.key);
         if (!snapshot) { break stateLoop; } // no more state events, break only this loop and try other HTTP events
 
-        const { nodes, relations, navigationInfo: stateNavInfo } = snapshot.value;
+        const { nodes, relations, componentIndex, navigationInfo: stateNavInfo } = snapshot.value;
         const snapshotKey = snapshot.key;
 
         this.updateDOM({ totStates, totHTTPevents });
 
         if (doneOn.has(snapshotKey) || !this.isInAnalysisWindow(httpNavInfo?.idx, stateNavInfo?.idx)) { continue; }
 
-          // find components that have the property and that have siblings
-          const matches = this.getMatches({ nodes, relations, key: snapshotKey, property }); // [ {node1}, {node2} ]
+        // find components that have the properties and that have at least another istance
+        const results = this.getMatches({ nodes, componentIndex, relations, key: snapshotKey, properties });
+        const matchingSets = await this.processResults({ results, componentIndex, nodes, relations });
 
-        if (matches.length) {
-          const matchingSets = await this.processResults(matches); // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
-
-          if (matchingSets?.length) {
-            emit({ type: events.GEN_REQ, payload: { matchingSets, http } });
-          }
-        } else {
-          log({ module: 'analysis manager', msg: 'no matches found' });
-        }
+        matchingSets?.length
+          ? emit({ type: events.GEN_REQ, payload: { matchingSets, http } })
+          : log({ module: 'analysis manager', msg: 'no matches found' });
 
         doneOn.add(snapshotKey); // flag current HTTP event as done for this snapshot
         await this.stateManager.updateHTTPevent({ id: httpKey, payload: { doneOn } });
@@ -130,136 +125,151 @@ export class Worker {
 
 
   // Returns array of matching nodes [ {node},{node} ]
-  // each node has: `path` (to the get the value), `relations`, snapshot `key`
-  getMatches({ nodes, relations, key, property }) {
-    const matches = [];
+  // DFS (deep-first search) executed once per set of properties
+  getMatches({ nodes, componentIndex, relations, key, properties }) {
+    const targets = properties.length ? properties.filter(p => p.value) : [];
+    if (!targets.length) { return []; }
+    if (!properties.length) { return []; }
+
+    const results = [];
     const ids = new Set();
 
-    for (const [id, relation] of Object.entries(relations)) {
-      // we specifically focus on list of elements, hence we consider only node with siblings
-      if (!Object.hasOwn(relation, 'sibling')) { continue; }
+    for (const nodeIds of Object.values(componentIndex)) {
+      if (nodeIds.length <= 1) { continue; } // single istance of component, no possible alternative data
 
-      const node = nodes[id];
-      const match = this.getMatchingNode({ value: node, toFind: property });
+      for (const nodeId of nodeIds) {
+        if (ids.has(nodeId)) { continue; }
 
-      if (match && !ids.has(node.id)) {
-        matches.push({
-          node,
-          relations: relation,
-          rowId: key,
-          ratio: "a value within this node matches a segment extracted from an HTTP request. This is the first of many siblings that appear in the component tree",
-          ...match
+        const node = nodes[nodeId];
+        if (!config.tagsWhitelist.includes(node.tag)) { continue; } // [TODO] check other tags
+
+        const matches = this.getMatchingNode({
+          value: node,
+          targets,
+          keysWhitelist: ['props', 'key'],
+          depth: config.graphExplorationDepth,
         });
 
-        ids.add(node.id);
+        if (matches?.length) {
+          matches.forEach(match => {
+            results.push({ node, rowId: key, ...match, relations: relations[nodeId] });
+          });
+          ids.add(nodeId);
+        }
       }
     }
 
-    return matches;
+    return results;
   }
 
 
 
-  getMatchingNode({ value, path = [], toFind }) {
+  getMatchingNode({ value, targets, keysWhitelist = [], depth }) {
     const visited = new WeakSet();
+    const remainingTargets = new Set(targets);
+    const matches = [];
 
-    function visit({ value, path }) {
-      if (value === toFind) {
-        return { path: [...path], value };
-      }
-
-      if (!value || typeof value !== "object") { return; }
+    function visit({ value, path, continueSearch = false }) {
+      if (depth && path.length > depth) { return; } // limit graph exploration 
       if (visited.has(value)) { return; }
-
-      visited.add(value);
+      
+      for (const target of Array.from(remainingTargets)) {
+        if (value == target.value) { // loose equality, we must match '123' == 123
+          matches.push({ path: [...path], target });
+          remainingTargets.delete(target);
+        }
+      }
+      
+      if (!value || typeof value !== "object") { return; }
+      visited.add(value); // must be an object      
+      if (!remainingTargets.size) { return; } // quit if every property is found
 
       if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i++) {
-          const result = visit({ value: value[i], path: [...path, i] });
-          if (result) { return result; }
+          visit({ value: value[i], path: [...path, i], continueSearch });
+          if (!remainingTargets.size) { return; }
         }
       } else {
         for (const k of Object.keys(value)) {
-          const result = visit({ value: value[k], path: [...path, k] });
-          if (result) { return result; }
+          const isWhitelisted = keysWhitelist.includes(k);
+          if (!continueSearch && !isWhitelisted) { continue; }
+
+          // explore only allowed properties recursively (props may be another object)
+          visit({ value: value[k], path: [...path, k], continueSearch: continueSearch || isWhitelisted });
+          if (!remainingTargets.size) { return; }
         }
       }
     }
 
-    return visit({ value, path });
-  }
-
-
-
-  // for each node, build sub-arrays with siblings and DOM references
-  // [[ {referenceNode: {...}}, {siblingNodes: [{...},{...}] ]]
-  async processResults(results) {
-    const matches = [];
-    const self = this;
-
-    for (const result of results) {
-      const siblingNodes = [];
-      const { path, relations, value: referenceMatch, node: referenceNode, rowId } = result;
-      let { sibling, siblingIdx } = relations;
-      await prepareNode({ node: referenceNode, rowId, siblingIds: sibling, siblingIdx, match: referenceMatch });
-
-      // consider other istances of the reference node that are NOT among its siblings
-      // we can append these istances as artificial siblings to continue the analysis
-      if (referenceNode.componentId) {
-        const istancesIds = await this.expandSiblingIds({ componentId: referenceNode.componentId, referenceIds: [referenceNode.id, ...sibling], rowId });
-        sibling = [...sibling, ...istancesIds];
-      }
-
-      for (const id of sibling) {
-        const node = await this.stateManager.getNodeByID(rowId, id);
-        const relations = await this.stateManager.getRelationsByID(rowId, id);
-        const match = this.getValueAtPath(node, path);
-
-        if (!match || match == referenceMatch) {
-          log({ module: 'analysis manager', msg: !match ? 'value extracted from reference component has no matches on siblings' : 'a sibling was found, but it has the same value as the reference component' });
-          continue;
-        }
-
-        await prepareNode({ node, rowId, siblingIds: relations.sibling, siblingIdx: relations.siblingIdx, match });
-        siblingNodes.push(node);
-      }
-
-      if (siblingNodes.length) {
-        // match is invalid if there are no siblings
-        matches.push({ referenceNode, siblingNodes });
-      }
-    }
+    visit({ value, path: [], continueSearch: false });
 
     return matches;
-
-
-    async function prepareNode({ node, rowId, siblingIds, siblingIdx, match }) {
-      if (!node.DOM) {
-        node.DOM = await self.stateManager.getAncestorDOM(rowId, node.id);
-      }
-      node.siblingIds = siblingIds;
-      node.siblingIdx = siblingIdx;
-      node.match = match;
-    }
-  }
-
-
-
-  // expand the list of siblings ids considering other istances of the component that are not among the siblings
-  // return expanded list of ids
-  async expandSiblingIds({ componentId, referenceIds, rowId }) {
-    const instancesIds = await this.stateManager.getIdsOfInstances(rowId, componentId);
-    const refSet = new Set(referenceIds);
-    return instancesIds.filter(id => !refSet.has(id));
   }
 
 
 
   getValueAtPath(obj, path) {
     return path.reduce((acc, key) => {
-      if (acc === undefined || acc === null) { return; }
-      return acc[key];
+      if (acc != null && Object.hasOwn(acc, key)) {
+        return acc[key];
+      }
+      return undefined;
     }, obj);
+  }
+
+
+
+  // For each matching node, build sub-arrays with candidates and DOM references
+  // [[ {referenceNode: {...}}, {candidateNodes: [{...},{...}] ]]
+  async processResults({ results, componentIndex, nodes, relations }) {
+    if (!results.length) { return []; }
+    const couples = [];
+
+    for (const result of results) {
+      const instanceId = result.node.componentId;
+      const nodeIds = componentIndex[instanceId];
+      const candidateNodes = [];
+      const domPromises = [];
+
+      if (!result.node.DOM) {
+        result.node.DOM = await this.stateManager.getAncestorDOM(result.rowId, result.node.id);
+      }
+
+      if (!nodeIds.length) { continue; }
+
+      for (const candidateId of nodeIds) {
+        if (candidateId === result.node.id) { continue; }
+
+        const candidateNode = nodes[candidateId];
+        const candidateMatch = this.getValueAtPath(candidateNode, result.path);
+
+        if ([null, undefined, ''].includes(candidateMatch)) { continue; }
+
+        if (!candidateNode.DOM) {
+          domPromises.push(this.stateManager.getAncestorDOM(result.rowId, candidateNode.id).then(dom => { candidateNode.DOM = dom; }));
+        }
+
+        const candidateTarget = structuredClone(result.target);
+        candidateTarget.value = candidateMatch;
+
+        candidateNodes.push({
+          node: candidateNode,
+          rowId: result.rowId,
+          path: result.path,
+          target: candidateTarget,
+          relations: relations[candidateNode.id]
+        });
+      }
+
+      await Promise.all(domPromises);
+
+      if (candidateNodes.length) {
+        couples.push({ referenceNode: result, candidateNodes })
+      }
+    }
+
+
+    return couples;
   }
 }
 
