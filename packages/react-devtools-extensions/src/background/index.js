@@ -12,6 +12,7 @@
 
 import './dynamicallyInjectContentScripts';
 import './tabsManager';
+import { WebWorker } from './worker';
 
 import {
   handleDevToolsPageMessage,
@@ -19,6 +20,11 @@ import {
   handleReactDevToolsHookMessage,
   handleFetchResourceContentScriptMessage,
 } from './messageHandlers';
+
+(async () => {
+  const w = new WebWorker();
+  await w.init();
+})();
 
 const ports: {
   // TODO: Check why we convert tab IDs to strings, and if we can avoid it

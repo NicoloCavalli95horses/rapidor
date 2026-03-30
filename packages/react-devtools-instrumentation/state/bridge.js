@@ -40,6 +40,8 @@ export class Bridge {
     let original = hook.onCommitFiberRoot; // save original reference
     original = wrap(original);
 
+    // [TODO] debouncing does not work on large web apps when the updates never stop
+    // Implement throttling making sure not to store two times the same graph
     const debouncedProcess = debounce(async (fiber) => {
       await self.handleStateGraph(fiber);
     }, config.debounceTimeMs);
@@ -69,7 +71,9 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
+    console.time('gettingGraph');
     const payload = await this.getStateGraph(fiber);
+    console.timeEnd('gettingGraph');
     emit({ type: 'STATE_UPDATE', payload });
   }
 

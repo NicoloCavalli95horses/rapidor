@@ -18,8 +18,10 @@ export class StateManager {
     this.dbStores = IDBManager.STORES;
   }
 
-  async init() {
-    await this.db.init();
+  async init({ listen = true, cleanDb = true } = {}) {   
+    await this.db.init(cleanDb);
+
+    if (!listen) { return; }
 
     eventBus.subscribe(async (event) => {
       if (event.type === events.STATE_UPDATE) {
@@ -82,7 +84,7 @@ export class StateManager {
 
   async getNavigationInfo() {
     const storeName = this.dbStores.NAV;
-    const url =  decodeURIComponent(window.location.href);
+    const url = decodeURIComponent(window.location.href);
     const { isStored, key: idx } = await this.db.isDataStored({ payload: url, storeName });
     return isStored ? { url, idx } : {};
   }
@@ -134,7 +136,7 @@ export class StateManager {
       currentId = node.parent;
     }
 
-    return;
+    return undefined;
   }
 
 

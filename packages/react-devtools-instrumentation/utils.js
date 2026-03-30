@@ -40,17 +40,20 @@ export function copyObjKeys(obj = {}, keys = []) {
 export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin = window.location.origin) {
   try {
     if (!msg || typeof msg !== 'object') {
-      log('[postMessage] Message must be a non-null object');
+      log({ module: 'utils', msg: 'Message must be a non-null object', type: 'error' });
     }
     if (isCloneable(msg)) {
       targetWindow.postMessage(msg, targetOrigin);
     } else {
-      log('[postMessage] Impossible to send. Uncloneable object: ', msg)
+      log({ module: 'utils', msg: 'Impossible to send. Uncloneable object', type: 'error' });
+      console.log(msg)
     }
   } catch (err) {
-    log('[postMessage] Error sending message:', err);
+    log({ module: 'utils', msg: 'Error sending message', type: 'error' });
   }
 }
+
+
 
 // type: info | error | warning
 export function log({ module, type = 'info', msg }) {
@@ -165,4 +168,15 @@ export function isSerializableValue(value) {
 
     return true;
   }
+}
+
+
+
+export function getValueAtPath(obj, path) {
+  return path.reduce((acc, key) => {
+    if (acc != null && Object.hasOwn(acc, key)) {
+      return acc[key];
+    }
+    return undefined;
+  }, obj);
 }

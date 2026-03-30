@@ -5,7 +5,7 @@ import { eventBus, events } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { log } from "../utils.js";
 import { StateManager } from "../state/stateManager.js";
-import { Worker } from "./worker.js";
+import { WorkerHandler } from "./workerHandler.js";
 
 
 
@@ -16,7 +16,7 @@ export class AnalysisManager {
   constructor(stateManager) {
     this.stateManager = stateManager;
     this.running = false;
-    this.worker = new Worker(this.stateManager);
+    this.worker = new WorkerHandler(this.stateManager);
   }
 
 
@@ -35,7 +35,7 @@ export class AnalysisManager {
     this.running = true;
 
     try {
-      await this.startWorker();
+      await this.startAnalysis();
     } finally {
       this.running = false;
     }
@@ -44,7 +44,7 @@ export class AnalysisManager {
 
 
   // process until empty, then sleep until next event
-  async startWorker() {
+  async startAnalysis() {
     const hasOneHttpEvent = await this.stateManager.hasOneHttpEvent();
     const hasOneState = await this.stateManager.hasOneState();
 

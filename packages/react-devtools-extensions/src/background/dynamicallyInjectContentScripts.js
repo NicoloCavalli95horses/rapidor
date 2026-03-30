@@ -47,6 +47,14 @@ const contentScriptsToInject = [
     persistAcrossSessions: true,
     runAt: 'document_start',
     world: chrome.scripting.ExecutionWorld.MAIN,
+  },
+  {
+    id: '@react-devtools/backgroundToMainBridge',
+    js: ['build/backgroundToMainBridge.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.ISOLATED,
   }
 ];
 

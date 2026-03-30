@@ -29,11 +29,13 @@ export class IDBManager {
   // Init
   // ====================================
 
-  async init() {
-    await this.deleteDB(this.name);
+  async init(cleanDb = true) {
+    if (cleanDb) {
+      await this.deleteDB(this.name);
+      log({ module: 'indexed db', msg: 'Deleted existing data' });
+    }
 
     this.db = await this.connectToDb();
-    log({ module: 'indexed db', msg: 'IndexedDB initialized' });
   }
 
 
@@ -41,7 +43,7 @@ export class IDBManager {
   connectToDb() {
     return new Promise((resolve, reject) => {
       // for other browsers: mozIndexedDB, webkitIndexedDB, msIndexedDB, shimIndexedDB
-      const request = window.indexedDB.open(this.name, this.version);
+      const request = indexedDB.open(this.name, this.version); // not window.indexedDB: it will resolve with `self.indexedDB` when a web worker is used
 
       request.onerror = (event) => {
         log({ module: 'indexed db', msg: 'IndexedDB error', type: 'error' });
@@ -92,14 +94,27 @@ export class IDBManager {
       const tx = this.db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
       const request = store.put(data); // primary key (id) is handled by indexedDB
-      request.onsuccess = (e) => resolve({ key: e.target.result, storeName });
+      let result;
+
+      request.onsuccess = (e) => {
+        result = { key: e.target.result, storeName };
+      };
+
       request.onerror = (e) => {
         console.error("DB SAVE ERROR PAYLOAD:", data);
         console.error("DB ERROR:", e.target.error);
         reject(e.target.error);
       };
+
+      tx.oncomplete = () => {
+        resolve(result);
+      };
+
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
     });
   }
+
 
 
   // ====================================
@@ -115,24 +130,35 @@ export class IDBManager {
       const tx = this.db.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
 
-      tx.onerror = (e) => reject(e.target.error);
-      tx.onabort = (e) => reject(e.target.error);
+      let updatedResult;
+
+      tx.oncomplete = () => {
+        resolve(updatedResult);
+      };
+
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
 
       const getRequest = store.get(id);
 
-      getRequest.onerror = (e) => reject(e.target.error);
+      getRequest.onerror = () => reject(getRequest.error);
 
       getRequest.onsuccess = (e) => {
         const existing = e.target.result;
 
         if (!existing) {
+          tx.abort();
           reject(new Error(`Object in ${storeName} at id: ${id} not found`));
           return;
         }
 
         const updated = { ...existing, ...payload };
-        store.put(updated, id);
-        resolve(updated);
+        const putRequest = store.put(updated, id);
+
+        putRequest.onerror = () => reject(putRequest.error);
+        putRequest.onsuccess = () => {
+          updatedResult = updated;
+        };
       };
     });
   }
@@ -145,7 +171,7 @@ export class IDBManager {
 
   async deleteDB(name) {
     return new Promise((resolve, reject) => {
-      const req = window.indexedDB.deleteDatabase(name);
+      const req = indexedDB.deleteDatabase(name);
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
       req.onblocked = () => console.error("Error during DB deletion");

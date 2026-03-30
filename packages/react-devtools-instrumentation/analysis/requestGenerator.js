@@ -38,7 +38,7 @@ export class RequestGenerator {
 
 
   async handleEvent(event) {
-    const { matchingSets, http } = event;
+    const { http, matchingSets } = event;
     const { request: referenceReq, response: referenceRes, type } = http; // [TODO] if response is empty, look at the first available graph matching the nav id
     log({ module: 'request generator', msg: 'received matches, building requests...' });
     const self = this;
@@ -54,9 +54,9 @@ export class RequestGenerator {
           continue;
         }
         const response = await self.executeRequest(request, type);
-        // [TODO] if response is 40X, and we have query parameters, try mutating the `location.href` instead
-        // In SPA the routing is handled by the front-end and we may have valid URLs displaying premium resources even without contacting the server
-
+        // [TODO] if response is 40X, and we have query parameters, try using the React routing system
+        // > This is the Pimsleur scenario
+        
         const payload = {
           reference: {
             node: referenceNode.node,

@@ -66,6 +66,7 @@ module.exports = {
     backendManager: './src/contentScripts/backendManager.js',
     fallbackEvalContext: './src/contentScripts/fallbackEvalContext.js',
     fileFetcher: './src/contentScripts/fileFetcher.js',
+    backgroundToMainBridge: '../react-devtools-instrumentation/content_scripts/backgroundToMainBridge.js',
     main: './src/main/index.js',
     panel: './src/panel.js',
     proxy: './src/contentScripts/proxy.js',
