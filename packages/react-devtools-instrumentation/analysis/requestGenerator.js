@@ -56,7 +56,7 @@ export class RequestGenerator {
         const response = await self.executeRequest(request, type);
         // [TODO] if response is 40X, and we have query parameters, try using the React routing system
         // > This is the Pimsleur scenario
-        
+
         const payload = {
           reference: {
             node: referenceNode.node,
@@ -76,7 +76,7 @@ export class RequestGenerator {
     }
   }
 
-  
+
 
   async alreadyDone(request) {
     const uri = this.HTTPAnalyzer.getURI(request.url);
@@ -105,8 +105,9 @@ export class RequestGenerator {
   buildRequest({ reference, target }) {
     const { uri, body, headers, verb, analysis } = reference;
     const method = verb.toUpperCase();
-    const parts = analysis.toEvaluate.property.parts;
-    const path = (target.parts[0] + target.value + (target.parts[1] ? target.parts[1] : '')).toString().trim();
+
+    target.parts.splice(target.index, 0, target.value);
+    const path = target.parts.join('').trim();
 
     const options = {
       method,

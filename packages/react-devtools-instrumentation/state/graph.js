@@ -31,7 +31,11 @@ export class Graph {
 
 
   addNode({ graph, id, data = {} }) {
-    graph.nodes[id] = { id, ...data };
+    graph.nodes[id] = {
+      id,
+      ...graph.nodes[id],
+      ...data
+    };
   }
 
 
@@ -44,27 +48,30 @@ export class Graph {
    * @param type type of relation (child, render) 
    * @param siblingIdx index of sibling (first sibling has 0) 
    */
-  addRelation({ graph, fromId, toId, type, siblingIdx }) {
-    if (!graph.relations[fromId]) {
-      graph.relations[fromId] = {};
+  addRelation({ graph, fromId, toId, type, siblingMeta }) {
+    // Init nodes
+    if (!graph.nodes[fromId]) { graph.nodes[fromId] = {}; }
+    if (toId && !graph.nodes[toId]) { graph.nodes[toId] = {}; }
+    if (!graph.relations[fromId]) { graph.relations[fromId] = {}; }
+    if (toId && !graph.relations[toId]) { graph.relations[toId] = {}; }
+
+    if (type === "child" && toId) {
+      if (!graph.relations[fromId].child) {
+        graph.relations[fromId].child = toId;
+      }
+      if (!graph.relations[toId].parent) {
+        graph.relations[toId].parent = fromId;
+      }
     }
 
-    if (!graph.relations[fromId][type]) {
-      graph.relations[fromId][type] = new Set();
-    }
-
-    graph.relations[fromId][type].add(toId);
-
-    if (!graph.relations[toId]) {
-      graph.relations[toId] = {};
-    }
-
-    // add parent relation on node too, to ease data retrieval
-    // we assume that a node can have just 1 parent
-    if (type == "child" && graph.nodes[toId]) {
-      graph.nodes[toId].parent = fromId;
-      graph.relations[toId].parent = fromId;
-      graph.relations[toId].siblingIdx = siblingIdx;
+    if (type === "sibling") {
+      if (toId && !graph.relations[fromId].nextSibling) {
+        graph.relations[fromId].nextSibling = toId;
+      }
+      if (toId && !graph.relations[toId].prevSibling) {
+        graph.relations[toId].prevSibling = fromId;
+      }
+      graph.relations[fromId].siblingMeta = siblingMeta;
     }
   }
 

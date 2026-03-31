@@ -44,12 +44,11 @@ export class WorkerHandler {
       if (!event.success) { return; }
 
       const { results, componentIndex, nodes, relations } = event.results;
-      const http = event.http;
 
       // the analysis must be completed here, cannot access the same IndexedDB instance from the service worker
       const matchingSets = await self.processResults({ results, componentIndex, nodes, relations });
       matchingSets.length
-        ? emit({ type: events.GEN_REQ, payload: { matchingSets, http } })
+        ? emit({ type: events.GEN_REQ, payload: { matchingSets, http: event.http } })
         : log({ module: 'worker handler', msg: 'no results' });
     }
 
@@ -72,31 +71,20 @@ export class WorkerHandler {
 
       const totHTTPevents = await this.stateManager.getTotalHttpEvent();
       const totStates = await this.stateManager.getTotalStates();
-
-      const http = httpEvent.value;
-      const httpKey = httpEvent.key;
-      const { request, doneOn, ignore, navigationInfo: httpNavInfo } = http;
-      const property = request.analysis.toEvaluate.property;
-      const queryParams = request.analysis.toEvaluate.queryParams;
-      const properties = [property, ...queryParams];
-
-      if (!property && !queryParams.length) {
+      const { request, doneOn, ignore, navigationInfo: httpNavInfo } = httpEvent.value;
+      const properties = request.analysis.toEvaluate;
+      
+      if (!properties.length || !properties.some(i => i.value) || ignore) {
         this.updateDOM({ totStates, totHTTPevents, increment: totStates });
         continue;
       }
 
       let snapshot = {};
 
-      if (ignore) {
-        // HTTP event already analized 
-        this.updateDOM({ totStates, totHTTPevents, increment: totStates });
-        continue;
-      }
-
       stateLoop: while (true) {
         snapshot = await this.stateManager.getNextState(snapshot?.key);
-        // log({ module: 'worker handler', msg: `HTTP event ${httpKey}, state ${snapshot?.key}` });
-        if (!snapshot) { break stateLoop; } // no more state events, break only this loop and try other HTTP events
+        // log({ module: 'worker handler', msg: `HTTP event ${httpEvent.key}, state ${snapshot?.key}` });
+        if (!snapshot) { break stateLoop; } 
 
         this.updateDOM({ totStates, totHTTPevents });
 
@@ -106,11 +94,11 @@ export class WorkerHandler {
         // [worker.js] DFS components graph to find matches on given properties
         sendPostMessage({
           type: events.START_ANALYSIS,
-          payload: { snapshot: snapshot.value, key: snapshot.key, properties, http }
+          payload: { snapshot: snapshot.value, key: snapshot.key, properties, http: httpEvent.value }
         });
 
         doneOn.add(snapshot.key); // flag current HTTP event as done for this snapshot
-        await this.stateManager.updateHTTPevent({ id: httpKey, payload: { doneOn } });
+        await this.stateManager.updateHTTPevent({ id: httpEvent.key, payload: { doneOn } });
       }
     }
 
@@ -177,7 +165,11 @@ export class WorkerHandler {
         if ([null, undefined, ''].includes(candidateMatch)) { continue; }
 
         if (!candidateNode.DOM) {
-          domPromises.push(this.stateManager.getAncestorDOM(result.rowId, candidateNode.id).then(dom => { candidateNode.DOM = dom; }));
+          domPromises.push(
+            this.stateManager
+              .getAncestorDOM(result.rowId, candidateNode.id)
+              .then(dom => { candidateNode.DOM = dom; })
+          );
         }
 
         const candidateTarget = structuredClone(result.target);

@@ -63,8 +63,9 @@ export class analyzeHTTP {
     const queryParams = params ? this.getParamsAnalysis(params, fullPath, property.value) : undefined;
 
     const analysis = {
+      fullPath,
       rawQueries,
-      toEvaluate: { property, queryParams }
+      toEvaluate: [property, ...queryParams]
     }
 
     emit({

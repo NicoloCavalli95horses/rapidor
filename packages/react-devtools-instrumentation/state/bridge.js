@@ -79,79 +79,14 @@ export class Bridge {
 
 
 
+  // [entry point] gets and returns the graph
   async getStateGraph(fiber) {
     const g = new Graph();
     const graph = g.createGraph();
-    const self = this;
     this.resetIds();
+    this.visitFiber({ node: fiber, parentId: null, graph, g });
 
-    function visit({ node, parentId = null, siblingIdx }) {
-      if (!node) { return; }
-
-      const id = self.getNodeId(node);
-      const domElement = (node.stateNode?.containerInfo instanceof HTMLElement) ? node.stateNode.containerInfo
-        : (node.stateNode instanceof HTMLElement) ? node.stateNode
-          : undefined;
-
-      // id of specific React component, used to identify istances
-      const componentId = self.getComponentTypeId(node.elementType ?? node.type);
-      self.updateComponentIndex(componentId, id);
-
-      // data needs to be serialized (we rule out functions, Node, Document, Window, DOM objects)
-      const serializableData = {
-        id,
-        name: self.filterReactComponentName(node.type),
-        key: node.key,
-        props: self.getSerializableValues(node.memoizedProps),
-        DOM: self.getDOMInfo(domElement),
-        tag: node.tag,
-        componentId
-      };
-
-      g.addNode({ graph, id, data: serializableData });
-
-      if (parentId) {
-        g.addRelation({ graph, fromId: parentId, toId: id, type: "child", siblingIdx });
-      }
-
-      // collect children once
-      const children = [];
-      let child = node.child;
-      let childIdx = 0;
-
-      while (child) {
-        children.push({ node: child, siblingIdx: childIdx });
-        child = child.sibling;
-        childIdx++;
-      }
-
-      // add sibling relations
-      for (let i = 0; i < children.length; i++) {
-        for (let j = i + 1; j < children.length; j++) {
-          const id1 = self.getNodeId(children[i].node);
-          const id2 = self.getNodeId(children[j].node);
-
-          g.addRelation({ graph, fromId: id1, toId: id2, type: "sibling" });
-          g.addRelation({ graph, fromId: id2, toId: id1, type: "sibling" });
-        }
-      }
-
-      // visit children
-      for (const { node, siblingIdx } of children) {
-        visit({ node, parentId: id, siblingIdx });
-      }
-    }
-
-    visit({ node: fiber, parentId: null, siblingIdx: 0 });
-
-    // add list of istances to graph
-    const componentIndex = {};
-    for (const [componentId, nodeIds] of this.componentIndex) {
-      componentIndex[componentId] = Array.from(nodeIds);
-    }
-    graph.componentIndex = componentIndex;
-
-    // calculate graph fingerprint
+    graph.componentIndex = this.buildComponentIndex();
     graph.fingerprint = await this.getFingerprint(graph);
 
     return graph;
@@ -159,12 +94,128 @@ export class Bridge {
 
 
 
-  // feature-based (shape-based) fingerprint: we create a graph id considering its shape
-  // in this way we can efficiently compare two graphs
+  // [main visit handler] prune React fiber object and save relations on projected graph
+  // Parent/Child: The parent is updated to the closest "kept" node above it in the hierarchy (A:B:C -> B invalid -> A parent of B)
+  // Sibling: The loop only consider the kept nodes, so only valid siblings are connected to each other, while the invalid siblings are skipped (A:B:C -> B invalid -> A sibling of B)
+  // No need to keep information about the filtered nodes: the keptChildren list takes care of reconstructing the list of remaining siblings
+  visitFiber({ node, parentId, graph, g }) {
+    if (!node) { return null; }
+
+    const context = this.processNode(node);
+    let currentParentId = parentId;
+
+    if (context.keep) {
+      // add node
+      g.addNode({ graph, id: context.id, data: context.data });
+
+      if (parentId) {
+        // link to parent
+        g.addRelation({ graph, fromId: parentId, toId: context.id, type: "child" });
+      }
+
+      currentParentId = context.id; // updated only if the node is kept
+    }
+
+    const keptChildren = this.visitChildren({ node, parentId: currentParentId, graph, g });
+
+    // link siblings
+    for (let idx = 0; idx < keptChildren.length; idx++) {
+      const child = keptChildren[idx];
+      const next = keptChildren[idx + 1];
+
+      g.addRelation({
+        graph,
+        fromId: child.id,
+        toId: next?.id ?? null,
+        type: "sibling",
+        siblingMeta: {
+          relativeIdx: idx,
+          fiberIdx: child.fiberIdx,
+        }
+      });
+    }
+
+    return context.keep ? { keptId: context.id } : null;
+  }
+
+
+
+  // [node processing] decide whether to keep a node, assign componentId (id of istance), serialize props, returns data
+  processNode(node) {
+    const domElement = (node.stateNode?.containerInfo instanceof HTMLElement) ? node.stateNode.containerInfo
+      : (node.stateNode instanceof HTMLElement) ? node.stateNode
+        : undefined;
+
+    const keep = this.shouldKeepNode(node.tag, domElement);
+    if (!keep) { return { keep: false }; }
+
+    const id = this.getNodeId(node);
+    const componentId = this.getComponentTypeId(node.elementType ?? node.type);
+    this.updateComponentIndex(componentId, id);
+
+    return {
+      keep: true,
+      id,
+      data: {
+        id,
+        componentId,
+        key: node.key,
+        tag: node.tag,
+        DOM: this.getDOMInfo(domElement),
+        name: this.filterReactComponentName(node.type),
+        props: this.getSerializableValues(node.memoizedProps),
+      }
+    };
+  }
+
+
+
+  visitChildren({ node, parentId, graph, g }) {
+    const keptChildren = [];
+
+    let child = node.child;
+    let fiberIdx = 0; // original index of sibling (0 -> first of sibling)
+
+    while (child) {
+      const result = this.visitFiber({ node: child, parentId, graph, g });
+
+      if (result?.keptId) {
+        keptChildren.push({ id: result.keptId, fiberIdx });
+      }
+
+      child = child.sibling;
+      fiberIdx++;
+    }
+
+    return keptChildren;
+  }
+
+
+
+  // Returns a map of the component instances {1: ['node-1','node-2'], 2: ['node-3'], ...}
+  buildComponentIndex() {
+    const componentIndex = {};
+
+    for (const [componentId, nodeIds] of this.componentIndex) {
+      componentIndex[componentId] = Array.from(nodeIds);
+    }
+
+    return componentIndex;
+  }
+
+
+
+  // Return true if the node is valid
+  shouldKeepNode(tag, domEl) {
+    return domEl || config.tagsWhitelist.includes(tag);
+  }
+
+
+
+  // feature-based (shape-based) fingerprint: create an id considering the relations shape
   async getFingerprint(graph) {
-    const nodeLabels = Object.values(graph.nodes).map(n => `${n.id}:${n.componentId}:${n.tag}`).sort();
     const edgeLabels = Object.values(graph.relations).map(n => `${n.parent}:${n.child}:${n.sibling}:${n.siblingIdx}`).sort();
-    const signature = JSON.stringify({ nodeLabels, edgeLabels });
+    const signature = JSON.stringify(edgeLabels);
     return await this.digestMessage(signature);
   }
 
@@ -249,6 +300,7 @@ export class Bridge {
 
 
 
+  // [TODO] shall we assign the DOM to the siblings directly at this level (?)
   getDOMInfo(el) {
     function visit(node) {
       if (!node) { return; };
