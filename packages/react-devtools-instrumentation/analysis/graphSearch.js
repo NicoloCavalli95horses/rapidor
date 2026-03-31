@@ -1,39 +1,85 @@
-// This runs as background script (web worker)
-// Does not have access to the same IndexedDB instance as the main thread
-
 //===================
 // Import
 //===================
-import { config } from "../../../react-devtools-instrumentation/config.js";
-import { events } from "../../../react-devtools-instrumentation/eventBus.js";
-
+import { config } from "../config.js";
+import { getValueAtPath } from "../utils.js";
 
 
 //===================
 // Class
 //===================
-export class WebWorker {
-  constructor() {
+export class GraphSearch {
+  constructor(stateManager) {
+    this.stateManager = stateManager;
   }
 
 
 
-  async init() {
-    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      if (msg.type != events.START_ANALYSIS) { return; }
-      const payload = this.run(msg.payload);
-      sendResponse({ done: true, payload });
-    });
-  }
-
-
-
-  run(event) {
-    const { snapshot, key, http, properties } = event;
+  async find(data) {
+    const { snapshot, key, http, properties } = data;
     const { nodes, relations, componentIndex, navigationInfo: stateNavInfo } = snapshot;
     const results = this.getMatches({ nodes, componentIndex, relations, key, properties });
-    const success = results.length;
-    return { success, http, results: { results, componentIndex, nodes, relations } };
+    const matchingSets = await this.processResults({ results, componentIndex, nodes, relations });
+    const success = matchingSets.length;
+    return { success, http, results: matchingSets };
+  }
+
+
+
+  // For each matching node, build sub-arrays with candidates and DOM references
+  // [[ {referenceNode: {...}}, {candidateNodes: [{...},{...}] ]]
+  async processResults({ results, componentIndex, nodes, relations }) {
+    if (!results.length) { return []; }
+    const couples = [];
+
+    for (const result of results) {
+      const instanceId = result.node.componentId;
+      const nodeIds = componentIndex[instanceId];
+      const candidateNodes = [];
+      const domPromises = [];
+
+      if (!result.node.DOM) {
+        result.node.DOM = await this.stateManager.getAncestorDOM(result.rowId, result.node.id);
+      }
+
+      if (!nodeIds.length) { continue; }
+
+      for (const candidateId of nodeIds) {
+        if (candidateId === result.node.id) { continue; }
+
+        const candidateNode = nodes[candidateId];
+        const candidateMatch = getValueAtPath(candidateNode, result.path);
+
+        if ([null, undefined, ''].includes(candidateMatch)) { continue; }
+
+        if (!candidateNode.DOM) {
+          domPromises.push(
+            this.stateManager
+              .getAncestorDOM(result.rowId, candidateNode.id)
+              .then(dom => { candidateNode.DOM = dom; })
+          );
+        }
+
+        const candidateTarget = structuredClone(result.target);
+        candidateTarget.value = candidateMatch;
+
+        candidateNodes.push({
+          node: candidateNode,
+          rowId: result.rowId,
+          path: result.path,
+          target: candidateTarget,
+          relations: relations[candidateNode.id]
+        });
+      }
+
+      await Promise.all(domPromises);
+
+      if (candidateNodes.length) {
+        couples.push({ referenceNode: result, candidateNodes })
+      }
+    }
+
+    return couples;
   }
 
 
@@ -120,4 +166,3 @@ export class WebWorker {
     return matches;
   }
 }
-

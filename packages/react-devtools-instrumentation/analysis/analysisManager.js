@@ -5,7 +5,7 @@ import { eventBus, events } from "../eventBus.js";
 import { filter } from 'rxjs/operators';
 import { log } from "../utils.js";
 import { StateManager } from "../state/stateManager.js";
-import { WorkerHandler } from "./workerHandler.js";
+import { AnalysisLoop } from "./analysisLoop.js";
 
 
 
@@ -16,12 +16,12 @@ export class AnalysisManager {
   constructor(stateManager) {
     this.stateManager = stateManager;
     this.running = false;
-    this.worker = new WorkerHandler(this.stateManager);
+    this.loop = new AnalysisLoop(this.stateManager);
   }
 
 
   init() {
-    this.worker.init();
+    this.loop.init();
 
     eventBus
       .pipe(filter(e => e.type === events.DB_SUCCESS))
@@ -50,7 +50,7 @@ export class AnalysisManager {
 
     if (hasOneHttpEvent && hasOneState) {
       log({ module: 'analysis manager', msg: 'starting the analysis...' });
-      await this.worker.startAnalysis();
+      await this.loop.startAnalysis();
     } else {
       log({ module: 'analysis manager', msg: 'nothing to analyze yet' });
     }

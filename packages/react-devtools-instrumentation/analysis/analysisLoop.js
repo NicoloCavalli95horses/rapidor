@@ -7,52 +7,23 @@ import { log, sendPostMessage, listenToMsg, getValueAtPath } from "../utils.js";
 import { StateManager } from "../state/stateManager.js";
 import { RequestGenerator } from "./requestGenerator.js";
 import { config } from "../config.js";
+import { GraphSearch } from "./graphSearch.js";
 
 
 //===================
 // Functions
 //===================
-export class WorkerHandler {
+export class AnalysisLoop {
   constructor(stateManager) {
     this.stateManager = stateManager;
     this.requestGenerator = new RequestGenerator(this.stateManager);
+    this.graphSearch = new GraphSearch(this.stateManager);
     this.analysisCounter = 0;
   }
 
 
   init() {
     this.requestGenerator.init();
-    this.onResults();
-  }
-
-
-
-  onResults() {
-    const self = this;
-
-    const handler = async (e) => {
-      if (e.source !== window) { return; }
-      if (e.data?.type != events.ANALYSIS_DONE) { return; }
-
-      const event = e.data.payload?.payload;
-      const error = e.data.payload?.error;
-
-      if (error) {
-        log({ module: 'worker handler', msg: error, type: 'error' });
-        return;
-      }
-      if (!event.success) { return; }
-
-      const { results, componentIndex, nodes, relations } = event.results;
-
-      // the analysis must be completed here, cannot access the same IndexedDB instance from the service worker
-      const matchingSets = await self.processResults({ results, componentIndex, nodes, relations });
-      matchingSets.length
-        ? emit({ type: events.GEN_REQ, payload: { matchingSets, http: event.http } })
-        : log({ module: 'worker handler', msg: 'no results' });
-    }
-
-    window.addEventListener('message', handler);
   }
 
 
@@ -73,7 +44,7 @@ export class WorkerHandler {
       const totStates = await this.stateManager.getTotalStates();
       const { request, doneOn, ignore, navigationInfo: httpNavInfo } = httpEvent.value;
       const properties = request.analysis.toEvaluate;
-      
+
       if (!properties.length || !properties.some(i => i.value) || ignore) {
         this.updateDOM({ totStates, totHTTPevents, increment: totStates });
         continue;
@@ -84,18 +55,20 @@ export class WorkerHandler {
       stateLoop: while (true) {
         snapshot = await this.stateManager.getNextState(snapshot?.key);
         // log({ module: 'worker handler', msg: `HTTP event ${httpEvent.key}, state ${snapshot?.key}` });
-        if (!snapshot) { break stateLoop; } 
+        if (!snapshot) { break stateLoop; }
 
         this.updateDOM({ totStates, totHTTPevents });
 
         const { navigationInfo: stateNavInfo } = snapshot.value;
         if (doneOn.has(snapshot.key) || !this.isInAnalysisWindow(httpNavInfo?.idx, stateNavInfo?.idx)) { continue; }
 
-        // [worker.js] DFS components graph to find matches on given properties
-        sendPostMessage({
-          type: events.START_ANALYSIS,
-          payload: { snapshot: snapshot.value, key: snapshot.key, properties, http: httpEvent.value }
-        });
+        console.time('searchInGraph');
+        const results = await this.graphSearch.find({ snapshot: snapshot.value, key: snapshot.key, properties, http: httpEvent.value });
+        console.timeEnd('searchInGraph');
+
+        results.success
+          ? emit({ type: events.GEN_REQ, payload: results })
+          : log({ module: 'worker handler', msg: 'no results' });
 
         doneOn.add(snapshot.key); // flag current HTTP event as done for this snapshot
         await this.stateManager.updateHTTPevent({ id: httpEvent.key, payload: { doneOn } });
@@ -134,63 +107,5 @@ export class WorkerHandler {
     }
 
     emit({ type: events.ANALYSIS_IN_PROGRESS, payload });
-  }
-
-
-
-  // For each matching node, build sub-arrays with candidates and DOM references
-  // [[ {referenceNode: {...}}, {candidateNodes: [{...},{...}] ]]
-  async processResults({ results, componentIndex, nodes, relations }) {
-    if (!results.length) { return []; }
-    const couples = [];
-
-    for (const result of results) {
-      const instanceId = result.node.componentId;
-      const nodeIds = componentIndex[instanceId];
-      const candidateNodes = [];
-      const domPromises = [];
-
-      if (!result.node.DOM) {
-        result.node.DOM = await this.stateManager.getAncestorDOM(result.rowId, result.node.id);
-      }
-
-      if (!nodeIds.length) { continue; }
-
-      for (const candidateId of nodeIds) {
-        if (candidateId === result.node.id) { continue; }
-
-        const candidateNode = nodes[candidateId];
-        const candidateMatch = getValueAtPath(candidateNode, result.path);
-
-        if ([null, undefined, ''].includes(candidateMatch)) { continue; }
-
-        if (!candidateNode.DOM) {
-          domPromises.push(
-            this.stateManager
-              .getAncestorDOM(result.rowId, candidateNode.id)
-              .then(dom => { candidateNode.DOM = dom; })
-          );
-        }
-
-        const candidateTarget = structuredClone(result.target);
-        candidateTarget.value = candidateMatch;
-
-        candidateNodes.push({
-          node: candidateNode,
-          rowId: result.rowId,
-          path: result.path,
-          target: candidateTarget,
-          relations: relations[candidateNode.id]
-        });
-      }
-
-      await Promise.all(domPromises);
-
-      if (candidateNodes.length) {
-        couples.push({ referenceNode: result, candidateNodes })
-      }
-    }
-
-    return couples;
   }
 }

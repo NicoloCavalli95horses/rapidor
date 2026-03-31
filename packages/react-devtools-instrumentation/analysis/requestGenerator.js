@@ -38,12 +38,12 @@ export class RequestGenerator {
 
 
   async handleEvent(event) {
-    const { http, matchingSets } = event;
+    const { http, results } = event;
     const { request: referenceReq, response: referenceRes, type } = http; // [TODO] if response is empty, look at the first available graph matching the nav id
     log({ module: 'request generator', msg: 'received matches, building requests...' });
     const self = this;
 
-    for (const { referenceNode, candidateNodes } of matchingSets) {
+    for (const { referenceNode, candidateNodes } of results) {
       for (let i = 0; i < candidateNodes.length; i++) {
         const candidate = candidateNodes[i];
         const node = candidate.node;
