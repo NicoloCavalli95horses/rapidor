@@ -2,25 +2,28 @@
 // Import
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
-import { emit } from '../eventBus.js';
+import { emit, events } from '../eventBus.js';
 import { debounce, log, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
 import { initialize } from '../../react-devtools-inline/src/backend.js';
+import { PreIndexing } from './preindexing.js';
 
 
 //===================
 // Class
 //===================
 export class Bridge {
-  constructor(stateManager) {
+  constructor() {
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
-    this.stateManager = stateManager;
+    this.preindexing = new PreIndexing();
 
     this.componentIndex = new Map(); // componentId -> Set<nodeId>
     this.componentTypes = new WeakMap(); // componentType -> componentId
     this.componentId = 0;
+
+    this.graphIndex = 0; // order of snapshots in DB
   }
 
 
@@ -53,13 +56,13 @@ export class Bridge {
       };
     }
 
+    // if someone attempts to wrap this function, it will receive
+    // the wrapped version and not the original one
     Object.defineProperty(hook, 'onCommitFiberRoot', {
       configurable: true,
       get() {
         return original;
       },
-      // if someone attempts to wrap this function, it will receive
-      // the wrapped version and not the original one
       set(fn) {
         original = wrap(fn);
       }
@@ -71,11 +74,27 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
+    console.log('getting graph...')
+    
     console.time('gettingGraph');
     const payload = await this.getStateGraph(fiber);
     console.timeEnd('gettingGraph');
-    emit({ type: 'STATE_UPDATE', payload });
+    emit({ type: events.STATE_UPDATE, payload });
   }
+
+  // [TODO]
+  // We are already pruning the gigantic fiber object provided by React and we get a simplified graph with all the relevant relations
+  // Unfortunately, this is not enough. In large applications, building a graph takes up to 10 seconds (each time)
+  // The DFS loops indefinitely in certain cases, since it is done for each HTTP request on each state snapshot/graph within a given analysis window
+  //
+  // [Idea]: Pre-indexing `interesting` values during the graph building phase
+  // string1: {snapshotKey1: [node-1, node-2, ...]}
+  // string2: {snapshotKey1: [node-1, node-2, ...], snapshotKey2: [node-1, node-2, ...]}
+  //
+  // Even with 50k rows, this map can drastically optimize the search
+  //
+  // [Workflow]
+  // HTTP event > properties extraction > lookup on map > get and process relevant nodes > find alternative data > ...
 
 
 
@@ -86,8 +105,10 @@ export class Bridge {
     this.resetIds();
     this.visitFiber({ node: fiber, parentId: null, graph, g });
 
-    graph.componentIndex = this.buildComponentIndex();
-    graph.fingerprint = await this.getFingerprint(graph);
+    graph.componentIndex = this.buildComponentIndex(); // index of componentId: [node-1, node-2, ...]
+    graph.fingerprint = await this.getFingerprint(graph); // used to compare graphs
+    graph.graphIndex = this.graphIndex;
+    this.graphIndex++;
 
     return graph;
   }
@@ -107,6 +128,9 @@ export class Bridge {
     if (context.keep) {
       // add node
       g.addNode({ graph, id: context.id, data: context.data });
+
+      // process primitive values for preindexing
+      this.preindexing.process({ graphIndex: this.graphIndex, nodeId: context.id, key: context.data.key, props: context.data.props });
 
       if (parentId) {
         // link to parent
@@ -301,6 +325,7 @@ export class Bridge {
 
 
   // [TODO] shall we assign the DOM to the siblings directly at this level (?)
+  // to review: DOM children is confusing here
   getDOMInfo(el) {
     function visit(node) {
       if (!node) { return; };

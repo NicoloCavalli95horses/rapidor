@@ -22,6 +22,7 @@ export class IDBManager {
     STATE: 'state',
     HTTP_EVENT: 'httpEvent',
     NAV: 'navigation',
+    PREINDEXING: 'preindexing',
   }
 
 
@@ -29,11 +30,9 @@ export class IDBManager {
   // Init
   // ====================================
 
-  async init(cleanDb = true) {
-    if (cleanDb) {
-      await this.deleteDB(this.name);
-      log({ module: 'indexed db', msg: 'Deleted existing data' });
-    }
+  async init() {
+    await this.deleteDB(this.name);
+    log({ module: 'indexed db', msg: 'Deleted existing data' });
 
     this.db = await this.connectToDb();
   }
@@ -55,16 +54,25 @@ export class IDBManager {
         const db = event.target.result;
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
-          const state = db.createObjectStore(IDBManager.STORES.STATE, { autoIncrement: true }); // primary key (id) handled by indexedDB
+          const state = db.createObjectStore(IDBManager.STORES.STATE, { keyPath: "graphIndex" });
           state.createIndex("url", "url", { unique: false });
           state.createIndex("fingerprint", "fingerprint", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
-          const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true });
+          const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true }); // primary key (id) handled by indexedDB
           httpEvent.createIndex("type", "type", { unique: false });
           httpEvent.createIndex("ignore", "ignore", { unique: false });
           httpEvent.createIndex("fingerprint", "fingerprint", { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains(IDBManager.STORES.PREINDEXING)) {
+          const preindexing = db.createObjectStore(IDBManager.STORES.PREINDEXING, { autoIncrement: true });
+          preindexing.createIndex("graphIndex", "graphIndex", { unique: false });
+          // get a certain value in a certain snapshot
+          preindexing.createIndex("value_graph", ["value", "graphIndex"], { unique: false });
+          // get a certain value only if it is found within N levels inside the `props` object
+          preindexing.createIndex("value_depth", ["value", "depth"], { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.NAV)) {
@@ -89,29 +97,44 @@ export class IDBManager {
   // Create
   // ====================================
 
-  saveState({ data, storeName }) {
+  saveState({ data, storeName, batch = false }) {
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(storeName, "readwrite");
-      const store = tx.objectStore(storeName);
-      const request = store.put(data); // primary key (id) is handled by indexedDB
-      let result;
+      try {
+        const tx = this.db.transaction(storeName, "readwrite");
+        const store = tx.objectStore(storeName);
 
-      request.onsuccess = (e) => {
-        result = { key: e.target.result, storeName };
-      };
+        let results = batch ? [] : null;
 
-      request.onerror = (e) => {
-        console.error("DB SAVE ERROR PAYLOAD:", data);
-        console.error("DB ERROR:", e.target.error);
-        reject(e.target.error);
-      };
+        if (batch && Array.isArray(data)) {
+          data.forEach(item => {
+            const request = store.put(item);
+            request.onsuccess = (e) => {
+              results.push({ key: e.target.result, storeName });
+            };
+            request.onerror = (e) => {
+              console.error("DB SAVE ERROR ITEM:", item);
+              console.error("DB ERROR:", e.target.error);
+            };
+          });
+        } else {
+          const request = store.put(data);
+          request.onsuccess = (e) => {
+            results = { key: e.target.result, storeName };
+          };
+          request.onerror = (e) => {
+            console.error("DB SAVE ERROR PAYLOAD:", data);
+            console.error("DB ERROR:", e.target.error);
+            reject(e.target.error);
+          };
+        }
 
-      tx.oncomplete = () => {
-        resolve(result);
-      };
+        tx.oncomplete = () => resolve(results);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
 
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      } catch (err) {
+        reject(err);
+      }
     });
   }
 

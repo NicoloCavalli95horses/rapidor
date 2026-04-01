@@ -18,21 +18,30 @@ export class StateManager {
     this.dbStores = IDBManager.STORES;
   }
 
-  async init({ listen = true, cleanDb = true } = {}) {   
-    await this.db.init(cleanDb);
-
-    if (!listen) { return; }
+  async init() {
+    await this.db.init();
 
     eventBus.subscribe(async (event) => {
-      if (event.type === events.STATE_UPDATE) {
-        await this.handleUpdate(event, this.dbStores.STATE);
-      } else if (event.type === events.HTTP_EVENT) {
-        // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
-        // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
-        // Hence, we don't store HTTP events twice and execute the analysis only once per event
-        await this.handleUpdate(event, this.dbStores.HTTP_EVENT);
-      } else if (event.type === events.NAV) {
-        await this.saveToDb({ data: event.payload, type: events.NAV, storeName: this.dbStores.NAV });
+
+      switch (event.type) {
+        case events.STATE_UPDATE:
+          await this.handleUpdate(event, this.dbStores.STATE);
+          break;
+
+        case events.HTTP_EVENT:
+          // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
+          // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
+          // Hence, we don't store HTTP events twice and execute the analysis only once per event
+          await this.handleUpdate(event, this.dbStores.HTTP_EVENT);
+          break;
+
+        case events.NAV:
+          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.NAV });
+          break;
+
+        case events.PREINDEXING_UPDATE:
+          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true});
+          break;
       }
     });
   }
@@ -69,11 +78,11 @@ export class StateManager {
    * @param {String} type type of event 
    * @param {String} storeName store name 
    */
-  async saveToDb({ data, type, storeName }) {
+  async saveToDb({ data, type, storeName, batch }) {
     try {
-      const res = await this.db.saveState({ data, storeName });
+      const res = await this.db.saveState({ data, storeName, batch });
       log({ module: 'state manager', msg: `saved ${type} to DB` });
-      emit({ type: events.DB_SUCCESS, payload: { type } }); // this will start the state analysis if HTTP events occurred
+      emit({ type: events.DB_SUCCESS, payload: type }); // this will start the state analysis if HTTP events and state snapshots are saved
       return res;
     } catch (error) {
       log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });

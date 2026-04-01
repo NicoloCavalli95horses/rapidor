@@ -133,7 +133,7 @@ export class GraphSearch {
       if (depth && path.length > depth) { return; } // limit graph exploration 
       if (visited.has(value)) { return; }
 
-      for (const target of Array.from(remainingTargets)) {
+      for (const target of remainingTargets) {
         if (value == target.value) { // loose equality, we must match '123' == 123
           matches.push({ path: [...path], target });
           remainingTargets.delete(target);
@@ -150,7 +150,7 @@ export class GraphSearch {
           if (!remainingTargets.size) { return; }
         }
       } else {
-        for (const k of Object.keys(value)) {
+        for (const k in value) {
           const isWhitelisted = keysWhitelist.includes(k);
           if (!continueSearch && !isWhitelisted) { continue; }
 

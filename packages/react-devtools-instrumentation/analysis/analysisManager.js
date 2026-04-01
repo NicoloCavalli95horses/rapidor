@@ -23,9 +23,11 @@ export class AnalysisManager {
   init() {
     this.loop.init();
 
-    eventBus
-      .pipe(filter(e => e.type === events.DB_SUCCESS))
-      .subscribe(e => this.onDbSuccess());
+    eventBus.subscribe((event) => {
+      if (event.type === events.DB_SUCCESS && event.payload === events.STATE_UPDATE) {
+        this.onDbSuccess();
+      }
+    });
   }
 
 
@@ -50,7 +52,7 @@ export class AnalysisManager {
 
     if (hasOneHttpEvent && hasOneState) {
       log({ module: 'analysis manager', msg: 'starting the analysis...' });
-      await this.loop.startAnalysis();
+      // await this.loop.startAnalysis();
     } else {
       log({ module: 'analysis manager', msg: 'nothing to analyze yet' });
     }
