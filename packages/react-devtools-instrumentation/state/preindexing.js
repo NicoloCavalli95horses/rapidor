@@ -14,8 +14,28 @@ export class PreIndexing {
   constructor() {
     this.batchLength = 5000;
     this.timeoverMs = 5000;
+    this.maxStrLength = 300;
     this.batches = [];
     this.timeoverId = null;
+
+    this.interestingKeys = [
+      // id
+      'id', 'userId', 'accountId', 'profileId', 'orderId',
+      'resourceId', 'itemId', 'objectId', 'docId',
+      'uid', 'uuid', 'guid', 'item',
+      // roles
+      'owner', 'ownerId',
+      'user', 'username',
+      'account', 'accountId',
+      'createdBy', 'updatedBy',
+      'author', 'creator',
+      'role', 'roles',
+      'permission', 'permissions',
+      'scope', 'scopes',
+      'isAdmin', 'isOwner', 'isSubscribed',
+      'accessLevel', 'isPremium', 'premium',
+      'registered', 'sub', 'isRegistered',
+    ];
   }
 
 
@@ -63,8 +83,8 @@ export class PreIndexing {
       data.push({ graphIndex, nodeId, value: key, path: [], depth: 0 });
     }
 
-    this.iterate(props, (value, path) => {
-      if (this.isInteresting(value)) {
+    this.iterate(props, ({ key, value, path }) => {
+      if (this.isInteresting(key, value)) {
         data.push({ graphIndex, nodeId, value, path, depth: path.length });
       }
     });
@@ -75,41 +95,72 @@ export class PreIndexing {
 
 
   iterate(root, callback) {
-    const stack = [{ value: root, path: [] }];
+    const stack = [{ value: root, path: [], key: undefined }];
 
     while (stack.length) {
-      const { value, path } = stack.pop();
+      const { value, path, key } = stack.pop();
 
       if (Array.isArray(value)) {
         for (let i = value.length - 1; i >= 0; i--) {
-          stack.push({ value: value[i], path: [...path, i] });
+          stack.push({ key: i, value: value[i], path: [...path, i] });
         }
       } else if (value !== null && typeof value === "object") {
         const entries = Object.entries(value);
         for (let i = entries.length - 1; i >= 0; i--) {
           const [k, v] = entries[i];
-          stack.push({ value: v, path: [...path, k] });
+          stack.push({ key: k, value: v, path: [...path, k] });
         }
       } else {
-        callback(value, path);
+        callback({ key, value, path });
       }
     }
   }
 
 
 
-  isInteresting(value) {
+  isInteresting(key, value) {
     if (value == null) { return false; }
 
-    if (typeof value === "string") {
-      const v = value.trim();
-      return v.length > 1 && v.length < 300;
-    }
+    if (this.matchesKey(key)) {
 
-    if (typeof value === "number") {
-      return Number.isFinite(value);
+      if (typeof value === 'string') {
+        if (/^\[.*\]$/.test(value)) { return false; } // ignore placeholders
+        const v = value.trim();
+        return v.length > 1 && v.length < this.maxStrLength;
+      }
+
+      if (typeof value === "number") {
+        return Number.isFinite(value);
+      }
     }
 
     return false;
+  }
+
+
+
+  matchesKey(str) {
+    if (!str) { return false; }
+    const norm = str.toString().trim().toLowerCase();
+    const words = this.splitWords(norm);
+
+    return this.interestingKeys.some(k => {
+      const key = k.toLowerCase();
+
+      return (
+        words.includes(key) ||
+        words.some(w => w.startsWith(key)) || // prefix (id → identifier)
+        words.some(w => key.startsWith(w))    // inverse (user → userid)
+      );
+    });
+  }
+
+
+
+  splitWords(str) {
+    return str
+      .replace(/([a-z])([A-Z])/g, '$1 $2') // camelCase → camel + case
+      .toLowerCase()
+      .split(/[^a-z0-9]+/);
   }
 }

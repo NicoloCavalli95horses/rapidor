@@ -74,8 +74,6 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
-    console.log('getting graph...')
-    
     console.time('gettingGraph');
     const payload = await this.getStateGraph(fiber);
     console.timeEnd('gettingGraph');
@@ -130,7 +128,12 @@ export class Bridge {
       g.addNode({ graph, id: context.id, data: context.data });
 
       // process primitive values for preindexing
-      this.preindexing.process({ graphIndex: this.graphIndex, nodeId: context.id, key: context.data.key, props: context.data.props });
+      this.preindexing.process({
+        graphIndex: this.graphIndex,
+        nodeId: context.id,
+        key: context.data.key,
+        props: context.data.props
+      });
 
       if (parentId) {
         // link to parent
@@ -187,7 +190,7 @@ export class Bridge {
         tag: node.tag,
         DOM: this.getDOMInfo(domElement),
         name: this.filterReactComponentName(node.type),
-        props: this.getSerializableValues(node.memoizedProps),
+        props: this.getSerializableValues({ obj: node.memoizedProps }),
       }
     };
   }
@@ -231,7 +234,7 @@ export class Bridge {
 
   // Return true if the node is valid
   shouldKeepNode(tag, domEl) {
-    return domEl || config.tagsWhitelist.includes(tag);
+    return config.tagsWhitelist.includes(tag); // || domEl ;
   }
 
 
@@ -372,30 +375,41 @@ export class Bridge {
 
 
 
-  // traverse props object and return only serializable values
-  getSerializableValues(obj, path, parentKey = null) {
-    if (!path) { path = new Set(); }
+  // Traverse props object at a given depth and return only serializable values
+  getSerializableValues({ obj, path, parentKey, depth = 0, maxDepth = config.maxExplorationDepth } = {}) {
+    if (!path) { path = new Set(); } // current path in recursive exploration
     if (obj === null || typeof obj !== "object") { return obj; }
-    if (path.has(obj)) { return "[circular]"; }
+    if (path.has(obj)) { return "[circular]"; } // example: const obj = {}; obj.self = obj;
+    if (depth >= maxDepth) { return "[max-depth]"; } // does not stop the algorithm but block the current exploration if too deep
 
     path.add(obj);
 
     const result = Array.isArray(obj) ? [] : {};
+    const keys = Object.keys(obj).slice(0, config.maxExplorationKeys);
 
-    for (const key of Reflect.ownKeys(obj)) {
+    for (const key of keys) {
       if (typeof key === "symbol") { continue; }
       const value = obj[key];
-      if (!isSerializableValue(value)) { continue; }
+
+      if (!isSerializableValue(value)) {
+        result[key] = `[non-serializable:${value?.constructor?.name}]`;
+        continue;
+      }
 
       // random key values inside location breaks snapshot equality
       if (key === "key" && parentKey === "location") { continue; }
 
-      if (typeof value === "object" && value !== null) {
-        result[key] = this.getSerializableValues(value, path, key);
-      } else {
-        result[key] = value;
-      }
+      const isExplorable = (typeof value === "object" && value !== null);
+
+      result[key] = isExplorable
+        ? this.getSerializableValues({ obj: value, path, parentKey: key, depth: depth + 1, maxDepth })
+        : result[key] = value;
     }
+
+    // The following line prevents false positives in different branches:
+    // const shared = { value: 42 };
+    // const obj = {a: shared,b: shared}; (this is not [circular], it is just a reuse)
+    path.delete(obj);
 
     return result;
   }

@@ -158,16 +158,21 @@ export function isSerializableValue(value) {
   }
 
   if (t === "object") {
-    if (value === null) { return true; }
-    if (Array.isArray(value)) { return true; }
-
-    // block large host objects
-    if (value === window || value === document || value === location) {
-      return false;
+    if (isPlainObject(value)) {
+      return true;
     }
 
-    return true;
+    return false;
   }
+  return false;
+}
+
+
+
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") { return false; }
+  const proto = Object.getPrototypeOf(value);
+  return (proto === Object.prototype || proto === null);
 }
 
 

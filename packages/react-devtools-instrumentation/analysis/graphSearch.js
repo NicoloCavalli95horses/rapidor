@@ -107,7 +107,7 @@ export class GraphSearch {
           value: node,
           targets,
           keysWhitelist: ['props', 'key'],
-          depth: config.graphExplorationDepth,
+          depth: config.maxExplorationDepth,
         });
 
         if (matches?.length) {
