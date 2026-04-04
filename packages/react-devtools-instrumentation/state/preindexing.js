@@ -1,10 +1,9 @@
 //===================
 // Import
 //===================
-import { emit, eventBus, events } from "../eventBus.js";
-import { filter } from 'rxjs/operators';
+import { emit, events } from "../eventBus.js";
 import { log } from "../utils.js";
-import { config } from "../config.js";
+
 
 
 //===================
@@ -22,7 +21,7 @@ export class PreIndexing {
       // id
       'id', 'userId', 'accountId', 'profileId', 'orderId',
       'resourceId', 'itemId', 'objectId', 'docId',
-      'uid', 'uuid', 'guid', 'item',
+      'uid', 'uuid', 'guid', 'item', 'username',
       // roles
       'owner', 'ownerId',
       'user', 'username',
@@ -85,7 +84,8 @@ export class PreIndexing {
 
     this.iterate(props, ({ key, value, path }) => {
       if (this.isInteresting(key, value)) {
-        data.push({ graphIndex, nodeId, value, path, depth: path.length });
+        // only save strings to avoid false negative in comparison ('112' == 112)
+        data.push({ graphIndex, nodeId, value: value.toString(), path, depth: path.length });
       }
     });
 
@@ -95,7 +95,7 @@ export class PreIndexing {
 
 
   iterate(root, callback) {
-    const stack = [{ value: root, path: [], key: undefined }];
+    const stack = [{ value: root, path: ['props'], key: undefined }];
 
     while (stack.length) {
       const { value, path, key } = stack.pop();
@@ -126,7 +126,7 @@ export class PreIndexing {
       if (typeof value === 'string') {
         if (/^\[.*\]$/.test(value)) { return false; } // ignore placeholders
         const v = value.trim();
-        return v.length > 1 && v.length < this.maxStrLength;
+        return (v.length > 1 && v.length < this.maxStrLength);
       }
 
       if (typeof value === "number") {

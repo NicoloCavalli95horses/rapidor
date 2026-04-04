@@ -14,6 +14,8 @@ export class IDBManager {
     this.name = name;
     this.version = version;
     this.db = null;
+
+    this.lastGraphIndex = 0;
   }
 
   // Config value belonging to the class and not to instances
@@ -32,6 +34,8 @@ export class IDBManager {
 
   async init() {
     await this.deleteDB(this.name);
+    this.lastGraphIndex = 0;
+
     log({ module: 'indexed db', msg: 'Deleted existing data' });
 
     this.db = await this.connectToDb();
@@ -70,7 +74,7 @@ export class IDBManager {
           const preindexing = db.createObjectStore(IDBManager.STORES.PREINDEXING, { autoIncrement: true });
           preindexing.createIndex("graphIndex", "graphIndex", { unique: false });
           // get a certain value in a certain snapshot
-          preindexing.createIndex("value_graph", ["value", "graphIndex"], { unique: false });
+          preindexing.createIndex("value_graphIndex", ["value", "graphIndex"], { unique: false });
           // get a certain value only if it is found within N levels inside the `props` object
           preindexing.createIndex("value_depth", ["value", "depth"], { unique: false });
         }
@@ -218,6 +222,25 @@ export class IDBManager {
 
 
 
+  async deleteById({ id, storeName }) {
+    if (!this.db) {
+      throw new Error("Database not initialized");
+    }
+
+    const tx = this.db.transaction(storeName, "readwrite");
+    const store = tx.objectStore(storeName);
+
+    return new Promise((resolve, reject) => {
+      const request = store.delete(id);
+      request.onerror = (e) => reject(e.target.error);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = (e) => reject(e.target.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+
+
+
   // ====================================
   // Read
   // ====================================
@@ -279,6 +302,25 @@ export class IDBManager {
 
 
 
+  // Returns matching preindexed nodes of all snapshots in the given interval
+  async getPreIndexedByValueInInterval({ value, interval }) {
+    const lower = Math.max(0, this.lastGraphIndex - interval);
+
+    const range = IDBKeyRange.bound(
+      [value, lower],
+      [value, this.lastGraphIndex]
+    );
+
+    return this.query({
+      storeName: IDBManager.STORES.PREINDEXING,
+      index: 'value_graphIndex',
+      method: 'getAll',
+      query: range
+    });
+  }
+
+
+
   // Store-based reads
   // ====================================
 
@@ -312,18 +354,25 @@ export class IDBManager {
   // ====================================
 
   // returns next row in given store name
-  async getNextCursor(storeName, lastKey = null) {
+  async getNextCursor(storeName, lastKey) {
     const tx = this.db.transaction(storeName, "readonly");
     const store = tx.objectStore(storeName);
 
     return await new Promise((resolve, reject) => {
-      const request = (lastKey !== null)
+      const request = lastKey
         ? store.openCursor(IDBKeyRange.lowerBound(lastKey, true))
         : store.openCursor();
 
       request.onsuccess = (e) => resolve(e.target.result); // cursor or null
       request.onerror = (e) => reject(e.target.error);
     });
+  }
+
+
+
+  updateLastGraphIdx() {
+    this.lastGraphIndex++;
+    return true;
   }
 
 

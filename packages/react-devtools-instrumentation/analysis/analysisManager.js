@@ -22,12 +22,7 @@ export class AnalysisManager {
 
   init() {
     this.loop.init();
-
-    eventBus.subscribe((event) => {
-      if (event.type === events.DB_SUCCESS && event.payload === events.STATE_UPDATE) {
-        this.onDbSuccess();
-      }
-    });
+    eventBus.subscribe(e => this.onDbSuccess());
   }
 
 
@@ -49,10 +44,11 @@ export class AnalysisManager {
   async startAnalysis() {
     const hasOneHttpEvent = await this.stateManager.hasOneHttpEvent();
     const hasOneState = await this.stateManager.hasOneState();
+    const hasOnePreIndexed = await this.stateManager.hasOnePreIndexed();
 
-    if (hasOneHttpEvent && hasOneState) {
+    if (hasOneHttpEvent && hasOneState && hasOnePreIndexed) {
       log({ module: 'analysis manager', msg: 'starting the analysis...' });
-      // await this.loop.startAnalysis();
+      await this.loop.startAnalysis();
     } else {
       log({ module: 'analysis manager', msg: 'nothing to analyze yet' });
     }

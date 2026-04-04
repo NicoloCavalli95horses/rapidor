@@ -80,20 +80,6 @@ export class Bridge {
     emit({ type: events.STATE_UPDATE, payload });
   }
 
-  // [TODO]
-  // We are already pruning the gigantic fiber object provided by React and we get a simplified graph with all the relevant relations
-  // Unfortunately, this is not enough. In large applications, building a graph takes up to 10 seconds (each time)
-  // The DFS loops indefinitely in certain cases, since it is done for each HTTP request on each state snapshot/graph within a given analysis window
-  //
-  // [Idea]: Pre-indexing `interesting` values during the graph building phase
-  // string1: {snapshotKey1: [node-1, node-2, ...]}
-  // string2: {snapshotKey1: [node-1, node-2, ...], snapshotKey2: [node-1, node-2, ...]}
-  //
-  // Even with 50k rows, this map can drastically optimize the search
-  //
-  // [Workflow]
-  // HTTP event > properties extraction > lookup on map > get and process relevant nodes > find alternative data > ...
-
 
 
   // [entry point] gets and returns the graph

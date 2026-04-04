@@ -38,6 +38,8 @@ export class ResponseEvaluator {
     const currResponse = candidate.response;
 
     const resSimilarity = this.responseSimilarity({ refResponse, currResponse });
+
+    console.log({event, resSimilarity});
     
     if (Array.isArray(refDOM) && Array.isArray(currDOM)) {
       const DOMsimilarity = this.evaluateDOM({ refDOM: refDOM[refIdx], currDOM: currDOM[currIdx] });
@@ -76,7 +78,7 @@ export class ResponseEvaluator {
       equalResponseFields: compare,
       bodyLength: { isLengthSimilar, refBodyLength, currBodyLength, threshold: config.resBodyThr },
       bodySimilarity,
-      ratio: "the similarity is calculated on body length and body content (Object keys)",
+      ratio: "the similarity is calculated on Object keys of both body length and body content",
     }
   }
 

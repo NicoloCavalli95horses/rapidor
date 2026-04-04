@@ -9,77 +9,7 @@ import { getValueAtPath } from "../utils.js";
 // Class
 //===================
 export class GraphSearch {
-  constructor(stateManager) {
-    this.stateManager = stateManager;
-  }
-
-
-
-  async find(data) {
-    const { snapshot, key, http, properties } = data;
-    const { nodes, relations, componentIndex, navigationInfo: stateNavInfo } = snapshot;
-    const results = this.getMatches({ nodes, componentIndex, relations, key, properties });
-    const matchingSets = await this.processResults({ results, componentIndex, nodes, relations });
-    const success = matchingSets.length;
-    return { success, http, results: matchingSets };
-  }
-
-
-
-  // For each matching node, build sub-arrays with candidates and DOM references
-  // [[ {referenceNode: {...}}, {candidateNodes: [{...},{...}] ]]
-  async processResults({ results, componentIndex, nodes, relations }) {
-    if (!results.length) { return []; }
-    const couples = [];
-
-    for (const result of results) {
-      const instanceId = result.node.componentId;
-      const nodeIds = componentIndex[instanceId];
-      const candidateNodes = [];
-      const domPromises = [];
-
-      if (!result.node.DOM) {
-        result.node.DOM = await this.stateManager.getAncestorDOM(result.rowId, result.node.id);
-      }
-
-      if (!nodeIds.length) { continue; }
-
-      for (const candidateId of nodeIds) {
-        if (candidateId === result.node.id) { continue; }
-
-        const candidateNode = nodes[candidateId];
-        const candidateMatch = getValueAtPath(candidateNode, result.path);
-
-        if ([null, undefined, ''].includes(candidateMatch)) { continue; }
-
-        if (!candidateNode.DOM) {
-          domPromises.push(
-            this.stateManager
-              .getAncestorDOM(result.rowId, candidateNode.id)
-              .then(dom => { candidateNode.DOM = dom; })
-          );
-        }
-
-        const candidateTarget = structuredClone(result.target);
-        candidateTarget.value = candidateMatch;
-
-        candidateNodes.push({
-          node: candidateNode,
-          rowId: result.rowId,
-          path: result.path,
-          target: candidateTarget,
-          relations: relations[candidateNode.id]
-        });
-      }
-
-      await Promise.all(domPromises);
-
-      if (candidateNodes.length) {
-        couples.push({ referenceNode: result, candidateNodes })
-      }
-    }
-
-    return couples;
+  constructor() {
   }
 
 
@@ -112,7 +42,7 @@ export class GraphSearch {
 
         if (matches?.length) {
           matches.forEach(match => {
-            results.push({ node, rowId: key, ...match, relations: relations[nodeId] });
+            results.push({ node, graphIndex: key, ...match, relations: relations[nodeId] });
           });
           ids.add(nodeId);
         }

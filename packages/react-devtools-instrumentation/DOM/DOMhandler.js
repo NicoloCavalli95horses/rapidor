@@ -122,11 +122,13 @@ export class DOMhandler {
 
   updateProgressBar({ payload, els }) {
     const { bg, h1, p, pr } = els;
-    const { max, value, totHTTPevents, totStates } = payload.progress;
-    p.textContent = `${value} out of ${max} (HTTP events: ${totHTTPevents}, states: ${totStates})`;
+    const { on_progress } = payload;
+    const { max, value } = payload.progress;
+
+    p.textContent = `${value} out of ${max} HTTP events`;
     pr.value = value;
     pr.max = max;
-    h1.textContent = value === max ? "Analysis completed" : "Analysis in progress...";
+    h1.textContent = on_progress ? "Analysis in progress..." : "Analysis completed";
     bg.style.display = (payload.on_progress || this.keepOverlay) ? "block" : "none";
   }
 

@@ -25,7 +25,8 @@ export class StateManager {
 
       switch (event.type) {
         case events.STATE_UPDATE:
-          await this.handleUpdate(event, this.dbStores.STATE);
+          const res = await this.handleUpdate(event, this.dbStores.STATE);
+          if (res) { this.db.updateLastGraphIdx(); }
           break;
 
         case events.HTTP_EVENT:
@@ -40,7 +41,8 @@ export class StateManager {
           break;
 
         case events.PREINDEXING_UPDATE:
-          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true});
+          // [TODO] do not save two times the same values, just update the snapshot key
+          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
           break;
       }
     });
@@ -53,11 +55,11 @@ export class StateManager {
 
     if (isStored) {
       log({ module: 'state manager', msg: `event already saved to DB, skipping` });
-      return;
+      return false;
     }
 
     const data = await this.prepareData(event.payload);
-    await this.saveToDb({ data, type: event.type, storeName });
+    return await this.saveToDb({ data, type: event.type, storeName });
   }
 
 
@@ -101,23 +103,37 @@ export class StateManager {
 
 
   // returns node
-  async getNodeByID(rowId, nodeId) {
-    const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
+  async getNodeByID(graphIndex, nodeId) {
+    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
     return state.nodes[nodeId];
   }
 
 
 
   // returns node relations
-  async getRelationsByID(rowId, nodeId) {
-    const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
+  async getRelationsByID(graphIndex, nodeId) {
+    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
     return state.relations[nodeId];
   }
 
 
 
-  async getIdsOfInstances(rowId, componentId) {
-    const state = await this.db.getByID({ id: rowId, storeName: this.dbStores.STATE });
+  async deleteHTTPEvent(key) {
+    return await this.db.deleteById({ id: key, storeName: this.dbStores.HTTP_EVENT });
+  }
+
+
+
+  // returns component index
+  async getComponentIndexByID(graphIndex) {
+    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
+    return state.componentIndex;
+  }
+
+
+
+  async getIdsOfInstances(graphIndex, componentId) {
+    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
     return state.componentIndex[componentId];
   }
 
@@ -129,11 +145,20 @@ export class StateManager {
 
 
 
-  async getAncestorDOM(rowId, parentId) {
+  async getPreIndexedByValue(value) {
+    return await this.db.getPreIndexedByValueInInterval({
+      value: value.toString(),
+      interval: config.analysisWindowSize
+    });
+  }
+
+
+
+  async getAncestorDOM(graphIndex, parentId) {
     let currentId = parentId;
 
     while (currentId) {
-      const node = await this.getNodeByID(rowId, currentId);
+      const node = await this.getNodeByID(graphIndex, currentId);
       if (!node) { return; }
       if (node.DOM) {
         return {
@@ -150,8 +175,8 @@ export class StateManager {
 
 
 
-  async getHTTPeventByID(rowId) {
-    return await this.db.getByID({ id: rowId, storeName: this.dbStores.HTTP_EVENT });
+  async getHTTPeventByID(graphIndex) {
+    return await this.db.getByID({ id: graphIndex, storeName: this.dbStores.HTTP_EVENT });
   }
 
 
@@ -194,6 +219,12 @@ export class StateManager {
 
   async hasOneState() {
     return await this.db.hasAny({ storeName: this.dbStores.STATE });
+  }
+
+
+
+  async hasOnePreIndexed() {
+    return await this.db.hasAny({ storeName: this.dbStores.PREINDEXING });
   }
 
 

@@ -38,30 +38,28 @@ export class RequestGenerator {
 
 
   async handleEvent(event) {
-    const { http, results } = event;
-    const { request: referenceReq, response: referenceRes, type } = http; // [TODO] if response is empty, look at the first available graph matching the nav id
-    log({ module: 'request generator', msg: 'received matches, building requests...' });
-    const self = this;
+    const { httpEvent, results } = event;
+    const { request: referenceReq, response: referenceRes, type } = httpEvent; // [TODO] if response is empty, look at the first available graph matching the nav id
 
     for (const { referenceNode, candidateNodes } of results) {
       for (let i = 0; i < candidateNodes.length; i++) {
         const candidate = candidateNodes[i];
         const node = candidate.node;
-        const request = self.buildRequest({ reference: referenceReq, target: candidate.target });
+        const request = this.buildRequest({ reference: referenceReq, target: candidate.target });
 
-        if (await self.alreadyDone(request)) {
+        if (await this.alreadyDone(request)) {
           log({ module: 'request generator', msg: 'new request already sent' });
           continue;
         }
-        const response = await self.executeRequest(request, type);
+        const response = await this.executeRequest(request, type);
         // [TODO] if response is 40X, and we have query parameters, try using the React routing system
         // > This is the Pimsleur scenario
 
         const payload = {
           reference: {
             node: referenceNode.node,
-            request: http.request,
-            response: http.response
+            request: httpEvent.request,
+            response: httpEvent.response
           },
           candidate: {
             node,
@@ -129,11 +127,11 @@ export class RequestGenerator {
 
     return new Promise((resolve) => {
       // register the Promise in order to be resolved later
-      this.pendingRequests.set(requestId, resolve);
+      self.pendingRequests.set(requestId, resolve);
 
       if (type === events.FETCH_EVENT) {
         window.fetch(request).catch((err) => {
-          this.pendingRequests.delete(requestId);
+          self.pendingRequests.delete(requestId);
           resolve({ error: err });
         });
       } else if (type === events.XML_EVENT) {
