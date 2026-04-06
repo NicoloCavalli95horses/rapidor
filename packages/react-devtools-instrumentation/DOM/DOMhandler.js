@@ -24,7 +24,7 @@ export class DOMhandler {
 
       eventBus.subscribe((e) => {
         if (e.type === events.ANALYSIS_IN_PROGRESS) {
-          this.updateProgressBar({ payload: e.payload, els });
+          this.updateInfo({ payload: e.payload, els });
         } else if (e.type === events.REPORT) {
           this.showWarning(els);
         }
@@ -96,40 +96,26 @@ export class DOMhandler {
     h1.textContent = "Analysis in progress...";
 
     const h2 = document.createElement("h2");
-    h2.style.color = "orange";
+    h2.style.color = "white";
 
     const p = document.createElement("p");
     p.style.color = "white";
 
-    const pr = document.createElement("progress");
-    pr.value = 0;
-    pr.max = 100;
-    pr.style.cssText = `
-      width: 400px;
-      height: 50px;
-      pointer-events:none;
-    `;
-
     wrapper.appendChild(h1);
-    wrapper.appendChild(p);
-    wrapper.appendChild(pr);
     wrapper.appendChild(h2);
+    wrapper.appendChild(p);
 
-    return { bg, h1, h2, p, pr };
+    return { h1, h2, p, bg };
   }
 
 
 
-  updateProgressBar({ payload, els }) {
-    const { bg, h1, p, pr } = els;
-    const { on_progress } = payload;
-    const { max, value } = payload.progress;
-
-    p.textContent = `${value} out of ${max} HTTP events`;
-    pr.value = value;
-    pr.max = max;
-    h1.textContent = on_progress ? "Analysis in progress..." : "Analysis completed";
-    bg.style.display = (payload.on_progress || this.keepOverlay) ? "block" : "none";
+  updateInfo({ payload, els }) {
+    const { h1, h2, p, bg } = els;
+    h1.textContent = payload.h1;
+    h2.textContent = payload.h2;
+    p.textContent = payload.p;
+    bg.style.display = (payload.keepOverlay || this.keepOverlay) ? "block" : "none";
   }
 
 
@@ -139,6 +125,7 @@ export class DOMhandler {
     this.keepOverlay = true;
     const { bg, h2 } = els;
     bg.style.display = "block";
+    h2.style.color = "orange";
     h2.textContent = `${this.bacCounter} potential access control issue found ⚠️​`;
   }
 

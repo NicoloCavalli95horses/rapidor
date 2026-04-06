@@ -2,7 +2,7 @@
 // Import
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
-import { emit, events } from '../eventBus.js';
+import { emit, events, eventBus } from '../eventBus.js';
 import { debounce, log, isSerializableValue } from '../utils.js';
 import { Graph } from './graph.js';
 import { config } from '../config.js';
@@ -29,6 +29,12 @@ export class Bridge {
 
   // Connect to React specific APIs
   init() {
+    eventBus.subscribe(e => {
+      if (e.type === events.STATE_UPDATE) {
+        this.preindexing.emit(); // if graph was saved successfully, save the preindexed data
+      }
+    });
+
     this.listenToFiberCommits();
   }
 
@@ -77,6 +83,7 @@ export class Bridge {
     console.time('gettingGraph');
     const payload = await this.getStateGraph(fiber);
     console.timeEnd('gettingGraph');
+
     emit({ type: events.STATE_UPDATE, payload });
   }
 
@@ -114,7 +121,7 @@ export class Bridge {
       g.addNode({ graph, id: context.id, data: context.data });
 
       // process primitive values for preindexing
-      this.preindexing.process({
+      this.preindexing.prepareData({
         graphIndex: this.graphIndex,
         nodeId: context.id,
         key: context.data.key,
@@ -313,8 +320,7 @@ export class Bridge {
 
 
 
-  // [TODO] shall we assign the DOM to the siblings directly at this level (?)
-  // to review: DOM children is confusing here
+  // [TODO] to review: DOM children is confusing here
   getDOMInfo(el) {
     function visit(node) {
       if (!node) { return; };

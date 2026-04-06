@@ -31,7 +31,7 @@ export class GraphSearch {
         if (ids.has(nodeId)) { continue; }
 
         const node = nodes[nodeId];
-        if (!config.tagsWhitelist.includes(node.tag)) { continue; } // [TODO] check other tags
+        if (!config.tagsWhitelist.includes(node.tag)) { continue; }
 
         const matches = this.getMatchingNode({
           value: node,

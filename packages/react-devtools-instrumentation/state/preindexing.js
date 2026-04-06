@@ -11,11 +11,8 @@ import { log } from "../utils.js";
 //===================
 export class PreIndexing {
   constructor() {
-    this.batchLength = 5000;
-    this.timeoverMs = 5000;
     this.maxStrLength = 300;
-    this.batches = [];
-    this.timeoverId = null;
+    this.data = [];
 
     this.interestingKeys = [
       // id
@@ -39,57 +36,29 @@ export class PreIndexing {
 
 
 
-  process({ graphIndex, nodeId, key, props }) {
-    const batch = this.createBatch({ graphIndex, nodeId, key, props });
-    if (batch.length === 0) { return; }
-
-    for (const item of batch) { // prevent stackoverflow
-      this.batches.push(item);
-    }
-
-    if (!this.timeoverId) {
-      this.timeoverId = setTimeout(() => {
-        this.flush();
-      }, this.timeoverMs);
-    }
-
-    if (this.batches.length >= this.batchLength) {
-      this.flush();
-    }
-  }
-
-
-
-  flush() {
-    if (this.batches.length === 0) { return; }
-
-    emit({ type: events.PREINDEXING_UPDATE, payload: this.batches });
-    log({ module: 'preindexing', msg: 'emitted batch' })
-    this.batches = [];
-
-    if (this.timeoverId) {
-      clearTimeout(this.timeoverId);
-      this.timeoverId = null;
-    }
-  }
-
-
-
-  createBatch({ graphIndex, nodeId, key, props }) {
-    const data = [];
-
+  // Create data to preindex
+  prepareData({ graphIndex, nodeId, key, props }) {
     if (this.isInteresting(key)) {
-      data.push({ graphIndex, nodeId, value: key, path: [], depth: 0 });
+      this.data.push({ graphIndex, nodeId, value: key, path: [], depth: 0 });
     }
 
     this.iterate(props, ({ key, value, path }) => {
       if (this.isInteresting(key, value)) {
         // only save strings to avoid false negative in comparison ('112' == 112)
-        data.push({ graphIndex, nodeId, value: value.toString(), path, depth: path.length });
+        this.data.push({ graphIndex, nodeId, value: value.toString(), path, depth: path.length });
       }
     });
+  }
 
-    return data;
+
+
+  emit() {
+    if (this.data.length === 0) { return; }
+
+    emit({ type: events.PREINDEXING_UPDATE, payload: this.data });
+    log({ module: 'preindexing', msg: 'emitted batch' })
+
+    this.data = [];
   }
 
 

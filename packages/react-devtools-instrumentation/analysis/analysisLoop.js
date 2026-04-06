@@ -2,11 +2,10 @@
 // Import
 //===================
 import { emit, eventBus, events } from "../eventBus.js";
-import { filter } from 'rxjs/operators';
-import { log, sendPostMessage, listenToMsg, getValueAtPath } from "../utils.js";
+import { log, updateDOM } from "../utils.js";
+import { config } from "../config.js";
 import { StateManager } from "../state/stateManager.js";
 import { RequestGenerator } from "./requestGenerator.js";
-import { config } from "../config.js";
 import { MatchFinder } from "./matchFinder.js";
 
 
@@ -32,8 +31,7 @@ export class AnalysisLoop {
   async startAnalysis() {
     let httpEvent = {};
     let lastKey = undefined;
-
-    const total = await this.stateManager.getTotalHttpEvent();
+    this.displayInfo({ h2: "Matching data from HTTP requests with available data", keepOverlay: true });
 
     while (true) {
       httpEvent = await this.stateManager.getNextHttpEvent(lastKey);
@@ -45,33 +43,21 @@ export class AnalysisLoop {
 
       lastKey = httpEvent.key;
 
-      // Show progress bar
-      // this.updateDOM({ total, current: lastKey })
+      const match = await this.matchFinder.find(httpEvent); // Find matches on preindexed values, get full nodes, return alternative instances
+      match.success
+        ? emit({ type: events.GEN_REQ, payload: match })
+        : log({ module: 'analysis loop', msg: 'no results' });
 
-      // Find matches on preindexed values, get full nodes, return alternative instances
-      const match = await this.matchFinder.find(httpEvent);
-      match.success ? emit({ type: events.GEN_REQ, payload: match }) : log({ module: 'analysis loop', msg: 'no results' });
-    
-      // Safe delete: the keys of the remaining elements do not change after deleting an entry
-      await this.stateManager.deleteHTTPEvent(lastKey);
+      await this.stateManager.deleteHTTPEvent(lastKey); // keys of remaining elements do not change after deleting an entry
     }
 
     log({ module: 'analysis manager', msg: 'exit analysis' });
+    this.displayInfo();
   }
 
 
 
-  // [TODO]: since we delete the HTTP events, we need to refactor this
-  updateDOM({ total, current = 1 }) {
-    emit({
-      type: events.ANALYSIS_IN_PROGRESS,
-      payload: {
-        on_progress: current != total,
-        progress: {
-          max: total,
-          value: current,
-        }
-      }
-    });
+  displayInfo({ h1, h2, p, keepOverlay } = {}) {
+    updateDOM({ h1, h2, p, keepOverlay });
   }
 }
