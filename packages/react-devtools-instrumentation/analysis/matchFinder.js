@@ -44,7 +44,7 @@ export class MatchFinder {
 
     const results = await Promise.all(
       properties.map(async (property) => {
-        const matches = await this.stateManager.getPreIndexedByValue(property.value);
+        const matches = await this.stateManager.getPreIndexed(property.value);
         if (!matches?.length) { return []; }
 
         return Promise.all(

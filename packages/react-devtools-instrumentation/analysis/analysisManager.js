@@ -22,7 +22,11 @@ export class AnalysisManager {
 
   init() {
     this.loop.init();
-    eventBus.subscribe(e => this.onDbSuccess());
+    eventBus.subscribe(e => {
+      if (e.type === events.DB_SUCCESS) {
+        this.onDbSuccess()
+      }
+    });
   }
 
 

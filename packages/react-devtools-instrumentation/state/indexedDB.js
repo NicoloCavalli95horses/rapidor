@@ -14,8 +14,6 @@ export class IDBManager {
     this.name = name;
     this.version = version;
     this.db = null;
-
-    this.lastGraphIndex = 0;
   }
 
   // Config value belonging to the class and not to instances
@@ -34,7 +32,6 @@ export class IDBManager {
 
   async init() {
     await this.deleteDB(this.name);
-    this.lastGraphIndex = 0;
 
     log({ module: 'indexed db', msg: 'Deleted existing data' });
 
@@ -60,14 +57,14 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
           const state = db.createObjectStore(IDBManager.STORES.STATE, { keyPath: "graphIndex" });
           state.createIndex("url", "url", { unique: false });
-          state.createIndex("fingerprint", "fingerprint", { unique: false });
+          state.createIndex("fingerprint", "fingerprint", { unique: true });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true }); // primary key (id) handled by indexedDB
           httpEvent.createIndex("type", "type", { unique: false });
           httpEvent.createIndex("ignore", "ignore", { unique: false });
-          httpEvent.createIndex("fingerprint", "fingerprint", { unique: false });
+          httpEvent.createIndex("fingerprint", "fingerprint", { unique: true });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.PREINDEXING)) {
@@ -222,19 +219,101 @@ export class IDBManager {
 
 
 
-  async deleteById({ id, storeName }) {
+  async deleteByIndex({ storeName, index, value }) {
+    return this._withStore(storeName, "readwrite", (store) => {
+      const source = store.index(index);
+      const range = IDBKeyRange.only(value);
+
+      return this._deleteWithCursor({ source, range });
+    });
+  }
+
+
+
+  async deleteFirst({ storeName }) {
+    return this._withStore(storeName, "readwrite", (store) => {
+      return new Promise((resolve, reject) => {
+        const request = store.openCursor();
+
+        request.onsuccess = (e) => {
+          const cursor = e.target.result;
+
+          if (!cursor) {
+            resolve(false);
+            return;
+          }
+
+          const deletedValue = { value: cursor.value, key: cursor.key };
+          cursor.delete();
+
+          resolve(deletedValue);
+        };
+
+        request.onerror = () => reject(request.error);
+      });
+    });
+  }
+
+
+
+  async deleteById({ storeName, id }) {
+    return this._withStore(storeName, "readwrite", (store) => {
+      return this._deleteRows(store, [id]);
+    });
+  }
+
+
+
+  _deleteWithCursor({ source, range = null }) {
+    return new Promise((resolve, reject) => {
+      const request = source.openCursor(range);
+
+      request.onsuccess = (e) => {
+        const cursor = e.target.result;
+
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        cursor.delete();
+        cursor.continue();
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+
+  _deleteRows(store, keys) {
+    return Promise.all(
+      keys.map(key => {
+        return new Promise((resolve, reject) => {
+          const req = store.delete(key);
+          req.onsuccess = resolve;
+          req.onerror = () => reject(req.error);
+        });
+      })
+    );
+  }
+
+
+  async _withStore(storeName, mode, fn) {
     if (!this.db) {
       throw new Error("Database not initialized");
     }
 
-    const tx = this.db.transaction(storeName, "readwrite");
+    const tx = this.db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
 
     return new Promise((resolve, reject) => {
-      const request = store.delete(id);
-      request.onerror = (e) => reject(e.target.error);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = (e) => reject(e.target.error);
+      Promise.resolve(fn(store))
+        .then(result => {
+          tx.oncomplete = () => resolve(result);
+        })
+        .catch(reject);
+
+      tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
     });
   }
@@ -284,13 +363,13 @@ export class IDBManager {
   // ====================================
 
   async getAllByIndex({ storeName, index, query }) {
-    return this.query({ storeName, index, query, method: 'getAll' });
+    return await this.query({ storeName, index, query, method: 'getAll' });
   }
 
 
 
   async getOneByIndex({ storeName, index, query }) {
-    return this.query({ storeName, index, query, method: 'get' });
+    return await this.query({ storeName, index, query, method: 'get' });
   }
 
 
@@ -303,15 +382,10 @@ export class IDBManager {
 
 
   // Returns matching preindexed nodes of all snapshots in the given interval
-  async getPreIndexedByValueInInterval({ value, interval }) {
-    const lower = Math.max(0, this.lastGraphIndex - interval);
+  async getPreIndexedByValue(value) {
+    const range = IDBKeyRange.only(value);
 
-    const range = IDBKeyRange.bound(
-      [value, lower],
-      [value, this.lastGraphIndex]
-    );
-
-    return this.query({
+    return await this.query({
       storeName: IDBManager.STORES.PREINDEXING,
       index: 'value_graphIndex',
       method: 'getAll',
@@ -370,37 +444,15 @@ export class IDBManager {
 
 
 
-  updateLastGraphIdx() {
-    this.lastGraphIndex++;
-    return true;
-  }
+  async isDataStored({ storeName, fingerprint }) {
+    const result = await this.query({
+      storeName,
+      index: "fingerprint",
+      method: "get",
+      query: fingerprint
+    });
 
-
-
-  async isDataStored({ payload, storeName, id }) {
-    let isStored = false;
-    let current = {};
-
-    if (!this.db) {
-      throw new Error("Database not initialized");
-    }
-
-    while (true) {
-      current = await this.getNextCursor(storeName, current?.key);
-      if (!current) {
-        isStored = false;
-        break;
-      }
-
-      if (id ? (current.value[id] === payload[id]) : current.value === payload) {
-        isStored = true;
-        break;
-      }
-      // const diff = this.checkDifferences(storedData, receivedData);
-      // log({module: 'indexed DB', msg: `differences between stored objects: ${JSON.stringify(diff)}`})
-    }
-
-    return { isStored, key: current?.key };
+    return !!result;
   }
 
 

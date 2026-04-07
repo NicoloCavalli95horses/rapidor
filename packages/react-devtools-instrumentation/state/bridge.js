@@ -30,8 +30,9 @@ export class Bridge {
   // Connect to React specific APIs
   init() {
     eventBus.subscribe(e => {
-      if (e.type === events.STATE_UPDATE) {
+      if (e.type === events.DB_SUCCESS && e.payload === events.STATE_UPDATE) {
         this.preindexing.emit(); // if graph was saved successfully, save the preindexed data
+        this.graphIndex++; // update graph index only in case of success
       }
     });
 
@@ -99,7 +100,6 @@ export class Bridge {
     graph.componentIndex = this.buildComponentIndex(); // index of componentId: [node-1, node-2, ...]
     graph.fingerprint = await this.getFingerprint(graph); // used to compare graphs
     graph.graphIndex = this.graphIndex;
-    this.graphIndex++;
 
     return graph;
   }

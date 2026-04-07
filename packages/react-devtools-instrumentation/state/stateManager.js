@@ -25,15 +25,11 @@ export class StateManager {
 
       switch (event.type) {
         case events.STATE_UPDATE:
-          const res = await this.handleUpdate(event, this.dbStores.STATE);
-          if (res) { this.db.updateLastGraphIdx(); }
+          await this.handleStateUpdate(event, this.dbStores.STATE);
           break;
 
         case events.HTTP_EVENT:
-          // Theoretically, we cannot assume that the answer from the web server will be always the same (data could be updated or deleted, even for GET requests)
-          // However, we are interested in "data access" more than "data content": so logically if a GET request was accepted before, it must be accepted again if no major changes occur
-          // Hence, we don't store HTTP events twice and execute the analysis only once per event
-          await this.handleUpdate(event, this.dbStores.HTTP_EVENT);
+          await this.handleHTTPUpdate(event, this.dbStores.HTTP_EVENT);
           break;
 
         case events.NAV:
@@ -41,7 +37,7 @@ export class StateManager {
           break;
 
         case events.PREINDEXING_UPDATE:
-          // [TODO] do not save two times the same values, just update the snapshot key
+          // [TODO] do not save two row with the same primitive values, just update the snapshot key
           await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
           break;
       }
@@ -50,23 +46,52 @@ export class StateManager {
 
 
 
+  async handleStateUpdate(event, storeName) {
+    await this.handleUpdate(event, storeName);
+
+    // Delete old state snapshots and pre-indexing if we are outside of the analysis window
+    const totStates = await this.getTotalStates();
+    if (totStates <= config.maxStateSnapshots) { return; }
+
+    // IndexedDB does not support relations. Here we have 1 (state) -> N (preindexing)
+    // we need to manually delete all the data in the related table
+    const deleted = await this.db.deleteFirst({ storeName });
+
+    if (deleted) {
+      await this.db.deleteByIndex({
+        storeName: this.dbStores.PREINDEXING,
+        index: 'graphIndex',
+        value: deleted.value.graphIndex
+      })
+    }
+
+    log({ module: "state manager", msg: `Out of analysis window. Deleted state snapshot and preindexed data at key ${deleted.value.graphIndex}` })
+  }
+
+
+
+  async handleHTTPUpdate(event, storeName) {
+    return await this.handleUpdate(event, storeName);
+  }
+
+
+
   async handleUpdate(event, storeName) {
-    const { isStored } = await this.db.isDataStored({ payload: event.payload, storeName, id: 'fingerprint' });
+    const isStored = await this.db.isDataStored({ storeName, fingerprint: event.payload.fingerprint });
 
     if (isStored) {
-      log({ module: 'state manager', msg: `event already saved to DB, skipping` });
+      log({ module: 'state manager', msg: `Event ${event.type} already saved to DB, skipping` });
       return false;
     }
 
-    const data = await this.prepareData(event.payload);
+    const data = this.prepareData(event.payload);
     return await this.saveToDb({ data, type: event.type, storeName });
   }
 
 
 
-  async prepareData(data) {
+  prepareData(data) {
     // direct mutation O(1) is more efficient than using spread notation O(n), which iterate on data
-    data.navigationInfo = await this.getNavigationInfo();
     data.sessionID = config.sessionID;
     data.timestamp = Date.now();
     return data;
@@ -84,20 +109,11 @@ export class StateManager {
     try {
       const res = await this.db.saveState({ data, storeName, batch });
       log({ module: 'state manager', msg: `saved ${type} to DB` });
-      emit({ type: events.DB_SUCCESS, payload: type }); // this will start the state analysis if HTTP events and state snapshots are saved
+      emit({ type: events.DB_SUCCESS, payload: type });
       return res;
     } catch (error) {
       log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
     }
-  }
-
-
-
-  async getNavigationInfo() {
-    const storeName = this.dbStores.NAV;
-    const url = decodeURIComponent(window.location.href);
-    const { isStored, key: idx } = await this.db.isDataStored({ payload: url, storeName });
-    return isStored ? { url, idx } : {};
   }
 
 
@@ -145,11 +161,8 @@ export class StateManager {
 
 
 
-  async getPreIndexedByValue(value) {
-    return await this.db.getPreIndexedByValueInInterval({
-      value: value.toString(),
-      interval: config.analysisWindowSize
-    });
+  async getPreIndexed(value) {
+    return await this.db.getPreIndexedByValue(value.toString());
   }
 
 
@@ -182,13 +195,13 @@ export class StateManager {
 
 
   async getNextHttpEvent(key) {
-    return this.db.getNextCursor(this.dbStores.HTTP_EVENT, key);
+    return await this.db.getNextCursor(this.dbStores.HTTP_EVENT, key);
   }
 
 
 
   async getNextState(key) {
-    return this.db.getNextCursor(this.dbStores.STATE, key);
+    return await this.db.getNextCursor(this.dbStores.STATE, key);
   }
 
 
