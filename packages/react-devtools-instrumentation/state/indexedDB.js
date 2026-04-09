@@ -23,6 +23,7 @@ export class IDBManager {
     HTTP_EVENT: 'httpEvent',
     NAV: 'navigation',
     PREINDEXING: 'preindexing',
+    REPORT: 'report',
   }
 
 
@@ -70,14 +71,15 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(IDBManager.STORES.PREINDEXING)) {
           const preindexing = db.createObjectStore(IDBManager.STORES.PREINDEXING, { autoIncrement: true });
           preindexing.createIndex("graphIndex", "graphIndex", { unique: false });
-          // get a certain value in a certain snapshot
-          preindexing.createIndex("value_graphIndex", ["value", "graphIndex"], { unique: false });
-          // get a certain value only if it is found within N levels inside the `props` object
-          preindexing.createIndex("value_depth", ["value", "depth"], { unique: false });
+          preindexing.createIndex("value", "value", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.NAV)) {
           db.createObjectStore(IDBManager.STORES.NAV, { autoIncrement: true });
+        }
+
+        if (!db.objectStoreNames.contains(IDBManager.STORES.REPORT)) {
+          db.createObjectStore(IDBManager.STORES.REPORT, { autoIncrement: true });
         }
       };
 
@@ -387,7 +389,7 @@ export class IDBManager {
 
     return await this.query({
       storeName: IDBManager.STORES.PREINDEXING,
-      index: 'value_graphIndex',
+      index: 'value',
       method: 'getAll',
       query: range
     });

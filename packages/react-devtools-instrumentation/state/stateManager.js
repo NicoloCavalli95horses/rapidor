@@ -40,6 +40,10 @@ export class StateManager {
           // [TODO] do not save two row with the same primitive values, just update the snapshot key
           await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
           break;
+
+        case events.REPORT:
+          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.REPORT });
+          break;
       }
     });
   }

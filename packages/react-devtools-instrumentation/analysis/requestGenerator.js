@@ -13,11 +13,11 @@ import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 // Functions
 //===================
 export class RequestGenerator {
-  constructor(stateManager) {
-    this.stateManager = stateManager;
+  constructor() {
     this.evaluator = new ResponseEvaluator();
     this.pendingRequests = new Map();
     this.HTTPAnalyzer = new analyzeHTTP();
+    this.alreadyDone = new Set();
   }
 
   init() {
@@ -45,12 +45,14 @@ export class RequestGenerator {
       for (let i = 0; i < candidateNodes.length; i++) {
         const candidate = candidateNodes[i];
         const node = candidate.node;
+        const relations = candidate.relations;
         const request = this.buildRequest({ reference: referenceReq, target: candidate.target });
 
-        if (await this.alreadyDone(request)) {
+        if (this.alreadyDone.has(request._requestId)) {
           log({ module: 'request generator', msg: 'new request already sent' });
           continue;
         }
+
         const response = await this.executeRequest(request, type);
         // [TODO] if response is 40X, and we have query parameters, try using the React routing system
         // > This is the Pimsleur scenario
@@ -58,17 +60,20 @@ export class RequestGenerator {
         const payload = {
           reference: {
             node: referenceNode.node,
-            request: httpEvent.request,
+            relations: referenceNode.relations,
+            request: referenceReq,
             response: httpEvent.response
           },
           candidate: {
             node,
-            request,
+            relations,
+            request: await this.serializedReqObj(request),
             response
           }
         }
 
         emit({ type: events.EVALUATE, payload });
+        this.alreadyDone.add(request._requestId);
         await sleep(config.timeBetweenRequests);
       }
     }
@@ -76,13 +81,39 @@ export class RequestGenerator {
 
 
 
-  async alreadyDone(request) {
-    const uri = this.HTTPAnalyzer.getURI(request.url);
-    const method = request.method;
-    const fullPath = decodeURIComponent(uri.href);
-    const fingerprint = this.HTTPAnalyzer.getFingerprint(fullPath, method);
-    const res = await this.stateManager.hasAlreadyDoneRequest(fingerprint);
-    return res;
+  // Returns serialized request object (needed to save to DB)
+  async serializedReqObj(request) {
+    const headers = {};
+    let body = null;
+
+    if (request.headers) {
+      for (const [key, value] of request.headers.entries()) {
+        headers[key] = value;
+      }
+    }
+
+    if (!!request.bodyUsed && request.method !== "GET" && request.method !== "HEAD") {
+      try {
+        body = await request.clone().text();
+      } catch (e) {
+        body = null;
+      }
+    }
+
+    return {
+      url: request.url,
+      method: request.method,
+      headers,
+      body,
+      mode: request.mode,
+      credentials: request.credentials,
+      cache: request.cache,
+      redirect: request.redirect,
+      referrer: request.referrer,
+      referrerPolicy: request.referrerPolicy,
+      integrity: request.integrity,
+      keepalive: request.keepalive,
+    };
   }
 
 

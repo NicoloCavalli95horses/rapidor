@@ -16,7 +16,7 @@ import { MatchFinder } from "./matchFinder.js";
 export class AnalysisLoop {
   constructor(stateManager) {
     this.stateManager = stateManager;
-    this.requestGenerator = new RequestGenerator(this.stateManager);
+    this.requestGenerator = new RequestGenerator();
     this.matchFinder = new MatchFinder(this.stateManager);
   }
 

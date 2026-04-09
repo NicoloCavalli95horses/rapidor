@@ -107,8 +107,8 @@ export class Bridge {
 
 
   // [main visit handler] prune React fiber object and save relations on projected graph
-  // Parent/Child: The parent is updated to the closest "kept" node above it in the hierarchy (A:B:C -> B invalid -> A parent of B)
-  // Sibling: The loop only consider the kept nodes, so only valid siblings are connected to each other, while the invalid siblings are skipped (A:B:C -> B invalid -> A sibling of B)
+  // > Parent/Child: The parent is updated to the closest "kept" node above it in the hierarchy (A:B:C -> B invalid -> A parent of B)
+  // > Sibling: The loop only consider the kept nodes, so only valid siblings are connected to each other, while the invalid siblings are skipped (A:B:C -> B invalid -> A sibling of B)
   // No need to keep information about the filtered nodes: the keptChildren list takes care of reconstructing the list of remaining siblings
   visitFiber({ node, parentId, graph, g }) {
     if (!node) { return null; }
@@ -227,7 +227,7 @@ export class Bridge {
 
   // Return true if the node is valid
   shouldKeepNode(tag, domEl) {
-    return config.tagsWhitelist.includes(tag); // || domEl ;
+    return config.tagsWhitelist.includes(tag) || domEl;
   }
 
 
@@ -320,25 +320,17 @@ export class Bridge {
 
 
 
-  // [TODO] to review: DOM children is confusing here
   getDOMInfo(el) {
     function visit(node) {
       if (!node) { return; };
 
-      const rect = node.getBoundingClientRect();
-
       const current = {
-        tag: node.tagName?.toLowerCase(),
-        id: node.id,
         classes: [...node.classList],
-        width: rect.width,
-        height: rect.height,
-        inlineStyle: Object.fromEntries(Object.entries(node.style).filter(([_, value]) => value !== '')),
         DOMchildren: []
       };
 
-      // `node.children` is not a property we have from React
-      // DOM Children are derived using DOM apis (HTMLCOllection)
+      // node.children is a DOM apis (HTMLCollection)
+      // children order matches the order with which they are displayed
       for (const child of node.children) {
         const childData = visit(child);
         if (childData) {

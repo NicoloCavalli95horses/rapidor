@@ -25,42 +25,43 @@ export class ResponseEvaluator {
   }
 
 
-  // [TODO] new strategy: compare callstacks after click events on siblings 
+  // [TODO] new strategies
+  // > compare callstacks after click events on siblings 
+  // > probabilistic grouping of free or premium elements
+  // > heuristics-based approach: find relevant key-values in `props` (eg. isLocked, isPremium, etc)
+
+  // This currently does not work when we have free items with different DOM classes (eg. promova case)
   handleEvent(event) {
     log({ module: "response evaluator", msg: "starting evaluation..." });
-
     const { reference, candidate } = event;
-    const refIdx = reference.node.siblingIdx;
-    const currIdx = candidate.node.siblingIdx;
-    const refDOM = reference.node.DOM?.DOMchildren;
-    const currDOM = candidate.node.DOM?.DOMchildren;
-    const refResponse = reference.response;
-    const currResponse = candidate.response;
 
-    const resSimilarity = this.responseSimilarity({ refResponse, currResponse });
+    const resSimilarity = this.calcResponseSimilarity({ refResponse: reference.response, currResponse: candidate.response });
+    const DOMsimilarity = this.calcDOMSimilarity({ reference, candidate });
 
-    console.log({event, resSimilarity});
-    
-    if (Array.isArray(refDOM) && Array.isArray(currDOM)) {
-      const DOMsimilarity = this.evaluateDOM({ refDOM: refDOM[refIdx], currDOM: currDOM[currIdx] });
+    // [TODO] add list of CSS classes to node.analysis to better compare the results
 
-      // if the DOM classes are not equal (over a certain threshold),
-      // it means that we have received a 200 OK response using data extracted from a component,
-      // which renders a different GUI element than what is done by a referenced component
-      // We can leverage this finding to infer access control vulnerability
-      if (DOMsimilarity.areDifferent && resSimilarity.areSimilar) {
-        const similarity = { DOMsimilarity, resSimilarity };
-        log({ module: "response evaluator", type: "warning", msg: "potential access control issue found" });
-        emit({ type: events.REPORT, payload: { reference, candidate, similarity, ratio: 'potential access control vulnerability' } });
-      }
-    } else {
-      // [TODO] sibling nodes with their own DOM elements
+    if (DOMsimilarity.areDifferent && resSimilarity.areSimilar) {
+      log({ module: "response evaluator", type: "warning", msg: "potential access control issue found" });
+      emit({ type: events.REPORT, payload: { reference, candidate, similarity: { DOMsimilarity, resSimilarity }, ratio: 'potential access control vulnerability' } });
     }
-    log({ module: "response evaluator", msg: "exit evaluation" });
   }
 
 
-  responseSimilarity({ refResponse, currResponse }) {
+
+  calcDOMSimilarity({ reference, candidate }) {
+    const refIdx = reference.relations.siblingMeta?.relativeIdx;
+    const currIdx = candidate.relations.siblingMeta?.relativeIdx;
+    const refDOM = reference.node.DOM?.DOMchildren;
+    const currDOM = candidate.node.DOM?.DOMchildren;
+
+    if (Array.isArray(refDOM) && Array.isArray(currDOM)) {
+      return this.evaluateDOM({ refDOM: refDOM[refIdx], currDOM: currDOM[currIdx] });
+    }
+  }
+
+
+
+  calcResponseSimilarity({ refResponse, currResponse }) {
     const compare = ['status', 'raw-type']; // shall we just compare the existing fields (?)
     const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
     const refBodyLength = Number(refResponse['content-length']) || 0;

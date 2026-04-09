@@ -22,7 +22,7 @@ export class MatchFinder {
       results: [],
       success: false,
     }
-    
+
     const { request, ignore } = httpEvent.value;
     if (ignore) { return data; } // self-generated HTTP events
 
@@ -84,10 +84,8 @@ export class MatchFinder {
       const domPromises = [];
 
       if (!result.node.DOM) {
-        // [TODO] can we do this within the graph building phase?
         result.node.DOM = await this.stateManager.getAncestorDOM(result.graphIndex, result.nodeId);
       }
-
 
       for (const candidateId of nodeIds) {
         if (candidateId === result.nodeId) { continue; }

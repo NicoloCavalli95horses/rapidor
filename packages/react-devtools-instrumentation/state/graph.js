@@ -43,8 +43,8 @@ export class Graph {
   /**
    * 
    * @param graph a graph object 
-   * @param fromId id of first node
-   * @param toId id of second node
+   * @param fromId id of first node (parent || reference node)
+   * @param toId id of second node (child || sibling)
    * @param type type of relation (child, render) 
    * @param siblingIdx index of sibling (first sibling has 0) 
    */
@@ -61,6 +61,7 @@ export class Graph {
       }
       if (!graph.relations[toId].parent) {
         graph.relations[toId].parent = fromId;
+        graph.nodes[toId].parent = fromId; // used in assigning DOM info (see stateManager.getAncestorDOM)
       }
     }
 

@@ -25,8 +25,6 @@ export class DOMhandler {
       eventBus.subscribe((e) => {
         if (e.type === events.ANALYSIS_IN_PROGRESS) {
           this.updateInfo({ payload: e.payload, els });
-        } else if (e.type === events.REPORT) {
-          this.showWarning(els);
         }
       });
     });
@@ -116,17 +114,6 @@ export class DOMhandler {
     h2.textContent = payload.h2;
     p.textContent = payload.p;
     bg.style.display = (payload.keepOverlay || this.keepOverlay) ? "block" : "none";
-  }
-
-
-
-  showWarning(els) {
-    this.bacCounter++;
-    this.keepOverlay = true;
-    const { bg, h2 } = els;
-    bg.style.display = "block";
-    h2.style.color = "orange";
-    h2.textContent = `${this.bacCounter} potential access control issue found ⚠️​`;
   }
 
 
