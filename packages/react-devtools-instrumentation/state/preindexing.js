@@ -14,23 +14,16 @@ export class PreIndexing {
     this.maxStrLength = 300;
     this.data = [];
 
+    // [TODO] improve set of keys and test matches
     this.interestingKeys = [
       // id
-      'id', 'userId', 'accountId', 'profileId', 'orderId',
-      'resourceId', 'itemId', 'objectId', 'docId',
-      'uid', 'uuid', 'guid', 'item', 'username',
+      'id', 'user', 'account', 'profile', 'order',
+      'resource', 'item', 'object', 'doc',
+      'name', 'key', 'title', 'type',
       // roles
-      'owner', 'ownerId',
-      'user', 'username',
-      'account', 'accountId',
-      'createdBy', 'updatedBy',
-      'author', 'creator',
-      'role', 'roles',
-      'permission', 'permissions',
+      'owner', 'createdBy', 'updatedBy',
+      'author', 'creator', 'role', 'permission',
       'scope', 'scopes',
-      'isAdmin', 'isOwner', 'isSubscribed',
-      'accessLevel', 'isPremium', 'premium',
-      'registered', 'sub', 'isRegistered',
     ];
   }
 
@@ -38,8 +31,8 @@ export class PreIndexing {
 
   // Create data to preindex
   prepareData({ graphIndex, nodeId, key, props }) {
-    if (this.isInteresting(key)) {
-      this.data.push({ graphIndex, nodeId, value: key, path: [], depth: 0 });
+    if (this.isInteresting('key', key)) {
+      this.data.push({ graphIndex, nodeId, value: key, path: ['key'], depth: 0 });
     }
 
     this.iterate(props, ({ key, value, path }) => {
@@ -90,20 +83,17 @@ export class PreIndexing {
   isInteresting(key, value) {
     if (value == null) { return false; }
 
-    if (this.matchesKey(key)) {
+    if (!this.matchesKey(key)) { return false; }
 
-      if (typeof value === 'string') {
-        if (/^\[.*\]$/.test(value)) { return false; } // ignore placeholders
-        const v = value.trim();
-        return (v.length > 1 && v.length < this.maxStrLength);
-      }
-
-      if (typeof value === "number") {
-        return Number.isFinite(value);
-      }
+    if (typeof value === 'string') {
+      if (/^\[.*\]$/.test(value)) { return false; } // ignore placeholders
+      const v = value.trim();
+      return (v.length > 1 && v.length < this.maxStrLength);
     }
 
-    return false;
+    if (typeof value === "number") {
+      return Number.isFinite(value);
+    }
   }
 
 

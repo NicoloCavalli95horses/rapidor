@@ -39,33 +39,36 @@ const FILE_EXTENSIONS = [
 //===================
 export class analyzeHTTP {
   constructor() {
+    this.segmentsHistory = [];
+    this.segmentsHistoryKeys = new Set();
   }
+
+
 
   init() {
   }
 
 
 
+  // [TODO] response can be empty: in this case it must be filled with the first available graph matching the endpoint
   parseHTTP({ type = events.FETCH_EVENT, request, response }) {
-    if (!request) { return; } // response can be empty. In this case it will be filled with the first available graph matching the endpoint
-    const uri = this.getURI(request?.uri);
-    if (!uri) { return; }
-    if (!this.isAllowed(uri)) { return; }
+    const urlObj = this.getURLObject(request?.uri);
+    if (!urlObj || !this.isAllowed(urlObj)) { return; }
 
     // full path (hostname + port + protocol, more robust if we then will have to generate a cross-origin request)
-    const fullPath = decodeURIComponent(uri.origin + uri.pathname); // path name can be encoded
-    const property = this.getProperty(fullPath);
+    const fullPath = decodeURIComponent(urlObj.origin + urlObj.pathname);
+    const properties = this.getProperties(urlObj);
     const fingerprint = this.getFingerprint(fullPath, request.verb);
 
     // query parameters
-    const rawQueries = uri.search; // ?page=1order=asc...
-    const params = this.searchParamsToObj(uri.searchParams); // { page:1,order:'asc' }
-    const queryParams = params ? this.getParamsAnalysis(params, fullPath, property.value) : undefined;
+    const rawQueries = urlObj.search; // ?page=1order=asc...
+    const params = this.searchParamsToObj(urlObj.searchParams); // { page:1,order:'asc' }
+    const queryParams = params ? this.getParamsAnalysis(params, fullPath, properties.map(p => p.value)) : undefined;
 
     const analysis = {
       fullPath,
       rawQueries,
-      toEvaluate: [property, ...queryParams]
+      toEvaluate: [...properties, ...queryParams]
     }
 
     emit({
@@ -82,36 +85,108 @@ export class analyzeHTTP {
 
 
 
-  // [TODO] design a system that infers the part to be fuzzed
-  // by comparing past requests and checking the part that changes
-  // > In Busuu, we have `/api/.../id1` and `api/.../id2`
-  // > In Memrise, we have `/api/.../grammar/chat` and `/api/.../role-play/chat`
-  getProperty(fullPath) {
-    let parts;
-    let value;
-    let ext;
+  getProperties(urlObj) {
+    const properties = [];
+    const segments = urlObj.pathname.split('/').filter(Boolean); // ['api', 'item', 'id1'];
+    const idx = this.getIndexOfSegment(segments);
 
-    const url = new URL(fullPath);
-    const segments = url.pathname.split('/').filter(Boolean);
-    const last = segments.pop();
-    if (!last) { return { parts, value, index: 1 } };
+    const property = this.getPropertyAt(urlObj, segments, idx);
+    properties.push(property);
 
-    const lastDot = last.lastIndexOf('.');
-    const hasExt = lastDot > 0;
+    this.updateSegmentsHistory(segments);
+
+    return properties;
+  }
 
 
-    if (!hasExt) {
-      value = last;
-      ext = '';
-    } else {
-      value = last.slice(0, lastDot);
-      ext = last.slice(lastDot); // include "."
+
+  // find the indices that vary over time while the others remain stable, considering past HTTP requests
+  // returns the index of the segment to change, in the input array
+  getIndexOfSegment(newSegments) {
+    if (!this.segmentsHistory.length) {
+      return newSegments.length - 1; // fallback
     }
 
-    const basePath = '/' + (segments.length ? segments.join('/') + '/' : '');
-    parts = [(url.origin + basePath), ext];
+    const candidateIndexes = new Set();
 
-    return { parts, value, index: 1 };
+    for (const oldSegments of this.segmentsHistory) {
+      const maxLength = Math.max(oldSegments.length, newSegments.length); // to compare all possible indexes
+      const diffIndexes = [];
+
+      for (let i = 0; i < maxLength; i++) {
+        const a = oldSegments[i];
+        const b = newSegments[i];
+
+        if (a !== b) {
+          diffIndexes.push(i);
+        }
+      }
+
+      // Ideal scenario: just one difference
+      if (diffIndexes.length === 1) {
+        candidateIndexes.add(diffIndexes[0]);
+      }
+    }
+
+    if (candidateIndexes.size === 1) {
+      return [...candidateIndexes][0];
+    }
+
+    return newSegments.length - 1;
+  }
+
+
+
+  // Returns the segment of the URL to be fuzzed, considering a possible file extension
+  getPropertyAt(urlObj, segments, idx) {
+    if (idx < 0 || idx >= segments.length) {
+      return { parts: [], value: undefined, index: -1 };
+    }
+
+    const segment = segments[idx];
+
+    if (!segment) {
+      return { parts: [], value: undefined, index: -1 };
+    }
+
+    // extension extraction
+    const lastDot = segment.lastIndexOf('.');
+    const hasExt = lastDot > 0;
+
+    const value = hasExt ? segment.slice(0, lastDot) : segment;
+    const ext = hasExt ? segment.slice(lastDot) : '';
+
+    // path
+    const before = segments.slice(0, idx);
+    const after = segments.slice(idx + 1);
+
+    const baseBefore = before.length ? before.join('/') + '/' : '';
+    const baseAfter = after.length ? '/' + after.join('/') : '';
+
+    const prefix = urlObj.origin + '/' + baseBefore;
+    const suffix = ext + baseAfter;
+
+    return {
+      parts: [prefix, suffix],
+      value,
+      index: 1
+    };
+  }
+
+
+
+  updateSegmentsHistory(segments) {
+    const key = segments.join('/');
+
+    if (this.segmentsHistoryKeys.has(key)) { return; }
+
+    this.segmentsHistory.push([...segments]);
+    this.segmentsHistoryKeys.add(key);
+
+    if (this.segmentsHistory.length > config.maxSegmentsHistoryLength) {
+      const removed = this.segmentsHistory.shift();
+      this.segmentsHistoryKeys.delete(removed.join('/'));
+    }
   }
 
 
@@ -119,7 +194,7 @@ export class analyzeHTTP {
   getParamsAnalysis(params, fullPath, filterVal) {
     const result = [];
     for (const [key, value] of Object.entries(params)) {
-      if (['true', 'false', filterVal].includes(value)) { continue; }
+      if (['true', 'false', ...filterVal].includes(value)) { continue; }
       const parts = [`${fullPath}?${key}=`];
       result.push({ parts, value, index: 1 });
     }
@@ -144,9 +219,9 @@ export class analyzeHTTP {
 
 
   // we accept the same domain and all its subdomains
-  isAllowed(uri) {
+  isAllowed(obj) {
     if (!config.domainRequestOnly) { return true; }
-    const receivedHost = new URL(uri).hostname;
+    const receivedHost = obj.hostname;
     const currentHost = window.location.hostname;
     const baseDomain = this.getBaseDomain(currentHost);
     const toKeep = (receivedHost === baseDomain) || receivedHost.endsWith(`.${baseDomain}`);
@@ -164,7 +239,7 @@ export class analyzeHTTP {
 
 
 
-  getURI(uri) {
+  getURLObject(uri) {
     if (!uri) { return; }
 
     try {

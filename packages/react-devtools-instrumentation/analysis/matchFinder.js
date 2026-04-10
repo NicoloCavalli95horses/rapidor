@@ -73,7 +73,6 @@ export class MatchFinder {
     if (!results.length) { return []; }
     const couples = [];
 
-
     for (const result of results) {
       // get alternative instances of matching component
       const componentIndex = await this.stateManager.getComponentIndexByID(result.graphIndex);
