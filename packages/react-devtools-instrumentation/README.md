@@ -27,6 +27,7 @@ To use RAPIDOR on your browser:
 - `yarn build-for-devtools` to build dependencies from source (from the root of the repository)
 - `cd packages/react-devtools-extensions/` to navigate to the `react-devtools-extensions` repository
 - `yarn build:chrome`| `yarn build:firefox`| `yarn build:edge` to build the browser extension
+- run mocha tests with `npx mocha`
 
 To test on Chrome, upload the unpacked folder to `chrome://extensions` (`rapidor/packages/react-devtools-extension/chrome/build/unpacked`). Logs will appear in the browser console and can be downloaded in JSON format at any time.
 

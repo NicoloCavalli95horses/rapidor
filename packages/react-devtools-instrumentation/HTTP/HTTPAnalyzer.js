@@ -62,8 +62,8 @@ export class analyzeHTTP {
 
     // query parameters
     const rawQueries = urlObj.search; // ?page=1order=asc...
-    const params = this.searchParamsToObj(urlObj.searchParams); // { page:1,order:'asc' }
-    const queryParams = params ? this.getParamsAnalysis(params, fullPath, properties.map(p => p.value)) : undefined;
+    const paramsObj = this.searchParamsToObj(urlObj.searchParams); // { page:1,order:'asc' }
+    const queryParams = paramsObj ? this.getParamsAnalysis({ params: paramsObj, fullPath, valuesToExclude: properties.map(p => p.value) }) : undefined;
 
     const analysis = {
       fullPath,
@@ -102,14 +102,14 @@ export class analyzeHTTP {
 
   // find the indices that vary over time while the others remain stable, considering past HTTP requests
   // returns the index of the segment to change, in the input array
-  getIndexOfSegment(newSegments) {
-    if (!this.segmentsHistory.length) {
+  getIndexOfSegment(newSegments, segmentsHistory = this.segmentsHistory) {
+    if (!segmentsHistory.length) {
       return newSegments.length - 1; // fallback
     }
 
     const candidateIndexes = new Set();
 
-    for (const oldSegments of this.segmentsHistory) {
+    for (const oldSegments of segmentsHistory) {
       const maxLength = Math.max(oldSegments.length, newSegments.length); // to compare all possible indexes
       const diffIndexes = [];
 
@@ -191,10 +191,10 @@ export class analyzeHTTP {
 
 
 
-  getParamsAnalysis(params, fullPath, filterVal) {
+  getParamsAnalysis({ params, fullPath, valuesToExclude = [] } = {}) {
     const result = [];
     for (const [key, value] of Object.entries(params)) {
-      if (['true', 'false', ...filterVal].includes(value)) { continue; }
+      if (['true', 'false', ...valuesToExclude].includes(value)) { continue; }
       const parts = [`${fullPath}?${key}=`];
       result.push({ parts, value, index: 1 });
     }
@@ -209,15 +209,6 @@ export class analyzeHTTP {
 
 
 
-  getExtension(fullPath) {
-    const segments = fullPath.split('/').filter(Boolean);
-    const lastDot = filename.lastIndexOf('.');
-    if (lastDot === -1) { return; }
-    return filename.slice(lastDot).toLowerCase(); // with the dot
-  }
-
-
-
   // we accept the same domain and all its subdomains
   isAllowed(obj) {
     if (!config.domainRequestOnly) { return true; }
@@ -225,7 +216,6 @@ export class analyzeHTTP {
     const currentHost = window.location.hostname;
     const baseDomain = this.getBaseDomain(currentHost);
     const toKeep = (receivedHost === baseDomain) || receivedHost.endsWith(`.${baseDomain}`);
-    // console.log({ receivedHost, currentHost, baseDomain, toKeep });
 
     return toKeep;
   }

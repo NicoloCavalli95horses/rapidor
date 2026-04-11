@@ -93,6 +93,7 @@
     "minimatch": "^3.0.4",
     "minimist": "^1.2.3",
     "mkdirp": "^0.5.1",
+    "mocha": "^11.7.5",
     "ncp": "^2.0.0",
     "prettier": "^3.3.3",
     "prettier-2": "npm:prettier@^2",
