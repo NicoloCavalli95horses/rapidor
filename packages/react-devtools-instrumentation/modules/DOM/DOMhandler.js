@@ -1,9 +1,9 @@
 //===================
 // Import
 //===================
-import { eventBus, events } from "../eventBus.js";
+import { eventBus, events } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { showDownloadBtn, logs } from "../utils.js";
+import { showDownloadBtn, logs } from "../../utils/utils.js";
 
 
 

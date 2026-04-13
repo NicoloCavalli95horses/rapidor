@@ -1,11 +1,11 @@
 //===================
 // Import
 //===================
-import { eventBus, events } from "../eventBus.js";
+import { eventBus, events } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log } from "../utils.js";
+import { log } from "../../utils/utils.js";
 import { StateManager } from "../state/stateManager.js";
-import { AnalysisLoop } from "./analysisLoop.js";
+import { AnalysisLoop } from "../analysis/analysisLoop.js";
 
 
 
@@ -51,10 +51,10 @@ export class AnalysisManager {
     const hasOnePreIndexed = await this.stateManager.hasOnePreIndexed();
 
     if (hasOneHttpEvent && hasOneState && hasOnePreIndexed) {
-      log({ module: 'analysis manager', msg: 'starting the analysis...' });
+      log({ module: 'analysis manager', msg: 'Starting the analysis...' });
       await this.loop.startAnalysis();
     } else {
-      log({ module: 'analysis manager', msg: 'nothing to analyze yet' });
+      log({ module: 'analysis manager', msg: 'Nothing to analyze yet' });
     }
   }
 }

@@ -4,7 +4,7 @@
 //===================
 // Import
 //===================
-import { events } from "../eventBus.js";
+import { events } from "../utils/eventBus.js";
 
 
 

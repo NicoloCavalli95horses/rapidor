@@ -1,9 +1,9 @@
 //===================
 // Import
 //===================
-import { emit, eventBus, events } from "../eventBus.js";
-import { log, updateDOM } from "../utils.js";
-import { config } from "../config.js";
+import { emit, eventBus, events } from "../../utils/eventBus.js";
+import { log, updateDOM } from "../../utils/utils.js";
+import { config } from "../../config.js";
 import { StateManager } from "../state/stateManager.js";
 import { RequestGenerator } from "./requestGenerator.js";
 import { MatchFinder } from "./matchFinder.js";
@@ -37,7 +37,7 @@ export class AnalysisLoop {
       httpEvent = await this.stateManager.getNextHttpEvent(lastKey);
 
       if (!httpEvent) {
-        log({ module: 'analysis manager', msg: 'no more HTTP events' });
+        log({ module: 'analysis manager', msg: 'No more HTTP events' });
         break;
       }
 
@@ -46,12 +46,12 @@ export class AnalysisLoop {
       const match = await this.matchFinder.find(httpEvent); // Find matches on preindexed values, get full nodes, return alternative instances
       match.success
         ? emit({ type: events.GEN_REQ, payload: match })
-        : log({ module: 'analysis loop', msg: 'no results' });
+        : log({ module: 'analysis loop', msg: 'No results' });
 
       await this.stateManager.deleteHTTPEvent(lastKey); // keys of remaining elements do not change after deleting an entry
     }
 
-    log({ module: 'analysis manager', msg: 'exit analysis' });
+    log({ module: 'analysis manager', msg: 'Exit analysis' });
     this.displayInfo();
   }
 

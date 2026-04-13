@@ -2,8 +2,8 @@
 //===================
 // Import
 //===================
-import { config } from "../config.js";
-import { getValueAtPath } from "../utils.js";
+import { config } from "../../config.js";
+import { getValueAtPath } from "../../utils/utils.js";
 
 
 //===================
@@ -68,7 +68,7 @@ export class MatchFinder {
 
 
   // For each matching node, build sub-arrays with candidates and DOM references
-  // [[ {referenceNode: {...}}, {candidateNodes: [{...},{...}] ]]
+  // [[ {reference: {...}}, {candidates: [{...},{...}] ]]
   async processResults(results) {
     if (!results.length) { return []; }
     const couples = [];
@@ -79,7 +79,7 @@ export class MatchFinder {
       const nodeIds = componentIndex[result.node.componentId];
       if (!nodeIds.length) { continue; }
 
-      const candidateNodes = [];
+      const candidates = [];
       const domPromises = [];
 
       if (!result.node.DOM) {
@@ -105,7 +105,7 @@ export class MatchFinder {
         const candidateTarget = structuredClone(result.target);
         candidateTarget.value = candidateMatch;
 
-        candidateNodes.push({
+        candidates.push({
           node: candidateNode,
           graphIndex: result.graphIndex,
           path: result.path,
@@ -116,8 +116,8 @@ export class MatchFinder {
 
       await Promise.all(domPromises);
 
-      if (candidateNodes.length) {
-        couples.push({ referenceNode: result, candidateNodes })
+      if (candidates.length) {
+        couples.push({ reference: result, candidates })
       }
     }
 

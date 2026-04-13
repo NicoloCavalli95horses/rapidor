@@ -1,10 +1,10 @@
 //===================
 // Import
 //===================
-import { eventBus, emit, events } from "../eventBus.js";
-import { log } from "../utils.js";
+import { eventBus, emit, events } from "../../utils/eventBus.js";
+import { log } from "../../utils/utils.js";
 import { IDBManager } from "./indexedDB.js";
-import { config } from "../config.js";
+import { config } from "../../config.js";
 
 
 
@@ -38,6 +38,7 @@ export class StateManager {
 
         case events.PREINDEXING_UPDATE:
           // [TODO] do not save two row with the same primitive values, just update the snapshot key
+          // [TODO] this seems to break the loop in very large apps (eg. app.memrise.com/learn). Shall we handle the preindexing with a service worker?
           await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
           break;
 
@@ -112,11 +113,11 @@ export class StateManager {
   async saveToDb({ data, type, storeName, batch }) {
     try {
       const res = await this.db.saveState({ data, storeName, batch });
-      log({ module: 'state manager', msg: `saved ${type} to DB` });
+      log({ module: 'state manager', msg: `Saved ${type} to DB` });
       emit({ type: events.DB_SUCCESS, payload: type });
       return res;
     } catch (error) {
-      log({ module: 'state manager', msg: `impossible to save on DB: ${error}`, type: 'error' });
+      log({ module: 'state manager', msg: `Impossible to save on DB: ${error}`, type: 'error' });
     }
   }
 

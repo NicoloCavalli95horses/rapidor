@@ -1,11 +1,11 @@
 //===================
 // Import
 //===================
-import { eventBus, events, emit } from "../eventBus.js";
+import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
-import { log, sleep } from "../utils.js";
-import { config } from "../config.js";
+import { log, sleep } from "../../utils/utils.js";
+import { config } from "../../config.js";
 import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 
 
@@ -16,7 +16,7 @@ export class RequestGenerator {
   constructor() {
     this.evaluator = new ResponseEvaluator();
     this.pendingRequests = new Map();
-    this.HTTPAnalyzer = new analyzeHTTP();
+    this.httpAnalyzer = new analyzeHTTP();
     this.alreadyDone = new Set();
   }
 
@@ -41,15 +41,16 @@ export class RequestGenerator {
     const { httpEvent, results } = event;
     const { request: referenceReq, response: referenceRes, type } = httpEvent; // [TODO] if response is empty, look at the first available graph matching the nav id
 
-    for (const { referenceNode, candidateNodes } of results) {
-      for (let i = 0; i < candidateNodes.length; i++) {
-        const candidate = candidateNodes[i];
+    for (const { reference, candidates } of results) {
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
         const node = candidate.node;
         const relations = candidate.relations;
         const request = this.buildRequest({ reference: referenceReq, target: candidate.target });
+        const id = this.httpAnalyzer.getFingerprint(request);
 
-        if (this.alreadyDone.has(request._requestId)) {
-          log({ module: 'request generator', msg: 'new request already sent' });
+        if (this.alreadyDone.has(id)) {
+          log({ module: 'request generator', msg: `Request already done, skipping` });
           continue;
         }
 
@@ -59,21 +60,23 @@ export class RequestGenerator {
 
         const payload = {
           reference: {
-            node: referenceNode.node,
-            relations: referenceNode.relations,
+            node: reference.node,
+            relations: reference.relations,
+            analysis: { path: reference.path, target: reference.target },
             request: referenceReq,
-            response: httpEvent.response
+            response: referenceRes,
           },
           candidate: {
             node,
             relations,
+            analysis: { path: candidate.path, target: candidate.target },
             request: await this.serializedReqObj(request),
-            response
+            response,
           }
         }
 
         emit({ type: events.EVALUATE, payload });
-        this.alreadyDone.add(request._requestId);
+        this.alreadyDone.add(id);
         await sleep(config.timeBetweenRequests);
       }
     }

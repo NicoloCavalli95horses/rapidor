@@ -3,9 +3,9 @@
 //==============================
 // Import
 //==============================
-import { log, deepObjCopy } from '../utils.js';
+import { log, deepObjCopy } from '../../utils/utils.js';
 import { analyzeHTTP } from './HTTPAnalyzer.js';
-import { events } from '../eventBus.js';
+import { events } from '../../utils/eventBus.js';
 
 
 //==============================
@@ -198,7 +198,7 @@ export class HTTPTracker {
 
     window.fetch = async function (...args) {
       // Normalize the request object: this allows us to read `_requestId` from requestGenerator
-      const originalRequest = args[0] instanceof Request ? args[0] : new Request(args[0], args[1]); // new Request(req) can read the body stream automatically
+      const originalRequest = args[0] instanceof Request ? args[0] : new Request(args[0], args[1]); // new Request(req) can read the body stream automatically (?)
       const _requestId = originalRequest._requestId; // present only in generated requests
 
       try {

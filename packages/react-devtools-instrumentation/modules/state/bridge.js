@@ -2,11 +2,11 @@
 // Import
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
-import { emit, events, eventBus } from '../eventBus.js';
-import { debounce, log, isSerializableValue } from '../utils.js';
+import { emit, events, eventBus } from '../../utils/eventBus.js';
+import { debounce, log, isSerializableValue } from '../../utils/utils.js';
 import { Graph } from './graph.js';
-import { config } from '../config.js';
-import { initialize } from '../../react-devtools-inline/src/backend.js';
+import { config } from '../../config.js';
+import { initialize } from '../../../react-devtools-inline/src/backend.js';
 import { PreIndexing } from './preindexing.js';
 
 
@@ -81,10 +81,7 @@ export class Bridge {
 
 
   async handleStateGraph(fiber) {
-    console.time('gettingGraph');
     const payload = await this.getStateGraph(fiber);
-    console.timeEnd('gettingGraph');
-
     emit({ type: events.STATE_UPDATE, payload });
   }
 

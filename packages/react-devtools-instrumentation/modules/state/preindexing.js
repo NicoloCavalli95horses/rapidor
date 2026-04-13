@@ -1,8 +1,8 @@
 //===================
 // Import
 //===================
-import { emit, events } from "../eventBus.js";
-import { log } from "../utils.js";
+import { emit, events } from "../../utils/eventBus.js";
+import { log } from "../../utils/utils.js";
 
 
 
@@ -100,7 +100,7 @@ export class PreIndexing {
 
   matchesKey(str) {
     if (!str) { return false; }
-    const norm = str.toString().trim().toLowerCase();
+    const norm = String(str).toString().trim().toLowerCase();
     const words = this.splitWords(norm);
 
     return this.interestingKeys.some(k => {

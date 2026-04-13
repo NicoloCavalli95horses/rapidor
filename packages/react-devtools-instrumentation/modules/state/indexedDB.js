@@ -1,8 +1,8 @@
 //===================
 // Import
 //===================
-import { config } from "../config.js";
-import { log, copyObjKeys } from "../utils.js"
+import { config } from "../../config.js";
+import { log, copyObjKeys } from "../../utils/utils.js";
 
 
 

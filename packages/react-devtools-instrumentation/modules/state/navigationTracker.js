@@ -1,9 +1,9 @@
 //===================
 // Import
 //===================
-import { emit, events } from '../eventBus.js';
-import { log } from '../utils.js';
-import { config } from '../config.js';
+import { emit, events } from '../../utils/eventBus.js';
+import { log } from '../../utils/utils.js';
+import { config } from '../../config.js';
 import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 
 

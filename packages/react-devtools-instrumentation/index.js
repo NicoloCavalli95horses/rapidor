@@ -1,14 +1,14 @@
 //===================
 // Import
 //===================
-import { log, showDownloadBtn } from './utils.js';
-import { eventBus } from './eventBus.js';
-import { Bridge } from './state/bridge.js';
-import { StateManager } from './state/stateManager.js';
-import { HTTPTracker } from './HTTP/HTTPTracker.js';
-import { AnalysisManager } from './analysis/analysisManager.js';
-import { DOMhandler } from './DOM/DOMhandler.js';
-import { NavigationTracker } from "./state/navigationTracker.js";
+import { log, showDownloadBtn } from './utils/utils.js';
+import { eventBus } from './utils/eventBus.js';
+import { Bridge } from './modules/state/bridge.js';
+import { StateManager } from './modules/state/stateManager.js';
+import { HTTPTracker } from './modules/HTTP/HTTPTracker.js';
+import { AnalysisManager } from './modules/analysis/analysisManager.js';
+import { DOMhandler } from './modules/DOM/DOMhandler.js';
+import { NavigationTracker } from "./modules/state/navigationTracker.js";
 
 
 //===================

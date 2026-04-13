@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
+import { analyzeHTTP } from "../modules/HTTP/HTTPAnalyzer.js";
 import assert from "node:assert";
 
 

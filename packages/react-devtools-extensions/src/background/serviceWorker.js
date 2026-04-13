@@ -7,7 +7,7 @@
 // Import
 //===================
 import { config } from "../../../react-devtools-instrumentation/config.js";
-import { events } from "../../../react-devtools-instrumentation/eventBus.js";
+import { events } from "../../../react-devtools-instrumentation/utils/eventBus.js";
 
 
 

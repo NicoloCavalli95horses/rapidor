@@ -1,8 +1,8 @@
 //===================
 // Import
 //===================
-import { config } from "../config.js";
-import { getValueAtPath } from "../utils.js";
+import { config } from "../../config.js";
+import { getValueAtPath } from "../../utils/utils.js";
 
 
 //===================

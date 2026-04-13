@@ -1,9 +1,9 @@
 //===================
 // Import
 //===================
-import { emit, eventBus, events } from '../eventBus.js';
-import { log } from '../utils.js';
-import { config } from '../config.js';
+import { emit, eventBus, events } from '../../utils/eventBus.js';
+import { log } from '../../utils/utils.js';
+import { config } from '../../config.js';
 
 
 
@@ -58,7 +58,7 @@ export class analyzeHTTP {
     // full path (hostname + port + protocol, more robust if we then will have to generate a cross-origin request)
     const fullPath = decodeURIComponent(urlObj.origin + urlObj.pathname);
     const properties = this.getProperties(urlObj);
-    const fingerprint = this.getFingerprint(fullPath, request.verb);
+    const fingerprint = this.getFingerprint(request);
 
     // query parameters
     const rawQueries = urlObj.search; // ?page=1order=asc...
@@ -92,7 +92,7 @@ export class analyzeHTTP {
     const segments = pathname.split('/').filter(Boolean); // ['api', 'item', 'id1'];
     const idx = this.getIndexOfSegment(segments);
 
-    const property = this.getPropertyAt({urlObj, segments, idx, hasTrailingSlash});
+    const property = this.getPropertyAt({ urlObj, segments, idx, hasTrailingSlash });
     properties.push(property);
 
     this.updateSegmentsHistory(segments);
@@ -140,7 +140,7 @@ export class analyzeHTTP {
 
 
   // Returns the segment of the URL to be fuzzed, considering a possible file extension
-  getPropertyAt({urlObj, segments, idx, hasTrailingSlash}) {
+  getPropertyAt({ urlObj, segments, idx, hasTrailingSlash }) {
     if (idx < 0 || idx >= segments.length) {
       return { parts: [], value: undefined, index: -1 };
     }
@@ -205,8 +205,12 @@ export class analyzeHTTP {
 
 
 
-  getFingerprint(fullPath, method) {
-    return `${method.toLowerCase()}:${fullPath}`;
+  getFingerprint(request) {
+    if (request) {
+      const path = request.uri || request.url || request.href;
+      const method = (request.verb || request.method).toLowerCase();
+      return `${method}:${path}`;
+    }
   }
 
 

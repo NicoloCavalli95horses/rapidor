@@ -1,11 +1,10 @@
 //===================
 // Import
 //===================
-import { eventBus, events, emit } from "../eventBus.js";
+import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log } from "../utils.js";
-import { config } from "../config.js";
-import { ReportManager } from "./reportManager.js";
+import { log } from "../../utils/utils.js";
+import { config } from "../../config.js";
 
 
 //===================
@@ -13,12 +12,9 @@ import { ReportManager } from "./reportManager.js";
 //===================
 export class ResponseEvaluator {
   constructor() {
-    this.reportManger = new ReportManager();
   }
 
   init() {
-    this.reportManger.init();
-
     eventBus
       .pipe(filter(e => e.type === events.EVALUATE))
       .subscribe(e => this.handleEvent(e.payload));
@@ -32,18 +28,31 @@ export class ResponseEvaluator {
 
   // This currently does not work when we have free items with different DOM classes (eg. promova case)
   handleEvent(event) {
-    log({ module: "response evaluator", msg: "starting evaluation..." });
+    log({ module: "response evaluator", msg: "Starting evaluation..." });
     const { reference, candidate } = event;
 
     const resSimilarity = this.calcResponseSimilarity({ refResponse: reference.response, currResponse: candidate.response });
     const DOMsimilarity = this.calcDOMSimilarity({ reference, candidate });
 
     // [TODO] add list of CSS classes to node.analysis to better compare the results
-
-    if (DOMsimilarity.areDifferent && resSimilarity.areSimilar) {
-      log({ module: "response evaluator", type: "warning", msg: "potential access control issue found" });
-      emit({ type: events.REPORT, payload: { reference, candidate, similarity: { DOMsimilarity, resSimilarity }, ratio: 'potential access control vulnerability' } });
+  
+    const canReport = DOMsimilarity.areDifferent && resSimilarity.areSimilar
+    if (!canReport) {
+      log({ module: "response evaluator", msg: "Nothing to report" });
+      return;
     }
+
+    emit({
+      type: events.REPORT,
+      payload: {
+        reference,
+        candidate,
+        similarity: { DOMsimilarity, resSimilarity },
+        description: 'potential access control vulnerability'
+      }
+    });
+    
+    log({ module: "response evaluator", type: "warning", msg: "Potential access control issue found" });
   }
 
 
@@ -80,7 +89,7 @@ export class ResponseEvaluator {
       equalResponseFields: compare,
       bodyLength: { isLengthSimilar, refBodyLength, currBodyLength, threshold: config.resBodyThr },
       bodySimilarity,
-      ratio: "the similarity is calculated on Object keys of both body length and body content",
+      description: "the similarity is calculated on Object keys of both body length and body content",
     }
   }
 
@@ -157,7 +166,7 @@ export class ResponseEvaluator {
     return {
       jaccard,
       orderSimilarity: this.orderedSimilarity(refClasses, currClasses),
-      ratio: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
+      description: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
       CSSclasses: { referenceNodeCSS: refClasses, candidateNodeCSS: currClasses },
       threshold: config.jaccardThr,
       areDifferent: jaccard <= config.jaccardThr
