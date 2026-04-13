@@ -61,6 +61,7 @@ export class ResponseEvaluator {
 
 
 
+  // [TODO] we are just considering JSON responses. To extend to HTML/JS or other valid responses (?)
   calcResponseSimilarity({ refResponse, currResponse }) {
     const compare = ['status', 'raw-type']; // shall we just compare the existing fields (?)
     const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);

@@ -198,7 +198,7 @@ export class HTTPTracker {
 
     window.fetch = async function (...args) {
       // Normalize the request object: this allows us to read `_requestId` from requestGenerator
-      const originalRequest = args[0] instanceof Request ? args[0] : new Request(...args);
+      const originalRequest = args[0] instanceof Request ? args[0] : new Request(args[0], args[1]); // new Request(req) can read the body stream automatically
       const _requestId = originalRequest._requestId; // present only in generated requests
 
       try {
@@ -209,14 +209,19 @@ export class HTTPTracker {
         const headers = {};
         originalRequest.headers?.forEach((v, k) => { headers[k] = v; });
 
-
         let body = {};
+        let text = undefined;
 
-        try {
-          const text = await originalRequest.clone().text();
-          body = text ? JSON.parse(text) : undefined;
-        } catch {
-          body = await originalRequest.clone().text();
+        if (!originalRequest.bodyUsed) {
+          text = await originalRequest.clone().text();
+        }
+
+        if (text) {
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = text;
+          }
         }
 
         const request = {

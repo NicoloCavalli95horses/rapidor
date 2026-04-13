@@ -87,10 +87,12 @@ export class analyzeHTTP {
 
   getProperties(urlObj) {
     const properties = [];
-    const segments = urlObj.pathname.split('/').filter(Boolean); // ['api', 'item', 'id1'];
+    const pathname = urlObj.pathname;
+    const hasTrailingSlash = pathname.endsWith('/');
+    const segments = pathname.split('/').filter(Boolean); // ['api', 'item', 'id1'];
     const idx = this.getIndexOfSegment(segments);
 
-    const property = this.getPropertyAt(urlObj, segments, idx);
+    const property = this.getPropertyAt({urlObj, segments, idx, hasTrailingSlash});
     properties.push(property);
 
     this.updateSegmentsHistory(segments);
@@ -138,7 +140,7 @@ export class analyzeHTTP {
 
 
   // Returns the segment of the URL to be fuzzed, considering a possible file extension
-  getPropertyAt(urlObj, segments, idx) {
+  getPropertyAt({urlObj, segments, idx, hasTrailingSlash}) {
     if (idx < 0 || idx >= segments.length) {
       return { parts: [], value: undefined, index: -1 };
     }
@@ -164,7 +166,7 @@ export class analyzeHTTP {
     const baseAfter = after.length ? '/' + after.join('/') : '';
 
     const prefix = urlObj.origin + '/' + baseBefore;
-    const suffix = ext + baseAfter;
+    const suffix = (ext + baseAfter) + (hasTrailingSlash ? "/" : "");
 
     return {
       parts: [prefix, suffix],

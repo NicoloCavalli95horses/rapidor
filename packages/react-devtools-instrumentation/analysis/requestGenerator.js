@@ -134,6 +134,7 @@ export class RequestGenerator {
   buildRequest({ reference, target }) {
     const { uri, body, headers, verb, analysis } = reference;
     const method = verb.toUpperCase();
+    const JSONBody = this.bodyToJSON(body);
 
     target.parts.splice(target.index, 0, target.value);
     const path = target.parts.join('').trim();
@@ -141,12 +142,23 @@ export class RequestGenerator {
     const options = {
       method,
       ...(headers && { headers }),
-      ...(["POST", "PUT", "PATCH"].includes(method) && body ? { body } : {})
+      ...(["POST", "PUT", "PATCH"].includes(method) && body ? { body: JSONBody } : {})
     };
 
     const request = new Request(path, options);
     request._requestId = crypto.randomUUID(); // this is read by HTTPTracker so we can use its analysis
     return request;
+  }
+
+
+
+  bodyToJSON(body) {
+    try {
+      return JSON.stringify(body);
+    } catch (e) {
+      log({ module: 'request generator', msg: 'Invalid body, fallback to empty JSON', type: 'warning' });
+      return "{}";
+    }
   }
 
 
