@@ -64,13 +64,11 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true }); // primary key (id) handled by indexedDB
           httpEvent.createIndex("type", "type", { unique: false });
-          httpEvent.createIndex("ignore", "ignore", { unique: false });
           httpEvent.createIndex("fingerprint", "fingerprint", { unique: true });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.PREINDEXING)) {
           const preindexing = db.createObjectStore(IDBManager.STORES.PREINDEXING, { autoIncrement: true });
-          preindexing.createIndex("graphIndex", "graphIndex", { unique: false });
           preindexing.createIndex("value", "value", { unique: false });
         }
 
@@ -112,7 +110,7 @@ export class IDBManager {
           data.forEach(item => {
             const request = store.put(item);
             request.onsuccess = (e) => {
-              results.push({ key: e.target.result, storeName });
+              results.push({ key: e.target.result, storeName, data: item });
             };
             request.onerror = (e) => {
               console.error("DB SAVE ERROR ITEM:", item);
@@ -122,7 +120,7 @@ export class IDBManager {
         } else {
           const request = store.put(data);
           request.onsuccess = (e) => {
-            results = { key: e.target.result, storeName };
+            results = { key: e.target.result, storeName, data };
           };
           request.onerror = (e) => {
             console.error("DB SAVE ERROR PAYLOAD:", data);

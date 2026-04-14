@@ -20,12 +20,13 @@ import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 export class NavigationTracker {
   constructor() {
     this.HTTPanalyzer = new analyzeHTTP();
+    this.lastUri = undefined;
   }
 
   init() {
     this.addEventListeners();
     this.update(); // URL of the page the user first lands on
-    log({ module: 'navigation tracker', msg: 'init' });
+    log({ module: 'navigation tracker', msg: 'Init' });
   }
 
 
@@ -33,31 +34,43 @@ export class NavigationTracker {
   addEventListeners() {
     const pushState = history.pushState;
 
-    history.pushState = function () {
+    history.pushState = function (state, title, url) {
       pushState.apply(this, arguments);
-      window.dispatchEvent(new Event('urlchange'));
+
+      window.dispatchEvent(new CustomEvent('urlchange', {
+        detail: { state }
+      }));
     };
 
-    window.addEventListener('popstate', () => {
-      window.dispatchEvent(new Event('urlchange'));
+    window.addEventListener('popstate', (event) => {
+      window.dispatchEvent(new CustomEvent('urlchange', {
+        detail: { state: event.state }
+      }));
     });
 
-    window.addEventListener('urlchange', () => {
-      this.update();
+    window.addEventListener('urlchange', (event) => {
+      const state = event.detail?.state;
+      if (!state?.ignore) {
+        this.update();
+      }
     });
   }
 
 
 
+  // In SPA, routing changes can occur without HTTP requests being executed. In this scenario:
+  // > A routing change (with query parameters) is treated as an independent GET request
+  // > The last state snapshot is treated as the server's response for this GET request
   update() {
-    const uri = decodeURIComponent(window.location.href);
-    emit({ type: events.NAV, payload: uri });
 
-    // In SPA, routing changes can occur without HTTP requests being executed
-    // We treat new URLs as GET requests: the new route may have queryParameters that may be important to fuzz
-    this.HTTPanalyzer.parseHTTP({
-      request: { uri, verb: 'GET' },
-      response: {} // [TODO] if empty, will be filled with the matching state snapshot, ie. the first available graph for the provided URI (if any)
-    });
+    const uri = decodeURIComponent(window.location.href);
+    if (this.lastUri == uri) { return; }
+
+    const request = { uri, verb: 'GET' };
+    const response = JSON.stringify({}); // [TODO] get DOM instead
+
+    this.HTTPanalyzer.parseHTTP({ request, response });
+    emit({ type: events.NAV, payload: uri });
+    this.lastUri = uri;
   }
 }

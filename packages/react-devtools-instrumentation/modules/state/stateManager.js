@@ -16,6 +16,8 @@ export class StateManager {
   constructor() {
     this.db = new IDBManager();
     this.dbStores = IDBManager.STORES;
+
+    this.pending = new Map();
   }
 
   async init() {
@@ -111,14 +113,26 @@ export class StateManager {
    * @param {String} storeName store name 
    */
   async saveToDb({ data, type, storeName, batch }) {
-    try {
-      const res = await this.db.saveState({ data, storeName, batch });
-      log({ module: 'state manager', msg: `Saved ${type} to DB` });
-      emit({ type: events.DB_SUCCESS, payload: type });
-      return res;
-    } catch (error) {
-      log({ module: 'state manager', msg: `Impossible to save on DB: ${error}`, type: 'error' });
+    const id = data?.fingerprint || data?.id;
+
+    if (this.pending.has(id)) {
+      return this.pending.get(id); // returns the same promise
     }
+
+    const promise = (async () => {
+      try {
+        const response = await this.db.saveState({ data, storeName, batch });
+        log({ module: 'state manager', msg: `Saved ${type} to DB` });
+        emit({ type: events.DB_SUCCESS, payload: { type, response } });
+        return response;
+      } finally {
+        this.pending.delete(id);
+      }
+    })();
+
+    this.pending.set(id, promise);
+
+    return promise;
   }
 
 
@@ -167,7 +181,7 @@ export class StateManager {
 
 
   async getPreIndexed(value) {
-    return await this.db.getPreIndexedByValue(value.toString());
+    return await this.db.getPreIndexedByValue(String(value).toString());
   }
 
 

@@ -50,7 +50,6 @@ export class analyzeHTTP {
 
 
 
-  // [TODO] response can be empty: in this case it must be filled with the first available graph matching the endpoint
   parseHTTP({ type = events.FETCH_EVENT, request, response }) {
     const urlObj = this.getURLObject(request?.uri);
     if (!urlObj || !this.isAllowed(urlObj)) { return; }

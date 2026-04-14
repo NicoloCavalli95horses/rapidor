@@ -24,15 +24,17 @@ export class Bridge {
     this.componentId = 0;
 
     this.graphIndex = 0; // order of snapshots in DB
+    this._lastState = undefined; // save last state locally to be read from other scripts
   }
 
 
   // Connect to React specific APIs
   init() {
     eventBus.subscribe(e => {
-      if (e.type === events.DB_SUCCESS && e.payload === events.STATE_UPDATE) {
+      if (e.type === events.DB_SUCCESS && e.payload.type === events.STATE_UPDATE) {
         this.preindexing.emit(); // if graph was saved successfully, save the preindexed data
         this.graphIndex++; // update graph index only in case of success
+        this._lastState = e.payload.response?.data;
       }
     });
 
@@ -393,5 +395,11 @@ export class Bridge {
     path.delete(obj);
 
     return result;
+  }
+
+
+
+  getLastState() {
+    return this._lastState;
   }
 }

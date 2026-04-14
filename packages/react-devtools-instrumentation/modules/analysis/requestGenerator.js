@@ -18,10 +18,16 @@ export class RequestGenerator {
     this.pendingRequests = new Map();
     this.httpAnalyzer = new analyzeHTTP();
     this.alreadyDone = new Set();
+
+    this.accessedParams = new Set(); // history of query parameters accessed by the AUT
+
+    this.navigationQueue = undefined;
+    this.usedQueryParams = new Set();
   }
 
   init() {
     this.evaluator.init();
+    this.detectParamsUsage();
 
     eventBus.subscribe(e => {
       switch (e.type) {
@@ -33,6 +39,18 @@ export class RequestGenerator {
           break;
       }
     });
+  }
+
+
+
+  detectParamsUsage() {
+    const self = this;
+    const origGet = URLSearchParams.prototype.get;
+
+    URLSearchParams.prototype.get = function (key) {
+      self.accessedParams.add(key);
+      return Reflect.apply(origGet, this, [key]);
+    };
   }
 
 
@@ -54,10 +72,6 @@ export class RequestGenerator {
           continue;
         }
 
-        const response = await this.executeRequest(request, type);
-        // [TODO] if response is 40X, and we have query parameters, try using the React routing system
-        // > This is the Pimsleur scenario
-
         const payload = {
           reference: {
             node: reference.node,
@@ -71,7 +85,7 @@ export class RequestGenerator {
             relations,
             analysis: { path: candidate.path, target: candidate.target },
             request: await this.serializedReqObj(request),
-            response,
+            response: await this.navigationHandler(request, type),
           }
         }
 
@@ -80,6 +94,123 @@ export class RequestGenerator {
         await sleep(config.timeBetweenRequests);
       }
     }
+  }
+
+
+  // Implicit navigation queue
+  // We do not immediatly get the server response, we set up a queue in case we need to manually test new query parameters
+  // This function ensures that we do not have overlapping navigations
+  async navigationHandler(request, type) {
+    if (this.navigationQueue) {
+      await this.navigationQueue; // wait for previous navigation to finish
+    }
+
+    this.navigationQueue = (async () => {
+      try {
+        return await this.handleResponse(request, type);
+      } finally {
+        this.navigationQueue = null;
+      }
+    })();
+
+    return this.navigationQueue;
+  }
+
+
+
+  async handleResponse(request, type) {
+    const response = await this.executeRequest(request, type);
+
+    // Best scenario: return the server-side response
+    if ((response.status >= 200 && response.status < 300) || !config.testClientSideQueryParamsUsage) {
+      return response;
+    }
+
+    // The server has rejected the request, but the new endpoint may still be valid
+    // In the context of a SPA, routing can be handled entirely on the client side
+    const result = await this.isUsingQueryParams(request);
+
+    if (result) {
+      response.hasClientSideEffect = true;
+    }
+    return response;
+  }
+
+
+
+  // Returns true if the SPA uses the new query parameters (they are accessed and the DOM changes);
+  async isUsingQueryParams(request) {
+    const baseUrl = new URL(request.url);
+    const originalUrl = window.location.href;
+    const params = baseUrl.searchParams;
+    let isUsingNewParams = 0;
+
+    // The length of params is 1 by design (ie, we mutate one segment at the time)
+    const entry = params.entries().next().value;
+    if (!entry) { return isUsingNewParams; }
+    const [param, value] = entry;
+    const key = `${param}=${value}`;
+
+    if (this.usedQueryParams.has(key)) {
+      return isUsingNewParams;
+    }
+
+    this.accessedParams.clear();
+
+    const testUrl = new URL(baseUrl.toString());
+    testUrl.searchParams.set(param, value);
+    let hasDOMchanges = false;
+
+    try {
+      window.history.pushState({ ignore: true }, "", testUrl);
+      window.dispatchEvent(new Event("popstate"));
+      hasDOMchanges = await this.waitDOMIdle();
+    } finally { // rollback
+      window.history.pushState({ ignore: true }, "", originalUrl);
+      window.dispatchEvent(new Event("popstate"));
+    }
+
+    isUsingNewParams = (this.accessedParams.has(param) && hasDOMchanges) ? 1 : 0;
+    this.usedQueryParams.add(key);
+
+    return isUsingNewParams;
+  }
+
+
+
+  // Wait for the DOM to stabilize (idle), return true if there are DOM changes, wait at least 500ms
+  waitDOMIdle({ minWait = 500, idleTime = 100 } = {}) {
+    return new Promise((resolve) => {
+      let changed = false;
+      let lastChange = Date.now();
+      const start = Date.now();
+
+      const obs = new MutationObserver(() => {
+        changed = true;
+        lastChange = Date.now();
+      });
+
+      obs.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true
+      });
+
+      const check = () => {
+        const now = Date.now();
+        const waitedEnough = now - start >= minWait;
+        const isStable = now - lastChange >= idleTime;
+
+        if (waitedEnough && isStable) {
+          obs.disconnect();
+          resolve(changed);
+        } else {
+          requestAnimationFrame(check);
+        }
+      };
+
+      check();
+    });
   }
 
 
@@ -95,7 +226,7 @@ export class RequestGenerator {
       }
     }
 
-    if (!!request.bodyUsed && request.method !== "GET" && request.method !== "HEAD") {
+    if (!!request.bodyUsed && !["GET", "HEAD"].includes(request.method)) {
       try {
         body = await request.clone().text();
       } catch (e) {

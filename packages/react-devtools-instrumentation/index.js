@@ -19,7 +19,7 @@ export async function instrumentationMain() {
   const DOM = new DOMhandler();
   DOM.init();
   
-  log({ module: 'index', msg: "main module loaded from 'packages/react-devtools-extensions/src/contentScripts/installHook.js'" });
+  log({ module: 'index', msg: "Main module loaded" });
 
   // Track HTTP messages
   const tracker = new HTTPTracker();
@@ -29,13 +29,13 @@ export async function instrumentationMain() {
   const stateManager = new StateManager();
   await stateManager.init();
 
-  // Navigation tracker
-  const navTracker = new NavigationTracker();
-  navTracker.init();
-
   // Connect to framework-specific APIs and listen to component tree changes
   const bridge = new Bridge(stateManager);
   bridge.init();
+
+  // Navigation tracker
+  const navTracker = new NavigationTracker(bridge);
+  navTracker.init();
 
   // Listen to HTTP events, search for similar data in other istances of components, generate and evaluate tests
   const analysisManager = new AnalysisManager(stateManager);

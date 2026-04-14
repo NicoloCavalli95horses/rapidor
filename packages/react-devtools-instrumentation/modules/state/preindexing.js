@@ -49,7 +49,7 @@ export class PreIndexing {
     if (this.data.length === 0) { return; }
 
     emit({ type: events.PREINDEXING_UPDATE, payload: this.data });
-    log({ module: 'preindexing', msg: 'emitted batch' })
+    log({ module: 'preindexing', msg: 'Emitted batch' })
 
     this.data = [];
   }
