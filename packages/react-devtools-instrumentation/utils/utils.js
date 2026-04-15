@@ -199,3 +199,9 @@ export function updateDOM({ h1, h2, p, keepOverlay } = {}) {
     }
   });
 }
+
+
+
+export function getCurrentDOM() {
+  return new XMLSerializer().serializeToString(document);
+}

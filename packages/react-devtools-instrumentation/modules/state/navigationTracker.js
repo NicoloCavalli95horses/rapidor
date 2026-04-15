@@ -2,7 +2,7 @@
 // Import
 //===================
 import { emit, events } from '../../utils/eventBus.js';
-import { log } from '../../utils/utils.js';
+import { log, getCurrentDOM } from '../../utils/utils.js';
 import { config } from '../../config.js';
 import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 
@@ -62,12 +62,11 @@ export class NavigationTracker {
   // > A routing change (with query parameters) is treated as an independent GET request
   // > The last state snapshot is treated as the server's response for this GET request
   update() {
-
     const uri = decodeURIComponent(window.location.href);
     if (this.lastUri == uri) { return; }
 
     const request = { uri, verb: 'GET' };
-    const response = JSON.stringify({}); // [TODO] get DOM instead
+    const response = { isClientSide: true, dom: getCurrentDOM() }
 
     this.HTTPanalyzer.parseHTTP({ request, response });
     emit({ type: events.NAV, payload: uri });

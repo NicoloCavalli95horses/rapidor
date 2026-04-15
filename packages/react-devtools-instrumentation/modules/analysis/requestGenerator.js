@@ -4,7 +4,7 @@
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
-import { log, sleep } from "../../utils/utils.js";
+import { log, sleep, getCurrentDOM } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 
@@ -130,10 +130,10 @@ export class RequestGenerator {
     // In the context of a SPA, routing can be handled entirely on the client side
     const result = await this.isUsingQueryParams(request);
 
-    if (result) {
-      response.hasClientSideEffect = true;
+    return  {
+      isClientSide: true,
+      ...result,
     }
-    return response;
   }
 
 
@@ -143,37 +143,42 @@ export class RequestGenerator {
     const baseUrl = new URL(request.url);
     const originalUrl = window.location.href;
     const params = baseUrl.searchParams;
-    let isUsingNewParams = 0;
+    let result = {isUsingNewParams: false, hasMutatedDom: false, dom: {}};
 
     // The length of params is 1 by design (ie, we mutate one segment at the time)
     const entry = params.entries().next().value;
-    if (!entry) { return isUsingNewParams; }
+    if (!entry) { return result; }
     const [param, value] = entry;
     const key = `${param}=${value}`;
 
     if (this.usedQueryParams.has(key)) {
-      return isUsingNewParams;
+      return result;
     }
 
     this.accessedParams.clear();
 
     const testUrl = new URL(baseUrl.toString());
     testUrl.searchParams.set(param, value);
-    let hasDOMchanges = false;
+    let state = {};
 
     try {
       window.history.pushState({ ignore: true }, "", testUrl);
       window.dispatchEvent(new Event("popstate"));
-      hasDOMchanges = await this.waitDOMIdle();
+      state = await this.waitDOMIdle();
     } finally { // rollback
       window.history.pushState({ ignore: true }, "", originalUrl);
       window.dispatchEvent(new Event("popstate"));
     }
 
-    isUsingNewParams = (this.accessedParams.has(param) && hasDOMchanges) ? 1 : 0;
+    result = {
+      ...result,
+      ...state,
+      isUsingNewParams: (this.accessedParams.has(param) && state.hasMutatedDom) ? true : false,
+    };
+  
     this.usedQueryParams.add(key);
 
-    return isUsingNewParams;
+    return result;
   }
 
 
@@ -181,12 +186,12 @@ export class RequestGenerator {
   // Wait for the DOM to stabilize (idle), return true if there are DOM changes, wait at least 500ms
   waitDOMIdle({ minWait = 500, idleTime = 100 } = {}) {
     return new Promise((resolve) => {
-      let changed = false;
+      let hasMutatedDom = false;
       let lastChange = Date.now();
       const start = Date.now();
 
       const obs = new MutationObserver(() => {
-        changed = true;
+        hasMutatedDom = true;
         lastChange = Date.now();
       });
 
@@ -203,7 +208,7 @@ export class RequestGenerator {
 
         if (waitedEnough && isStable) {
           obs.disconnect();
-          resolve(changed);
+          resolve({hasMutatedDom, dom: getCurrentDOM()});
         } else {
           requestAnimationFrame(check);
         }

@@ -31,12 +31,13 @@ export class ResponseEvaluator {
     log({ module: "response evaluator", msg: "Starting evaluation..." });
     const { reference, candidate } = event;
 
-    const resSimilarity = this.calcResponseSimilarity({ refResponse: reference.response, currResponse: candidate.response });
-    const DOMsimilarity = this.calcDOMSimilarity({ reference, candidate });
+    const responseSimilarity = this.handleResponseSimilarity(reference.response, candidate.response);
+    const DOMsimilarity = this.calcDOMSimilarity(reference, candidate);
 
     // [TODO] add list of CSS classes to node.analysis to better compare the results
-  
-    const canReport = DOMsimilarity.areDifferent && resSimilarity.areSimilar
+
+    const canReport = DOMsimilarity.areDifferent && responseSimilarity.areSimilar;
+
     if (!canReport) {
       log({ module: "response evaluator", msg: "Nothing to report" });
       return;
@@ -45,19 +46,46 @@ export class ResponseEvaluator {
     emit({
       type: events.REPORT,
       payload: {
+        id: this.getReportId(candidate, reference),
         reference,
         candidate,
-        similarity: { DOMsimilarity, resSimilarity },
+        similarity: { DOMsimilarity, responseSimilarity },
         description: 'potential access control vulnerability'
       }
     });
-    
+
     log({ module: "response evaluator", type: "warning", msg: "Potential access control issue found" });
   }
 
 
 
-  calcDOMSimilarity({ reference, candidate }) {
+  getReportId(ref, cand) {
+    return `ref:${ref.analysis.target.value}:nodeId:${ref.node.id}::curr:${cand.analysis.target.value}:nodeId:${cand.node.id}`;
+  }
+
+
+
+  handleResponseSimilarity(refResponse, currResponse) {
+    if (refResponse.isClientSide && currResponse.isUsingNewParams) {
+      return this.getDOMResponseSimilarity(refResponse.dom, currResponse.dom);
+    }
+
+    return this.calcResBodySimilarity(refResponse, currResponse);
+  }
+
+
+
+  getDOMResponseSimilarity(dom1, dom2) {
+    return {
+      areSimilar: this.checkIntSimilarity(dom1.length, dom2.length, config.resBodyThr),
+      bodyLength: { refDOMlength: dom1.length, currDOMLength: dom2.length, threshold: config.resBodyThr },
+      description: "mutated query parameters have produces similar client-side DOM changes",
+    }
+  }
+
+
+
+  calcDOMSimilarity(reference, candidate) {
     const refIdx = reference.relations.siblingMeta?.relativeIdx;
     const currIdx = candidate.relations.siblingMeta?.relativeIdx;
     const refDOM = reference.node.DOM?.DOMchildren;
@@ -71,7 +99,7 @@ export class ResponseEvaluator {
 
 
   // [TODO] we are just considering JSON responses. To extend to HTML/JS or other valid responses (?)
-  calcResponseSimilarity({ refResponse, currResponse }) {
+  calcResBodySimilarity(refResponse, currResponse) {
     const compare = ['status', 'raw-type']; // shall we just compare the existing fields (?)
     const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
     const refBodyLength = Number(refResponse['content-length']) || 0;
