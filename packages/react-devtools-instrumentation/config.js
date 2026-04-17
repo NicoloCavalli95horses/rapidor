@@ -5,14 +5,14 @@ export const config = Object.freeze({
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
   timeBetweenRequests: 1000,            // [policy] Ms between each generated HTTP request
   jaccardThr: 0.80,                     // [policy] Similarity threshold considered in Jaccard's similarity index (0: non-similar with HIGH visual differences, 1: non-similar with LOW visual differences)
-  resBodyThr: 0.70,                     // [policy] Similarity threshold in the response body (0: more relaxed key's similarity, 1: more strict key's similarity)
+  resBodyThr: 0.55,                     // [policy] Similarity threshold in response keys, and within the body (0: more relaxed key's similarity, 1: more strict key's similarity)
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
   tagsWhitelist: [0,7,11,15],           // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long
   maxExplorationKeys: 100,              // [optimization] Trim extremely large objects
   maxSegmentsHistoryLength: 100,        // [optimization] Max length of the history of URL segments
-  testClientSideQueryParamsUsage: true  // [policy] Candidate query parameters are tested on the client-side (eg url.searchParams.set(param, value); window.history.pushState({}, "", url); )
+  testClientSideQueryParamsUsage: false  // [policy] Candidate query parameters are tested on the client-side (eg url.searchParams.set(param, value); window.history.pushState({}, "", url); )
 });
 
 

@@ -65,10 +65,12 @@ export class NavigationTracker {
     const uri = decodeURIComponent(window.location.href);
     if (this.lastUri == uri) { return; }
 
-    const request = { uri, verb: 'GET' };
-    const response = { isClientSide: true, dom: getCurrentDOM() }
+    if (new URL(uri).searchParams?.size) { // send new HTTP event to analyze only if we have search parameters
+      const request = { uri, verb: 'GET' };
+      const response = { isClientSide: true, dom: getCurrentDOM() }
+      this.HTTPanalyzer.parseHTTP({ request, response });
+    }
 
-    this.HTTPanalyzer.parseHTTP({ request, response });
     emit({ type: events.NAV, payload: uri });
     this.lastUri = uri;
   }

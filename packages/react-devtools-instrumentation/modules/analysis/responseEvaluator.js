@@ -32,10 +32,7 @@ export class ResponseEvaluator {
     const { reference, candidate } = event;
 
     const responseSimilarity = this.handleResponseSimilarity(reference.response, candidate.response);
-    const DOMsimilarity = this.calcDOMSimilarity(reference, candidate);
-
-    // [TODO] add list of CSS classes to node.analysis to better compare the results
-
+    const DOMsimilarity = this.handleDOMSimilarity(reference, candidate);
     const canReport = DOMsimilarity.areDifferent && responseSimilarity.areSimilar;
 
     if (!canReport) {
@@ -59,18 +56,20 @@ export class ResponseEvaluator {
 
 
 
-  getReportId(ref, cand) {
-    return `ref:${ref.analysis.target.value}:nodeId:${ref.node.id}::curr:${cand.analysis.target.value}:nodeId:${cand.node.id}`;
+  getReportId(cand, ref) {
+    return `curr:${cand.analysis.target.value}:nodeId:${cand.node.id}:::ref:${ref.analysis.target.value}:nodeId:${ref.node.id}`;
   }
 
 
 
   handleResponseSimilarity(refResponse, currResponse) {
+    // The new query parameters triggered client-side DOM changes
     if (refResponse.isClientSide && currResponse.isUsingNewParams) {
       return this.getDOMResponseSimilarity(refResponse.dom, currResponse.dom);
     }
 
-    return this.calcResBodySimilarity(refResponse, currResponse);
+    // Compare server-side responses body
+    return this.getResponseSimilarity(refResponse, currResponse);
   }
 
 
@@ -79,13 +78,13 @@ export class ResponseEvaluator {
     return {
       areSimilar: this.checkIntSimilarity(dom1.length, dom2.length, config.resBodyThr),
       bodyLength: { refDOMlength: dom1.length, currDOMLength: dom2.length, threshold: config.resBodyThr },
-      description: "mutated query parameters have produces similar client-side DOM changes",
+      description: "mutated query parameters produced client-side DOM changes",
     }
   }
 
 
 
-  calcDOMSimilarity(reference, candidate) {
+  handleDOMSimilarity(reference, candidate) {
     const refIdx = reference.relations.siblingMeta?.relativeIdx;
     const currIdx = candidate.relations.siblingMeta?.relativeIdx;
     const refDOM = reference.node.DOM?.DOMchildren;
@@ -99,52 +98,44 @@ export class ResponseEvaluator {
 
 
   // [TODO] we are just considering JSON responses. To extend to HTML/JS or other valid responses (?)
-  calcResBodySimilarity(refResponse, currResponse) {
-    const compare = ['status', 'raw-type']; // shall we just compare the existing fields (?)
-    const areFieldsEqual = compare.every(e => refResponse[e] === currResponse[e]);
-    const refBodyLength = Number(refResponse['content-length']) || 0;
-    const currBodyLength = Number(currResponse['content-length']) || 0;
-    const isLengthSimilar = (refBodyLength && currBodyLength) ? this.checkIntSimilarity(refBodyLength, currBodyLength, config.resBodyThr) : true;
+  getResponseSimilarity(refResponse, currResponse) {
+    // 1. Compare response fields
+    const {fields, areFieldsEqual} = this.areFieldsEqual(refResponse, currResponse);
 
-    const refBody = refResponse.body;
-    const currBody = currResponse.body;
-    const hasBody = !!refBody && !!currBody;
+    // 2. Compare response body length
+    const { refBodyLength, currBodyLength, isBodyLengthSimilar } = this.getBodyLengthSimilarity(refResponse, currResponse);
 
-    const bodySimilarity = hasBody ? this.checkBodySimilarity(refBody, currBody) : {};
+    // 3. Compare response body shape
+    const { refBodyKeys, currBodyKeys, isBodyShapeSimilar } = this.getBodyShapeSimilarity(refResponse, currResponse);
 
     return {
-      areSimilar: areFieldsEqual && isLengthSimilar && (hasBody ? bodySimilarity.isSimilar : true),
-      equalResponseFields: compare,
-      bodyLength: { isLengthSimilar, refBodyLength, currBodyLength, threshold: config.resBodyThr },
-      bodySimilarity,
-      description: "the similarity is calculated on Object keys of both body length and body content",
+      areSimilar: areFieldsEqual && isBodyLengthSimilar && isBodyShapeSimilar,
+      fields: { areEqual: areFieldsEqual, fields},
+      bodyLength: { refBodyLength, currBodyLength, isBodyLengthSimilar, threshold: config.resBodyThr },
+      bodyShape: { refBodyKeys, currBodyKeys, isBodyShapeSimilar, threshold: config.resBodyThr },
+      description: "the overall similarity takes into consideration response fields similarity, body length and body content",
     }
   }
 
 
 
-  checkBodySimilarity(refBody, currBody) {
-    const refKeys = this.extractKeyPaths(refBody);
-    const currKeys = this.extractKeyPaths(currBody);
+  getBodyShapeSimilarity(reference, current) {
+    const refBodyKeys = this.extractKeyPaths(reference?.body || {});
+    const currBodyKeys = this.extractKeyPaths(current?.body || {});
 
-    // Calc similarity on the length of the sets of keys
-    // We dont really care about the actual content, we just expect similar shapes
-    const threshold = config.resBodyThr;
-    const isSimilar = this.checkIntSimilarity(refKeys.length, currKeys.length, threshold);
+    // Calculate similarity on the length of the sets of keys
+    // We dont care about the actual content, we just expect similar shapes
+    const isBodyShapeSimilar = this.checkIntSimilarity(refBodyKeys.length, currBodyKeys.length, config.resBodyThr);
 
-    return {
-      isSimilar,
-      refKeys,
-      currKeys,
-      threshold,
-      calculatedRatio: currKeys.length / refKeys.length,
-    };
+    return { refBodyKeys, currBodyKeys, isBodyShapeSimilar };
   }
 
 
 
-  extractKeyPaths(obj, prefix = '') {
+  // Returns a flat array of all the keys, including nested ones
+  extractKeyPaths(obj = {}, prefix = '') {
     let paths = [];
+    if (!obj) { return paths; }
 
     for (const key in obj) {
       const path = prefix ? `${prefix}.${key}` : key;
@@ -160,7 +151,34 @@ export class ResponseEvaluator {
 
 
 
+  getBodyLengthSimilarity(reference, current) {
+    const refBodyLength = Number(reference['content-length']) || 0;
+    const currBodyLength = Number(current['content-length']) || 0;
+    const isBodyLengthSimilar = this.checkIntSimilarity(refBodyLength, currBodyLength, config.resBodyThr);
+
+    return { refBodyLength, currBodyLength, isBodyLengthSimilar };
+  }
+
+
+
+  areFieldsEqual(reference, current) {
+    const fields = ['status', 'type', 'rawType', 'headers'];
+    let areFieldsEqual = true;
+
+    for (const f of fields) {
+      if (reference[f] !== current[f]) {
+        areFieldsEqual = false;
+      }
+    }
+
+    return {fields, areFieldsEqual};
+  }
+
+
+
+
   checkIntSimilarity(a, b, thr) {
+    if (a === 0 && b === 0) { return true; }
     if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) { return false; }
     const ratio = b / a;
     return (ratio >= thr) && (ratio <= 1 / thr);
