@@ -12,7 +12,7 @@ export const config = Object.freeze({
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long
   maxExplorationKeys: 100,              // [optimization] Trim extremely large objects
   maxSegmentsHistoryLength: 100,        // [optimization] Max length of the history of URL segments
-  testClientSideQueryParamsUsage: false  // [policy] Candidate query parameters are tested on the client-side (eg url.searchParams.set(param, value); window.history.pushState({}, "", url); )
+  testClientSideQueryParamsUsage: true  // [policy] Candidate query parameters are tested on the client-side (eg url.searchParams.set(param, value); window.history.pushState({}, "", url); )
 });
 
 
