@@ -188,20 +188,6 @@ export function getValueAtPath(obj, path) {
 
 
 
-export function updateDOM({ h1, h2, p, keepOverlay } = {}) {
-  emit({
-    type: events.ANALYSIS_IN_PROGRESS,
-    payload: {
-      h1: h1 || 'Analysis in progress',
-      h2: h2 || '',
-      p: p || 'please wait...',
-      keepOverlay: keepOverlay || false,
-    }
-  });
-}
-
-
-
 export function getCurrentDOM() {
   return new XMLSerializer().serializeToString(document);
 }

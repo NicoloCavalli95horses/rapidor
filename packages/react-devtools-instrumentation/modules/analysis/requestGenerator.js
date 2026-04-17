@@ -13,8 +13,8 @@ import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 // Functions
 //===================
 export class RequestGenerator {
-  constructor() {
-    this.evaluator = new ResponseEvaluator();
+  constructor(stateManager) {
+    this.evaluator = new ResponseEvaluator(stateManager);
     this.pendingRequests = new Map();
     this.httpAnalyzer = new analyzeHTTP();
     this.alreadyDone = new Set();

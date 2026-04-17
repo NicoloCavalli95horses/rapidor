@@ -4,8 +4,6 @@ export const config = Object.freeze({
   sessionID: crypto.randomUUID(),       // [meta] ID of stored data
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
   timeBetweenRequests: 1000,            // [policy] Ms between each generated HTTP request
-  jaccardThr: 0.80,                     // [policy] Similarity threshold considered in Jaccard's similarity index (0: non-similar with HIGH visual differences, 1: non-similar with LOW visual differences)
-  resBodyThr: 0.55,                     // [policy] Similarity threshold in response keys, and within the body (0: more relaxed key's similarity, 1: more strict key's similarity)
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
   tagsWhitelist: [0,7,11,15],           // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)

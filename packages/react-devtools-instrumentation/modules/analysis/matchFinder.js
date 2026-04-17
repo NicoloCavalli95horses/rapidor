@@ -27,8 +27,8 @@ export class MatchFinder {
     if (ignore) { return data; } // self-generated HTTP events
 
     const properties = request.analysis.toEvaluate;
-    const results = await this.getPreIndexedMatches(properties);
-    const couples = await this.processResults(results);
+    const matches = await this.getPreIndexedMatches(properties);
+    const couples = await this.processResults(matches);
 
     data.results = couples;
     data.success = couples?.length;
@@ -55,6 +55,7 @@ export class MatchFinder {
             if (!node?.componentId) { return null; }
 
             const relations = await this.stateManager.getRelationsByID(match.graphIndex, match.nodeId);
+            node.graphIndex = match.graphIndex;
 
             return { ...match, node, relations, target: property };
           })
@@ -69,55 +70,66 @@ export class MatchFinder {
 
   // For each matching node, build sub-arrays with candidates and DOM references
   // [[ {reference: {...}}, {candidates: [{...},{...}] ]]
-  async processResults(results) {
-    if (!results.length) { return []; }
+  async processResults(references) {
+    if (!references.length) { return []; }
     const couples = [];
 
-    for (const result of results) {
-      // get alternative instances of matching component
-      const componentIndex = await this.stateManager.getComponentIndexByID(result.graphIndex);
-      const nodeIds = componentIndex[result.node.componentId];
-      if (!nodeIds.length) { continue; }
+    for (const ref of references) {
+      // Get alternative instances of matching component
+      const componentIndex = await this.stateManager.getComponentIndexByID(ref.graphIndex);
+      const instancesIds = componentIndex[ref.node.componentId];
+      if (!instancesIds.length) { continue; }
+
+      // [TODO] process here the DOMs and append a boolean that will be used in evaluation
+      // > ref.node.DOM.isPremium = false (the tester or an AI agent clicked successfully so it must be free)
+      // > candidateNode.DOM.isPremium = (?)
+      //   consider all the avaiable set of DOM classes (eg if instancesIds.length = 10 -> 10 sets of DOM classes)
+      //   we assume that all the premium elements are identical to each other
+      //   we assume that the free elements may have some differences between each other
+      //   - first, group all the identical set of CSS classes. This is likely the set of premium elements
+      //   - if the candidateNode.DOM has the same set of CSS classes, is premium, else is free
+
+      ref.node.DOM = ref.node.DOM || await this.stateManager.getAncestorDOM(ref.graphIndex, ref.nodeId);
+      ref.node.instancesIds = instancesIds.filter(i => i != ref.node.id);
 
       const candidates = [];
       const domPromises = [];
 
-      if (!result.node.DOM) {
-        result.node.DOM = await this.stateManager.getAncestorDOM(result.graphIndex, result.nodeId);
-      }
+      for (const id of instancesIds) {
+        if (id === ref.nodeId) { continue; }
 
-      for (const candidateId of nodeIds) {
-        if (candidateId === result.nodeId) { continue; }
-
-        const candidateNode = await this.stateManager.getNodeByID(result.graphIndex, candidateId);
-        const candidateMatch = getValueAtPath(candidateNode, result.path);
+        const candidateNode = await this.stateManager.getNodeByID(ref.graphIndex, id);
+        const candidateMatch = getValueAtPath(candidateNode, ref.path);
 
         if ([null, undefined, ''].includes(candidateMatch)) { continue; }
 
         if (!candidateNode.DOM) {
           domPromises.push(
             this.stateManager
-              .getAncestorDOM(result.graphIndex, candidateNode.id)
+              .getAncestorDOM(ref.graphIndex, candidateNode.id)
               .then(dom => { candidateNode.DOM = dom; })
           );
         }
 
-        const candidateTarget = structuredClone(result.target);
+        candidateNode.graphIndex = ref.graphIndex;
+        candidateNode.instancesIds = instancesIds.filter(i => i != candidateNode.id);
+
+        const candidateTarget = structuredClone(ref.target);
         candidateTarget.value = candidateMatch;
 
         candidates.push({
           node: candidateNode,
-          graphIndex: result.graphIndex,
-          path: result.path,
+          graphIndex: ref.graphIndex,
+          path: ref.path,
           target: candidateTarget,
-          relations: await this.stateManager.getRelationsByID(result.graphIndex, candidateNode.id),
+          relations: await this.stateManager.getRelationsByID(ref.graphIndex, candidateNode.id),
         });
       }
 
       await Promise.all(domPromises);
 
       if (candidates.length) {
-        couples.push({ reference: result, candidates })
+        couples.push({ reference: ref, candidates })
       }
     }
 

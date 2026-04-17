@@ -2,7 +2,7 @@
 // Import
 //===================
 import { emit, eventBus, events } from "../../utils/eventBus.js";
-import { log, updateDOM } from "../../utils/utils.js";
+import { log } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { StateManager } from "../state/stateManager.js";
 import { RequestGenerator } from "./requestGenerator.js";
@@ -16,7 +16,7 @@ import { MatchFinder } from "./matchFinder.js";
 export class AnalysisLoop {
   constructor(stateManager) {
     this.stateManager = stateManager;
-    this.requestGenerator = new RequestGenerator();
+    this.requestGenerator = new RequestGenerator(this.stateManager);
     this.matchFinder = new MatchFinder(this.stateManager);
   }
 
@@ -31,7 +31,6 @@ export class AnalysisLoop {
   async startAnalysis() {
     let httpEvent = {};
     let lastKey = undefined;
-    this.displayInfo({ h2: "Matching data from HTTP requests with available data", keepOverlay: true });
 
     while (true) {
       httpEvent = await this.stateManager.getNextHttpEvent(lastKey);
@@ -52,12 +51,5 @@ export class AnalysisLoop {
     }
 
     log({ module: 'analysis manager', msg: 'Exit analysis' });
-    this.displayInfo();
-  }
-
-
-
-  displayInfo({ h1, h2, p, keepOverlay } = {}) {
-    updateDOM({ h1, h2, p, keepOverlay });
   }
 }

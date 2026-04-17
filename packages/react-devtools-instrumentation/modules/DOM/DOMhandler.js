@@ -21,12 +21,6 @@ export class DOMhandler {
     this.onDOMReady(() => {
       const els = this.createBackground();
       this.showDownloadBtn();
-
-      eventBus.subscribe((e) => {
-        if (e.type === events.ANALYSIS_IN_PROGRESS) {
-          this.updateInfo({ payload: e.payload, els });
-        }
-      });
     });
   }
 
@@ -104,16 +98,6 @@ export class DOMhandler {
     wrapper.appendChild(p);
 
     return { h1, h2, p, bg };
-  }
-
-
-
-  updateInfo({ payload, els }) {
-    const { h1, h2, p, bg } = els;
-    h1.textContent = payload.h1;
-    h2.textContent = payload.h2;
-    p.textContent = payload.p;
-    bg.style.display = (payload.keepOverlay || this.keepOverlay) ? "block" : "none";
   }
 
 
