@@ -39,7 +39,6 @@ export class StateManager {
           break;
 
         case events.PREINDEXING_UPDATE:
-          // [TODO] do not save two row with the same primitive values, just update the snapshot key
           // [TODO] this seems to break the loop in very large apps (eg. app.memrise.com/learn). Shall we handle the preindexing with a service worker?
           await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
           break;

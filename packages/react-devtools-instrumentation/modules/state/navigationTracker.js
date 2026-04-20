@@ -12,11 +12,6 @@ import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 // Class
 //===================
 
-// [TODO] sometimes the route change without an HTTP request being fired
-// - the new route may have queryParameters that may be interesting to fuzz
-// - we need an independent navigation tracker that saves each new URL
-//   and use HTTPAnalyzer to emit an HTTP event that will be then analyzed
-// > In Pimsleur, we go from `/MiniLearn` to `/MiniLearn/MiniLesson?id=112...`
 export class NavigationTracker {
   constructor() {
     this.HTTPanalyzer = new analyzeHTTP();

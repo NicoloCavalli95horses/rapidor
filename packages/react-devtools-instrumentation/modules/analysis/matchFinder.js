@@ -80,15 +80,6 @@ export class MatchFinder {
       const instancesIds = componentIndex[ref.node.componentId];
       if (!instancesIds.length) { continue; }
 
-      // [TODO] process here the DOMs and append a boolean that will be used in evaluation
-      // > ref.node.DOM.isPremium = false (the tester or an AI agent clicked successfully so it must be free)
-      // > candidateNode.DOM.isPremium = (?)
-      //   consider all the avaiable set of DOM classes (eg if instancesIds.length = 10 -> 10 sets of DOM classes)
-      //   we assume that all the premium elements are identical to each other
-      //   we assume that the free elements may have some differences between each other
-      //   - first, group all the identical set of CSS classes. This is likely the set of premium elements
-      //   - if the candidateNode.DOM has the same set of CSS classes, is premium, else is free
-
       ref.node.DOM = ref.node.DOM || await this.stateManager.getAncestorDOM(ref.graphIndex, ref.nodeId);
       ref.node.instancesIds = instancesIds.filter(i => i != ref.node.id);
 

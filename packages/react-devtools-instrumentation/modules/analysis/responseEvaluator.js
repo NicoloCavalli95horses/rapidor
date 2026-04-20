@@ -24,7 +24,7 @@ export class ResponseEvaluator {
     // > [1] non-similar with LOW visual differences)
     this.jaccardThr = 0.70;
 
-    this.cache = new Map(); // node-id: [flat-css-classes]
+    this.CSSmap = new Map(); // Map<graphIndex, Map<nodeId, cssArray>>
   }
 
   init() {
@@ -36,17 +36,17 @@ export class ResponseEvaluator {
 
   // [TODO] new strategies
   // > compare callstacks after click events on siblings 
-  // > probabilistic grouping of free or premium elements
   // > heuristics-based approach: find relevant key-values in `props` (eg. isLocked, isPremium, etc)
 
   // This currently does not work when we have free items with different DOM classes (eg. promova case)
   async handleEvent(event) {
     log({ module: "response evaluator", msg: "Starting evaluation..." });
     const { reference, candidate } = event;
+    this.CSSmap.clear();
 
     const responses = this.handleResponseSimilarity(reference.response, candidate.response);
-    const gui = await this.handleVisualAnalysis(reference, candidate);
-    const canReport = gui.isPremium && responses.areSimilar;
+    const domEl = await this.handleVisualAnalysis(reference, candidate);
+    const canReport = domEl.areDifferent && responses.areSimilar;
 
     if (!canReport) {
       log({ module: "response evaluator", msg: "Nothing to report" });
@@ -59,7 +59,7 @@ export class ResponseEvaluator {
         id: this.getReportId(candidate, reference),
         reference,
         candidate,
-        analysis: { gui, responses },
+        analysis: { domEl, responses },
         description: 'potential access control vulnerability'
       }
     });
@@ -96,9 +96,7 @@ export class ResponseEvaluator {
   }
 
 
-  // [TODO] now we have all the CSS classes of all the istances of the matching components
-  // should we move this info at the matchFinder instead (?)
-  // [TODO] label istances as free or premium
+
   async handleVisualAnalysis(reference, current) {
     const graphIndex = reference.node.graphIndex;
     const referenceCSS = await this.getCSS(reference, graphIndex);
@@ -106,8 +104,9 @@ export class ResponseEvaluator {
 
     await Promise.all(
       current.node.instancesIds.map(async (id) => {
-        const key = this.getCacheId(id, graphIndex);
-        if (this.cache.has(key)) { return; }
+        const graph = this.CSSmap.get(graphIndex);
+
+        if (graph?.has(id)) { return; }
 
         const [node, relations] = await Promise.all([
           this.stateManager.getNodeByID(graphIndex, id),
@@ -118,21 +117,78 @@ export class ResponseEvaluator {
       })
     );
 
-    console.log('cache', this.cache)
+    const instancesCSS = this.CSSmap.get(graphIndex);
+    const freq = this.buildGlobalStats(instancesCSS);
+    const score = this.buildScoreMap({ freeSet: new Set(referenceCSS), freq, totalNodes: instancesCSS.size });
+    const areDifferent = this.hasLikelyPremiumCSS(new Set(currentCSS), score);
 
-    return {}
+    return {
+      // description: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
+      CSSanalysis: { reference: referenceCSS, current: currentCSS, freq, score },
+      areDifferent
+    }
+  }
+
+
+
+  // Create a map of frequencies of CSS classes
+  // This describes how common a specific CSS class is
+  buildGlobalStats(cssMap) {
+    const freq = {};
+
+    cssMap.forEach(classes => {
+      for (const c of new Set(classes)) {
+        freq[c] = (freq[c] || 0) + 1;
+      }
+    });
+
+    return freq;
+  }
+
+
+
+  // This describes the likelihood of CSS class being used in a free element
+  // The lower the value the higher the change that it is used in premium elements
+  buildScoreMap({ freeSet, freq, totalNodes }) {
+    const score = {};
+
+    for (const c of Object.keys(freq)) {
+      const p_global = freq[c] / totalNodes;
+      const inFree = freeSet.has(c) ? 1 : 0;
+      score[c] = inFree - p_global;
+    }
+
+    return score;
+  }
+
+
+
+  hasLikelyPremiumCSS(nodeCSS = new Set(), scoreMap) {
+    let tot = 0;
+
+    for (const c of nodeCSS) {
+      tot += scoreMap[c] || 0;
+    }
+
+    return tot < 0;
   }
 
 
 
   async getCSS(obj, graphIndex) {
     const nodeId = obj.node.id;
-    const key = this.getCacheId(nodeId, graphIndex);
-    let css = this.cache.get(key);
+    let graph = this.CSSmap.get(graphIndex);
+
+    if (!graph) {
+      graph = new Map();
+      this.CSSmap.set(graphIndex, graph);
+    }
+
+    let css = graph.get(nodeId);
 
     if (!css) {
       css = await this.handleDOMclasses(obj, graphIndex);
-      this.cache.set(key, css);
+      graph.set(nodeId, css);
     }
 
     return css;
@@ -144,12 +200,12 @@ export class ResponseEvaluator {
     const idx = obj.relations?.siblingMeta?.relativeIdx;
     const dom = obj.node.DOM || await this.stateManager.getAncestorDOM(graphIndex, obj.node.id);
 
-    if (!Array.isArray(dom.DOMchildren)) {
+    if (!Array.isArray(dom?.DOMchildren)) {
       log({ module: "response evaluator", type: "error", msg: "Impossible to execute DOM analysis" });
       return [];
     }
 
-    const el = dom.DOMchildren[idx];
+    const el = dom?.DOMchildren[idx];
 
     return el ? this.getFlatCSSClasses(el) : [];
   }
@@ -165,19 +221,13 @@ export class ResponseEvaluator {
       arr.push(...el.classes);
     }
 
-    if (el.DOMchildren) {
+    if (el?.DOMchildren) {
       for (const child of el.DOMchildren) {
         this.getFlatCSSClasses(child, arr);
       }
     }
 
     return arr;
-  }
-
-
-
-  getCacheId(nodeId, graphIndex) {
-    return `${nodeId}:${graphIndex}`
   }
 
 
@@ -261,100 +311,10 @@ export class ResponseEvaluator {
 
 
 
-
   checkIntSimilarity(a, b, thr = this.responseBodyThr) {
     if (a === 0 && b === 0) { return true; }
     if (!Number.isFinite(a) || !Number.isFinite(b) || a === 0) { return false; }
     const ratio = b / a;
     return (ratio >= thr) && (ratio <= 1 / thr);
-  }
-
-
-
-  evaluateDOM(refDOM, currDOM) {
-    const referenceCSS = this.getFlatCSSClasses(refDOM);
-    const currCSS = this.getFlatCSSClasses(currDOM);
-    const jaccard = this.jaccardMultiset(referenceCSS, currCSS);
-
-    return {
-      jaccard,
-      orderSimilarity: this.orderedSimilarity(referenceCSS, currCSS),
-      description: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
-      CSSclasses: { referenceNodeCSS: referenceCSS, candidateNodeCSS: currCSS },
-      threshold: this.jaccardThr,
-      areDifferent: jaccard <= this.jaccardThr
-    }
-  }
-
-
-
-  jaccardMultiset(a, b) {
-    const countA = {};
-    const countB = {};
-
-    for (const x of a) countA[x] = (countA[x] || 0) + 1;
-    for (const x of b) countB[x] = (countB[x] || 0) + 1;
-
-    const keys = new Set([...Object.keys(countA), ...Object.keys(countB)]);
-
-    let intersection = 0;
-    let union = 0;
-
-    for (const k of keys) {
-      const ca = countA[k] || 0;
-      const cb = countB[k] || 0;
-
-      intersection += Math.min(ca, cb);
-      union += Math.max(ca, cb);
-    }
-
-    return (union === 0) ? 1 : (intersection / union);
-  }
-
-
-
-  // Returns the longest sequence of common elements
-  // A = ['a','b','c','d']
-  // B = ['a','c','d']
-  // LCS = 3 
-  longestCommonSubsequence(A, B) {
-    const m = A.length;
-    const n = B.length;
-
-    // new matrice (m+1)x(n+1) init at 0
-    const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
-
-    for (let i = 1; i <= m; i++) {
-      for (let j = 1; j <= n; j++) {
-        if (A[i - 1] === B[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-        }
-      }
-    }
-
-    let i = m, j = n;
-    const lcs = [];
-    while (i > 0 && j > 0) {
-      if (A[i - 1] === B[j - 1]) {
-        lcs.unshift(A[i - 1]);
-        i--; j--;
-      } else if (dp[i - 1][j] > dp[i][j - 1]) {
-        i--;
-      } else {
-        j--;
-      }
-    }
-
-    return { length: dp[m][n], sequence: lcs };
-  }
-
-
-
-  // Normalize LCS
-  orderedSimilarity(A, B) {
-    const lcsLen = this.longestCommonSubsequence(A, B).length;
-    return lcsLen / Math.max(A.length, B.length);
   }
 }

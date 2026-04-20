@@ -57,7 +57,7 @@ export class RequestGenerator {
 
   async handleEvent(event) {
     const { httpEvent, results } = event;
-    const { request: referenceReq, response: referenceRes, type } = httpEvent; // [TODO] if response is empty, look at the first available graph matching the nav id
+    const { request: referenceReq, response: referenceRes, type } = httpEvent;
 
     for (const { reference, candidates } of results) {
       for (let i = 0; i < candidates.length; i++) {
