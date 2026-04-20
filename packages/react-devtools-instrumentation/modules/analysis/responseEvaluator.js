@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log } from "../../utils/utils.js";
+import { log, isPlainObject } from "../../utils/utils.js";
 import { config } from "../../config.js";
 
 
@@ -25,6 +25,12 @@ export class ResponseEvaluator {
     this.jaccardThr = 0.70;
 
     this.CSSmap = new Map(); // Map<graphIndex, Map<nodeId, cssArray>>
+
+    this.sensitiveKeys = [
+      "premium", "locked", "access", "active", "blocked", "unlocked",
+      "role", "plan", "subscription", "subscribed", "free",
+      "entitlement", "tier", "paid"
+    ];
   }
 
   init() {
@@ -35,7 +41,6 @@ export class ResponseEvaluator {
 
 
   // [TODO] new strategies
-  // > compare callstacks after click events on siblings 
   // > heuristics-based approach: find relevant key-values in `props` (eg. isLocked, isPremium, etc)
 
   // This currently does not work when we have free items with different DOM classes (eg. promova case)
@@ -44,9 +49,12 @@ export class ResponseEvaluator {
     const { reference, candidate } = event;
     this.CSSmap.clear();
 
-    const responses = this.handleResponseSimilarity(reference.response, candidate.response);
-    const domEl = await this.handleVisualAnalysis(reference, candidate);
-    const canReport = domEl.areDifferent && responses.areSimilar;
+    const httpResponses = this.handleResponseSimilarity(reference.response, candidate.response);
+    //const domEl = await this.handleVisualAnalysis(reference, candidate);
+    const clientSideAuthZ = this.assessAuthZ(reference.node.props, candidate.node.props);
+    const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium; //&& domEl.areDifferent ;
+
+    console.log({ reference, candidate, clientSideAuthZ })
 
     if (!canReport) {
       log({ module: "response evaluator", msg: "Nothing to report" });
@@ -59,7 +67,7 @@ export class ResponseEvaluator {
         id: this.getReportId(candidate, reference),
         reference,
         candidate,
-        analysis: { domEl, responses },
+        analysis: { clientSideAuthZ, httpResponses },
         description: 'potential access control vulnerability'
       }
     });
@@ -69,8 +77,77 @@ export class ResponseEvaluator {
 
 
 
-  getReportId(cand, ref) {
-    return `curr:${cand.analysis.target.value}:nodeId:${cand.node.id}:::ref:${ref.analysis.target.value}:nodeId:${ref.node.id}`;
+  // Differential analysis: compare reference props to current props
+  // if there are differences for critical keys (eg. isPremium), return true (ie, currProps describes a premium item)
+  assessAuthZ(refProps, currProps) {
+    const diffs = this.compareObj(refProps, currProps);
+    const sensitiveDiffs = diffs.filter(d => this.isSensitiveKey(d.key) || this.isSensitiveKey(d.pathStr));
+    const isPremium = sensitiveDiffs.some(d => d.reference != d.current);
+
+    return { isPremium, sensitiveDiffs };
+  }
+
+
+
+  isSensitiveKey(key) {
+    // "isPremium" > ["is", "premium"]
+    function tokenize(key) {
+      return key
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .replace(/[_-]+/g, " ")
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean);
+    }
+
+    const tokens = tokenize(key);
+    return tokens.some(token => this.sensitiveKeys.includes(token));
+  }
+
+
+
+  // [TODO] to check: sometimes weird properties are matched, eg. updated_at (?)
+  compareObj(a, b) {
+    const visited = new WeakSet();
+    const diffs = [];
+
+    function compare(a, b, path = []) {
+      if (a === b) { return; }
+
+      // check different types
+      if (typeof a !== typeof b) {
+        const key = path.length ? path[path.length - 1] : "";
+        diffs.push({ path, reference: a, current: b, key, pathStr: path.join(".") });
+        return;
+      }
+
+      // check different primitives
+      if (!isPlainObject(a) || !isPlainObject(b)) {
+        const key = path.length ? path[path.length - 1] : "";
+        diffs.push({ path, reference: a, current: b, key: key, pathStr: path.join(".") });
+        return;
+      }
+
+      if (visited.has(a) || visited.has(b)) { return; }
+      visited.add(a);
+      visited.add(b);
+
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+
+      for (const key of keys) {
+        compare(a[key], b[key], [...path, key]);
+      }
+    }
+
+    compare(a, b);
+
+    return diffs;
+  }
+
+
+
+  getReportId(current, reference) {
+    return `current:${current.analysis.target.value}:nodeId:${current.node.id}:::reference:${reference.analysis.target.value}:nodeId:${reference.node.id}`;
   }
 
 
@@ -119,11 +196,11 @@ export class ResponseEvaluator {
 
     const instancesCSS = this.CSSmap.get(graphIndex);
     const freq = this.buildGlobalStats(instancesCSS);
-    const score = this.buildScoreMap({ freeSet: new Set(referenceCSS), freq, totalNodes: instancesCSS.size });
-    const areDifferent = this.hasLikelyPremiumCSS(new Set(currentCSS), score);
+    const score = this.buildScoreMap({ freeSet: referenceCSS, freq, totalNodes: instancesCSS.size });
+    const areDifferent = this.hasLikelyPremiumCSS(currentCSS, score);
 
     return {
-      // description: "the similarity is calculated on DOM classes chain. These originate from a common ancestor and end in two sibling nodes",
+      description: "We estimate the likelihood of a component being free or premium by weighting its CSS classes according to their global frequency and their occurrence in a known free instance.",
       CSSanalysis: { reference: referenceCSS, current: currentCSS, freq, score },
       areDifferent
     }
@@ -191,7 +268,7 @@ export class ResponseEvaluator {
       graph.set(nodeId, css);
     }
 
-    return css;
+    return new Set(css);
   }
 
 

@@ -3,7 +3,7 @@
 // Import
 //===================
 import { config } from "../../config.js";
-import { getValueAtPath } from "../../utils/utils.js";
+
 
 
 //===================
@@ -90,9 +90,9 @@ export class MatchFinder {
         if (id === ref.nodeId) { continue; }
 
         const candidateNode = await this.stateManager.getNodeByID(ref.graphIndex, id);
-        const candidateMatch = getValueAtPath(candidateNode, ref.path);
+        const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, esclude: ref.value });
 
-        if ([null, undefined, ''].includes(candidateMatch)) { continue; }
+        if (!candidateMatch) { continue; }
 
         if (!candidateNode.DOM) {
           domPromises.push(
@@ -125,5 +125,18 @@ export class MatchFinder {
     }
 
     return couples;
+  }
+
+
+
+  getValueAtPath({ obj, path = [], esclude }) {
+    let current = obj;
+
+    for (const key of path) {
+      if (current == null || typeof current !== 'object' || !Object.hasOwn(current, key)) { return; }
+      current = current[key];
+    }
+
+    return [esclude, null, undefined, ''].includes(current) ? undefined : current;
   }
 }

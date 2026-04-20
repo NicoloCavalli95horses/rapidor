@@ -169,21 +169,10 @@ export function isSerializableValue(value) {
 
 
 
-function isPlainObject(value) {
+export function isPlainObject(value) {
   if (value === null || typeof value !== "object") { return false; }
   const proto = Object.getPrototypeOf(value);
   return (proto === Object.prototype || proto === null);
-}
-
-
-
-export function getValueAtPath(obj, path) {
-  return path.reduce((acc, key) => {
-    if (acc != null && Object.hasOwn(acc, key)) {
-      return acc[key];
-    }
-    return undefined;
-  }, obj);
 }
 
 
