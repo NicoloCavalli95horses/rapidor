@@ -3,7 +3,7 @@
 //===================
 import { attach } from 'react-devtools-shared/src/backend/fiber/renderer.js';
 import { emit, events, eventBus } from '../../utils/eventBus.js';
-import { debounce, log, isSerializableValue } from '../../utils/utils.js';
+import { debounceWithMaxTime, log, isSerializableValue } from '../../utils/utils.js';
 import { Graph } from './graph.js';
 import { config } from '../../config.js';
 import { initialize } from '../../../react-devtools-inline/src/backend.js';
@@ -54,13 +54,13 @@ export class Bridge {
 
     // [TODO] debouncing does not work on large web apps when the updates never stop
     // Implement throttling making sure not to store two times the same graph
-    const debouncedProcess = debounce(async (fiber) => {
+    const handleCommit = debounceWithMaxTime(async (fiber) => {
       await self.handleStateGraph(fiber);
-    }, config.debounceTimeMs);
+    }, {debounceT: config.debounceTimeMs, maxT: config.throttleTimeMs});
 
     function wrap(fn) {
       return function (rendererID, root, ...args) {
-        if (root && root?.current) { debouncedProcess(root.current); }
+        if (root && root?.current) { handleCommit(root.current); }
         return fn?.apply(this, [rendererID, root, ...args]);
       };
     }

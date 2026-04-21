@@ -13,7 +13,7 @@ export class ResponseEvaluator {
   constructor() {
     // Similarity threshold in response keys, and within the body
     // more relaxed [0,1] more strict key's similarity
-    this.responseBodyThr = 0.70;
+    this.responseBodyThr = 0.45;
 
     this.sensitiveKeys = [
       "premium", "locked", "access", "active", "blocked", "unlocked",
@@ -42,6 +42,8 @@ export class ResponseEvaluator {
     const httpResponses = this.handleResponseSimilarity(reference.response, current.response);
     const clientSideAuthZ = this.assessAuthZ(reference.node.props, current.node.props);
     const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium;
+
+    console.log({httpResponses, clientSideAuthZ, canReport})
 
     const id = await this.getReportId(current, reference);
 

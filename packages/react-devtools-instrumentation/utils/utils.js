@@ -116,26 +116,58 @@ export function hasOwnKeys(value) {
 
 
 // Returns a wrapper function that check when fn is executed
-export function debounce(fn, delay) {
-  let timer = null;
+// > Debounce (idle execution): executed after the idle debounceT
+// > Throttling: force execution after throttleT under if under continuous load
+export function debounceWithMaxTime(fn, { debounceT = 1000, maxT = 10000 } = {}) {
+  let debounceTimer = null;
+  let maxTimer = null;
+  let lastArgs = null;
+  let lastThis = null;
+  let startedAt = null;
   let running = false;
 
+  function clear() {
+    if (debounceTimer) { clearTimeout(debounceTimer); }
+    debounceTimer = null;
+  }
+
+  function clearMax() {
+    if (maxTimer) { clearTimeout(maxTimer); }
+    maxTimer = null;
+    startedAt = null;
+  }
+
+  async function run() {
+    if (running) return;
+    running = true;
+
+    clear();
+    clearMax();
+
+    try {
+      await fn.apply(lastThis, lastArgs);
+    } finally {
+      running = false;
+    }
+  }
+
   return function (...args) {
-    if (timer) { clearTimeout(timer); }
+    lastArgs = args;
+    lastThis = this;
 
-    timer = setTimeout(async () => {
-      if (running) { return; }
+    const now = Date.now();
 
-      running = true;
-      try {
-        await fn.apply(this, args);
-      } finally {
-        running = false;
-      }
-    }, delay);
+    if (!startedAt) {
+      startedAt = now;
+
+      maxTimer = setTimeout(run, maxT);
+    }
+
+    clear();
+
+    debounceTimer = setTimeout(run, debounceT);
   };
 }
-
 
 
 export function isSerializableValue(value) {

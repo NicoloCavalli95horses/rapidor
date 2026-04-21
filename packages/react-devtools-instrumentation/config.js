@@ -3,6 +3,7 @@ export const config = Object.freeze({
   toolName: 'RAPIDOR',
   sessionID: crypto.randomUUID(),       // [meta] ID of stored data
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
+  throttleTimeMs: 7000,                 // [optimization] Component state retrieval
   timeBetweenRequests: 1000,            // [policy] Ms between each generated HTTP request
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
