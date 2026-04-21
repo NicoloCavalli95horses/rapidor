@@ -52,8 +52,6 @@ export class Bridge {
     let original = hook.onCommitFiberRoot; // save original reference
     original = wrap(original);
 
-    // [TODO] debouncing does not work on large web apps when the updates never stop
-    // Implement throttling making sure not to store two times the same graph
     const handleCommit = debounceWithMaxTime(async (fiber) => {
       await self.handleStateGraph(fiber);
     }, {debounceT: config.debounceTimeMs, maxT: config.throttleTimeMs});

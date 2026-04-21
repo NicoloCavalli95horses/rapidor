@@ -92,8 +92,6 @@ export class RequestGenerator {
           }
         }
 
-        console.log({payload})
-
         emit({ type: events.EVALUATE, payload });
         this.alreadyDone.add(id);
         await sleep(config.timeBetweenRequests);

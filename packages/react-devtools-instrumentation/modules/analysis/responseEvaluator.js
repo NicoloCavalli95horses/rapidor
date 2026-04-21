@@ -22,6 +22,7 @@ export class ResponseEvaluator {
     ];
 
     this.reportedId = new Set();
+    this.totIdor = 0;
   }
 
 
@@ -43,14 +44,14 @@ export class ResponseEvaluator {
     const clientSideAuthZ = this.assessAuthZ(reference.node.props, current.node.props);
     const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium;
 
-    console.log({httpResponses, clientSideAuthZ, canReport})
-
-    const id = await this.getReportId(current, reference);
+    const id = await this.getReportId(current);
 
     if (!canReport || !id) {
       log({ module: "response evaluator", msg: "Nothing to report" });
       return;
     }
+
+    this.totIdor++;
 
     emit({
       type: events.REPORT,
@@ -63,7 +64,7 @@ export class ResponseEvaluator {
       }
     });
 
-    log({ module: "response evaluator", type: "warning", msg: "Potential access control issue found" });
+    log({ module: "response evaluator", type: "warning", msg: `${this.totIdor} potential access control issue${this.totIdor > 1 ? 's' : ''} found` });
   }
 
 
@@ -97,7 +98,7 @@ export class ResponseEvaluator {
 
 
 
-  // [TODO] to check: sometimes weird properties are matched, eg. updated_at (?)
+  // [TODO] to test
   compareObj(a, b) {
     const visited = new WeakSet();
     const diffs = [];
@@ -136,14 +137,14 @@ export class ResponseEvaluator {
   }
 
 
-
-  async getReportId(current, reference) {
-    const ref = `reference::${reference.analysis.target.value}:nodeId:${reference.node.id}`;
+  // Returns a report ID used to avoid duplicates
+  async getReportId(current) {
+    // Do not consider data from reference node: this may lead to duplicate reports
     const curr = `current::${current.analysis.target.value}:nodeId:${current.node.id}`;
     const http = `http::${current.request.method}:${current.request.url}`;
 
     const encoder = new TextEncoder();
-    const data = encoder.encode(ref + curr + http);
+    const data = encoder.encode(curr + http);
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const id = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
 

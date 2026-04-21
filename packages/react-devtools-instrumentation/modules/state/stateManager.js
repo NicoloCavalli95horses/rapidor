@@ -39,8 +39,7 @@ export class StateManager {
           break;
 
         case events.PREINDEXING_UPDATE:
-          // [TODO] this seems to break the loop in very large apps (eg. app.memrise.com/learn). Shall we handle the preindexing with a service worker?
-          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.PREINDEXING, batch: true });
+          await this.handlePreindexingUpdate(event, this.dbStores.PREINDEXING);
           break;
 
         case events.REPORT:
@@ -72,6 +71,18 @@ export class StateManager {
     }
 
     log({ module: "state manager", msg: `Out of analysis window. Deleted state snapshot and preindexed data at key ${deleted.value.graphIndex}` })
+  }
+
+
+
+  async handlePreindexingUpdate(event, storeName) {
+    // [TODO] update graphIndex instead of adding new row?
+    await this.saveToDb({
+      data: event.payload,
+      type: event.type,
+      storeName,
+      batch: true,
+    });
   }
 
 
@@ -166,39 +177,14 @@ export class StateManager {
 
 
 
-  async getIdsOfInstances(graphIndex, componentId) {
-    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
-    return state.componentIndex[componentId];
-  }
-
-
-
-  async updateHTTPevent({ id, payload }) {
-    return await this.db.updateRow({ id, payload, storeName: this.dbStores.HTTP_EVENT });
-  }
-
-
-
   async getPreIndexed(value) {
     return await this.db.getPreIndexedByValue(String(value).toString());
   }
 
 
 
-  async getHTTPeventByID(graphIndex) {
-    return await this.db.getByID({ id: graphIndex, storeName: this.dbStores.HTTP_EVENT });
-  }
-
-
-
   async getNextHttpEvent(key) {
     return await this.db.getNextCursor(this.dbStores.HTTP_EVENT, key);
-  }
-
-
-
-  async getNextState(key) {
-    return await this.db.getNextCursor(this.dbStores.STATE, key);
   }
 
 
@@ -235,11 +221,5 @@ export class StateManager {
 
   async hasOnePreIndexed() {
     return await this.db.hasAny({ storeName: this.dbStores.PREINDEXING });
-  }
-
-
-
-  async getIgnoredHTTPEvents() {
-    return await this.db.getAllByIndex({ storeName: this.dbStores.HTTP_EVENT, index: 'ignore', query: 1 });
   }
 }

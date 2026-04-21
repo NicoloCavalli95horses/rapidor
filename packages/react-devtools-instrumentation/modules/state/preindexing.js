@@ -56,11 +56,13 @@ export class PreIndexing {
 
 
 
-  iterate(root, callback) {
+  iterate(root, callback, maxDepth = 4) {
     const stack = [{ value: root, path: ['props'], key: undefined }];
 
     while (stack.length) {
       const { value, path, key } = stack.pop();
+
+      if (path.length > maxDepth) { continue; } // limit exploration
 
       if (Array.isArray(value)) {
         for (let i = value.length - 1; i >= 0; i--) {
@@ -86,7 +88,9 @@ export class PreIndexing {
     if (!this.matchesKey(key)) { return false; }
 
     if (typeof value === 'string') {
-      if (/^\[.*\]$/.test(value)) { return false; } // ignore placeholders
+      const hasSquareBrackets = /^\[.*\]$/.test(value);
+      const hasWhiteSpaces = /\s/.test(value);
+      if (hasSquareBrackets || hasWhiteSpaces) { return false; }
       const v = value.trim();
       return (v.length > 1 && v.length < this.maxStrLength);
     }

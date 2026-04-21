@@ -70,6 +70,7 @@ export class IDBManager {
         if (!db.objectStoreNames.contains(IDBManager.STORES.PREINDEXING)) {
           const preindexing = db.createObjectStore(IDBManager.STORES.PREINDEXING, { autoIncrement: true });
           preindexing.createIndex("value", "value", { unique: false });
+          preindexing.createIndex("graphIndex", "graphIndex", { unique: false });
         }
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.NAV)) {
