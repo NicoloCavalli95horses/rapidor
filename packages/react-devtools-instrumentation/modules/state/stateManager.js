@@ -185,27 +185,6 @@ export class StateManager {
 
 
 
-  async getAncestorDOM(graphIndex, parentId) {
-    let currentId = parentId;
-
-    while (currentId) {
-      const node = await this.getNodeByID(graphIndex, currentId);
-      if (!node) { return; }
-      if (node.DOM) {
-        return {
-          ...node.DOM,
-          isAncestorDOM: true,
-          ancestorId: currentId
-        }
-      }
-      currentId = node.parent;
-    }
-
-    return undefined;
-  }
-
-
-
   async getHTTPeventByID(graphIndex) {
     return await this.db.getByID({ id: graphIndex, storeName: this.dbStores.HTTP_EVENT });
   }

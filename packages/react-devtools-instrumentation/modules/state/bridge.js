@@ -161,11 +161,7 @@ export class Bridge {
 
   // [node processing] decide whether to keep a node, assign componentId (id of istance), serialize props, returns data
   processNode(node) {
-    const domElement = (node.stateNode?.containerInfo instanceof HTMLElement) ? node.stateNode.containerInfo
-      : (node.stateNode instanceof HTMLElement) ? node.stateNode
-        : undefined;
-
-    const keep = this.shouldKeepNode(node.tag, domElement);
+    const keep = this.shouldKeepNode(node.tag);
     if (!keep) { return { keep: false }; }
 
     const id = this.getNodeId(node);
@@ -180,7 +176,6 @@ export class Bridge {
         componentId,
         key: node.key,
         tag: node.tag,
-        DOM: this.getDOMInfo(domElement),
         name: this.filterReactComponentName(node.type),
         props: this.getSerializableValues({ obj: node.memoizedProps }),
       }
@@ -225,8 +220,8 @@ export class Bridge {
 
 
   // Return true if the node is valid
-  shouldKeepNode(tag, domEl) {
-    return config.tagsWhitelist.includes(tag) || domEl;
+  shouldKeepNode(tag) {
+    return config.tagsWhitelist.includes(tag);
   }
 
 
@@ -315,32 +310,6 @@ export class Bridge {
     this.componentIndex = new Map();
     this.componentTypes = new WeakMap();
     this.componentId = 0;
-  }
-
-
-
-  getDOMInfo(el) {
-    function visit(node) {
-      if (!node) { return; };
-
-      const current = {
-        classes: [...node.classList],
-        DOMchildren: []
-      };
-
-      // node.children is a DOM apis (HTMLCollection)
-      // children order matches the order with which they are displayed
-      for (const child of node.children) {
-        const childData = visit(child);
-        if (childData) {
-          current.DOMchildren.push(childData);
-        };
-      }
-
-      return current;
-    }
-
-    return visit(el);
   }
 
 

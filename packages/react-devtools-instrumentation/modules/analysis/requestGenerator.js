@@ -13,8 +13,8 @@ import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 // Functions
 //===================
 export class RequestGenerator {
-  constructor(stateManager) {
-    this.evaluator = new ResponseEvaluator(stateManager);
+  constructor() {
+    this.evaluator = new ResponseEvaluator();
     this.pendingRequests = new Map();
     this.httpAnalyzer = new analyzeHTTP();
     this.alreadyDone = new Set();
@@ -56,6 +56,8 @@ export class RequestGenerator {
 
 
   async handleEvent(event) {
+    log({ module: 'request generator', msg: 'Generating new HTTP events...' });
+
     const { httpEvent, results } = event;
     const { request: referenceReq, response: referenceRes, type } = httpEvent;
     this.alreadyDone.clear();

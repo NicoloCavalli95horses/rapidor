@@ -68,7 +68,7 @@ export class MatchFinder {
 
 
 
-  // For each matching node, build sub-arrays with candidates and DOM references
+  // For each matching node, build sub-arrays with candidates
   // [[ {reference: {...}}, {candidates: [{...},{...}] ]]
   async processResults(references) {
     if (!references.length) { return []; }
@@ -78,13 +78,11 @@ export class MatchFinder {
       // Get alternative instances of matching component
       const componentIndex = await this.stateManager.getComponentIndexByID(ref.graphIndex);
       const instancesIds = componentIndex[ref.node.componentId];
+      const candidates = [];
+
       if (!instancesIds.length) { continue; }
 
-      ref.node.DOM = ref.node.DOM || await this.stateManager.getAncestorDOM(ref.graphIndex, ref.nodeId);
       ref.node.instancesIds = instancesIds.filter(i => i != ref.node.id);
-
-      const candidates = [];
-      const domPromises = [];
 
       for (const id of instancesIds) {
         if (id === ref.nodeId) { continue; }
@@ -93,14 +91,6 @@ export class MatchFinder {
         const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, esclude: ref.value });
 
         if (!candidateMatch) { continue; }
-
-        if (!candidateNode.DOM) {
-          domPromises.push(
-            this.stateManager
-              .getAncestorDOM(ref.graphIndex, candidateNode.id)
-              .then(dom => { candidateNode.DOM = dom; })
-          );
-        }
 
         candidateNode.graphIndex = ref.graphIndex;
         candidateNode.instancesIds = instancesIds.filter(i => i != candidateNode.id);
@@ -116,8 +106,6 @@ export class MatchFinder {
           relations: await this.stateManager.getRelationsByID(ref.graphIndex, candidateNode.id),
         });
       }
-
-      await Promise.all(domPromises);
 
       if (candidates.length) {
         couples.push({ reference: ref, candidates })

@@ -61,7 +61,7 @@ export class Graph {
       }
       if (!graph.relations[toId].parent) {
         graph.relations[toId].parent = fromId;
-        graph.nodes[toId].parent = fromId; // used in assigning DOM info (see stateManager.getAncestorDOM)
+        graph.nodes[toId].parent = fromId;
       }
     }
 
