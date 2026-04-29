@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log, isPlainObject } from "../../utils/utils.js";
+import { log, isPlainObject, getCurrentDOM } from "../../utils/utils.js";
 
 
 //===================
@@ -73,7 +73,8 @@ export class ResponseEvaluator {
   // if there are differences for critical keys (eg. isPremium), return true (ie, currProps describes a premium item)
   assessAuthZ(refProps, currProps) {
     const diffs = this.compareObj(refProps, currProps);
-    const sensitiveDiffs = diffs.filter(d => this.isSensitiveKey(d.key) || this.isSensitiveKey(d.pathStr));
+    const fields = ["key", "pathStr", "current", "reference"];
+    const sensitiveDiffs = diffs.filter(d => fields.some(f => this.isSensitiveKey(d[f])));
     const isPremium = sensitiveDiffs.some(d => d.reference != d.current);
 
     return { isPremium, sensitiveDiffs };
@@ -82,6 +83,10 @@ export class ResponseEvaluator {
 
 
   isSensitiveKey(key) {
+    if (key == null) { return false; }
+    if (typeof key === "number" || typeof key === "boolean") { key = String(key); }
+    if (typeof key !== "string") { return false; }
+
     // "isPremium" > ["is", "premium"]
     function tokenize(key) {
       return key
@@ -160,8 +165,8 @@ export class ResponseEvaluator {
 
   handleResponseSimilarity(reference, current) {
     // The new query parameters triggered client-side DOM changes
-    if (reference.isClientSide && current.isUsingNewParams) {
-      return this.getClientResponseSimilarity(reference.dom, current.dom);
+    if (reference.isClientSide && reference.dom) {
+      return this.getClientResponseSimilarity(reference.dom, current.dom || getCurrentDOM());
     }
 
     // Compare server-side responses body

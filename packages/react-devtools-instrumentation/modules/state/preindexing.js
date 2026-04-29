@@ -24,6 +24,8 @@ export class PreIndexing {
       'owner', 'createdBy', 'updatedBy',
       'author', 'creator', 'role', 'permission',
       'scope', 'scopes',
+      // content
+      'content', 'node', 'slug'
     ];
   }
 
