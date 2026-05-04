@@ -54,17 +54,15 @@ export class NavigationTracker {
 
 
   // In SPA, routing changes can occur without HTTP requests being executed. In this scenario:
-  // > A routing change (with query parameters) is treated as an independent GET request
-  // > The last state snapshot is treated as the server's response for this GET request
+  // > A routing change is treated as an independent GET request
+  // > The current DOM is treated as the server's response for this GET request
   update() {
     const uri = decodeURIComponent(window.location.href);
     if (this.lastUri == uri) { return; }
 
-    if (new URL(uri).searchParams?.size) { // send new HTTP event to analyze only if we have search parameters
-      const request = { uri, verb: 'GET' };
-      const response = { isClientSide: true, dom: getCurrentDOM() }
-      this.HTTPanalyzer.parseHTTP({ request, response });
-    }
+    const request = { uri, verb: 'GET' };
+    const response = { isClientSide: true, dom: getCurrentDOM() }
+    this.HTTPanalyzer.parseHTTP({ request, response });
 
     emit({ type: events.NAV, payload: uri });
     this.lastUri = uri;

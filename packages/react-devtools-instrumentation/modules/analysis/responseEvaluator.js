@@ -166,7 +166,8 @@ export class ResponseEvaluator {
   handleResponseSimilarity(reference, current) {
     // The new query parameters triggered client-side DOM changes
     if (reference.isClientSide && reference.dom) {
-      return this.getClientResponseSimilarity(reference.dom, current.dom || getCurrentDOM());
+      const currentClientSideRes = current.dom || (current.status === 200 && current.body?.length ? current.body : null);
+      return this.getClientResponseSimilarity(reference.dom, currentClientSideRes);
     }
 
     // Compare server-side responses body
@@ -178,7 +179,7 @@ export class ResponseEvaluator {
   getClientResponseSimilarity(dom1, dom2) {
     return {
       areSimilar: this.checkIntSimilarity(dom1.length, dom2.length),
-      description: "mutated query parameters produced client-side DOM changes",
+      description: "Original request was handled by the SPA routing system. This similarity refers to the two DOMs obtained from the original URL and the mutated one",
       bodyLength: {
         refDOMlength: dom1.length,
         currDOMLength: dom2.length,
