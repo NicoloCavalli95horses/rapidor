@@ -1,6 +1,7 @@
 // Global configuration
 export const config = Object.freeze({
   toolName: 'RAPIDOR',
+  detectionMode: 'horizontal',          // [policy] horizontal / vertical
   sessionID: crypto.randomUUID(),       // [meta] ID of stored data
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
   throttleTimeMs: 7000,                 // [optimization] Component state retrieval

@@ -212,3 +212,15 @@ export function isPlainObject(value) {
 export function getCurrentDOM() {
   return new XMLSerializer().serializeToString(document);
 }
+
+
+export function printConfig() {
+  const table = Object.entries(config).map(([key, value]) => ({
+    key,
+    value: Array.isArray(value) ? value.join(', ')
+        : typeof value === 'object' ? JSON.stringify(value)
+            : value
+  }));
+  
+  console.table(table);
+}

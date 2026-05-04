@@ -1,11 +1,23 @@
 //===================
 // Import
 //===================
-import { eventBus, events } from "../../utils/eventBus.js";
-import { filter } from 'rxjs/operators';
+import { emit, eventBus, events } from "../../utils/eventBus.js";
 import { log } from "../../utils/utils.js";
+import { config } from "../../config.js";
+
 import { StateManager } from "../state/stateManager.js";
-import { AnalysisLoop } from "../analysis/analysisLoop.js";
+import { RequestGenerator } from "./requestGenerator.js";
+import { MatchFinder } from "./matchFinder.js";
+
+
+
+//===================
+// Const
+//===================
+const MODES = Object.freeze({
+  VERTICAL: "vertical",
+  HORIZONTAL: "horizontal"
+});
 
 
 
@@ -16,12 +28,27 @@ export class AnalysisManager {
   constructor(stateManager) {
     this.stateManager = stateManager;
     this.running = false;
-    this.loop = new AnalysisLoop(this.stateManager);
+    this.requestGenerator = new RequestGenerator();
+    this.matchFinder = new MatchFinder(this.stateManager);
+
+    this.modeHandlers = {
+      [MODES.VERTICAL]: {
+        canStart: this.canStartVertical.bind(this),
+        run: this.startVerticalAnalysis.bind(this),
+      },
+
+      [MODES.HORIZONTAL]: {
+        canStart: this.canStartHorizontal.bind(this),
+        run: this.startHorizontalAnalysis.bind(this),
+      },
+    };
   }
 
 
+
   init() {
-    this.loop.init();
+    this.requestGenerator.init();
+
     eventBus.subscribe(e => {
       if (e.type === events.DB_SUCCESS) {
         this.onDbSuccess()
@@ -31,12 +58,34 @@ export class AnalysisManager {
 
 
 
+  async canStartVertical() {
+    const [http, state, pre] = await Promise.all([
+      this.stateManager.hasOneHttpEvent(),
+      this.stateManager.hasOneState(),
+      this.stateManager.hasOnePreIndexed(),
+    ]);
+    return http && state && pre;
+  }
+
+
+
+   async canStartHorizontal() {
+    const [http, state, pre] = await Promise.all([
+      this.stateManager.hasOneHttpEvent(),
+      this.stateManager.hasOneState(),
+      this.stateManager.hasOnePreIndexed(),
+    ]);
+    return http && state && pre;
+  }
+
+
+
   async onDbSuccess() {
     if (this.running) { return; }
     this.running = true;
 
     try {
-      await this.startAnalysis();
+      await this.handleDbSuccess();
     } finally {
       this.running = false;
     }
@@ -45,16 +94,55 @@ export class AnalysisManager {
 
 
   // process until empty, then sleep until next event
-  async startAnalysis() {
-    const hasOneHttpEvent = await this.stateManager.hasOneHttpEvent();
-    const hasOneState = await this.stateManager.hasOneState();
-    const hasOnePreIndexed = await this.stateManager.hasOnePreIndexed();
+  async handleDbSuccess() {
+    const mode = config.detectionMode;
+    const handler = this.modeHandlers[mode];
 
-    if (hasOneHttpEvent && hasOneState && hasOnePreIndexed) {
+    if (!handler) {
+      throw new Error(`Unknown mode: ${mode}`);
+    }
+
+    if (await handler.canStart()) {
       log({ module: 'analysis manager', msg: 'Starting the analysis...' });
-      await this.loop.startAnalysis();
+      await handler.run();
     } else {
       log({ module: 'analysis manager', msg: 'Nothing to analyze yet' });
     }
+  }
+
+
+
+  async startVerticalAnalysis() {
+    let httpEvent = {};
+    let lastKey = undefined;
+
+    while (true) {
+      httpEvent = await this.stateManager.getNextHttpEvent(lastKey);
+
+      if (!httpEvent) {
+        log({ module: 'analysis manager', msg: 'No more HTTP events' });
+        break;
+      }
+
+      lastKey = httpEvent.key;
+
+      // Find matches on preindexed values, get full nodes, return alternative instances
+      const match = await this.matchFinder.find(httpEvent);
+
+      match.success
+        ? emit({ type: events.GEN_REQ, payload: match })
+        : log({ module: 'analysis loop', msg: 'No results' });
+
+      // keys of remaining elements do not change after deleting an entry
+      await this.stateManager.deleteHTTPEvent(lastKey);
+    }
+
+    log({ module: 'analysis manager', msg: 'Exit analysis' });
+  }
+
+
+
+  async startHorizontalAnalysis() {
+
   }
 }
