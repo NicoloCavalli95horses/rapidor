@@ -42,4 +42,6 @@ export const events = Object.freeze({
   
   EVALUATE: "EVALUATE", // new requests and responses, combined with related nodes and DOM info, are emitted
   REPORT: "REPORT_VULNERABILITY", // at least strategy confirmed an access-control issue
+
+  OPEN_TAB: "OPEN_TAB",
 });

@@ -10,7 +10,7 @@ import { log, copyObjKeys } from "../../utils/utils.js";
 // Class
 //===================
 export class IDBManager {
-  constructor(name = `${config.toolName}_DB`, version = 1) {
+  constructor(name = `${config.toolName}_DB_${config.sessionID}`, version = 1) {
     this.name = name;
     this.version = version;
     this.db = null;

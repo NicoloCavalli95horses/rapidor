@@ -67,6 +67,7 @@ module.exports = {
     fallbackEvalContext: './src/contentScripts/fallbackEvalContext.js',
     fileFetcher: './src/contentScripts/fileFetcher.js',
     backgroundToMainBridge: '../react-devtools-instrumentation/content_scripts/backgroundToMainBridge.js',
+    contentScriptsMain: '../react-devtools-instrumentation/content_scripts/main.js',
     main: './src/main/index.js',
     panel: './src/panel.js',
     proxy: './src/contentScripts/proxy.js',

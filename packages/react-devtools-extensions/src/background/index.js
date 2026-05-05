@@ -25,6 +25,7 @@ import {
 
 (() => {
   const s = new ServiceWorker();
+  s.init();
 })();
 
 ///////////////////////

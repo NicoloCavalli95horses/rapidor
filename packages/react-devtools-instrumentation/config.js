@@ -2,13 +2,13 @@
 export const config = Object.freeze({
   toolName: 'RAPIDOR',
   detectionMode: 'horizontal',          // [policy] horizontal / vertical
-  sessionID: crypto.randomUUID(),       // [meta] ID of stored data
+  sessionID: crypto.randomUUID(),       // [meta] affects DB name to avoid collision between tabs, marks each db entry
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
   throttleTimeMs: 7000,                 // [optimization] Component state retrieval
   timeBetweenRequests: 1000,            // [policy] Ms between each generated HTTP request
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
-  tagsWhitelist: [0,7,11,15],           // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
+  tagsWhitelist: [0, 7, 11, 15],           // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long
   maxExplorationKeys: 100,              // [optimization] Trim extremely large objects
   maxSegmentsHistoryLength: 250,        // [optimization] Max length of the history of URL segments
@@ -21,3 +21,13 @@ export const config = Object.freeze({
 // > Busuu: [11]
 // > Memrise: [7]
 // > Promova: [0,15]
+
+// Side-effects based on glboal configuration
+export const watchConfig = Object.freeze({
+  openNewTab: () => {
+    return (
+      config.detectionMode === 'horizontal' &&
+      window?.location?.href?.startsWith("http")
+    );
+  },
+})

@@ -55,6 +55,14 @@ const contentScriptsToInject = [
     persistAcrossSessions: true,
     runAt: 'document_start',
     world: chrome.scripting.ExecutionWorld.ISOLATED,
+  },
+    {
+    id: '@react-devtools/contentScriptsMain',
+    js: ['build/contentScriptsMain.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.ISOLATED,
   }
 ];
 
