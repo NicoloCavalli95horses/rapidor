@@ -226,8 +226,8 @@ export class ResponseEvaluator {
 
 
   getBodyShapeSimilarity(reference, current) {
-    const refBodyKeys = this.extractKeyPaths(reference?.body || {});
-    const currBodyKeys = this.extractKeyPaths(current?.body || {});
+    const refBodyKeys = this.extractKeyPaths({ obj: reference?.body || {}, depth: 1 });
+    const currBodyKeys = this.extractKeyPaths({ obj: current?.body || {}, depth: 1 });
 
     // Calculate similarity on the length of the sets of keys
     // We dont care about the actual content, we just expect similar shapes
@@ -239,16 +239,25 @@ export class ResponseEvaluator {
 
 
   // Returns a flat array of all the keys, including nested ones
-  extractKeyPaths(obj = {}, prefix = '') {
+  // Consider the path to improve matching efficacy
+  extractKeyPaths({ obj = {}, depth = Infinity, prefix = '' } = {}) {
+    if (!obj || depth <= 0) { return []; }
     let paths = [];
-    if (!obj) { return paths; }
 
     for (const key in obj) {
       const path = prefix ? `${prefix}.${key}` : key;
       paths.push(path);
 
-      if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-        paths = paths.concat(this.extractKeyPaths(obj[key], path));
+      const value = obj[key];
+
+      if (depth > 1 && value && typeof value === 'object' && !Array.isArray(value)) {
+        paths.push(
+          ...this.extractKeyPaths({
+            obj: value,
+            depth: depth - 1,
+            prefix: path,
+          })
+        );
       }
     }
 
