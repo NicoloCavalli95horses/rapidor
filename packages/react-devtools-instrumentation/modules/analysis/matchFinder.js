@@ -3,7 +3,7 @@
 // Import
 //===================
 import { config } from "../../config.js";
-
+import { log } from "../../utils/utils.js";
 
 
 //===================
@@ -30,8 +30,13 @@ export class MatchFinder {
     const matches = await this.getPreIndexedMatches(properties);
     const couples = await this.processResults(matches);
 
-    data.results = couples;
     data.success = couples?.length;
+    data.results = couples;
+
+    if (data.success) {
+      log({ module: "match finder", msg: couples, verboseOnly: true });
+    }
+
     return data;
   }
 
@@ -88,8 +93,7 @@ export class MatchFinder {
         if (id === ref.nodeId) { continue; }
 
         const candidateNode = await this.stateManager.getNodeByID(ref.graphIndex, id);
-        const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, esclude: ref.value });
-
+        const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, originalVal: ref.value });
         if (!candidateMatch) { continue; }
 
         candidateNode.graphIndex = ref.graphIndex;
@@ -117,7 +121,10 @@ export class MatchFinder {
 
 
 
-  getValueAtPath({ obj, path = [], esclude }) {
+  // obj: the object to explore
+  // path: the path with which to explore the object
+  // originalVal: the original value  
+  getValueAtPath({ obj, path = [], originalVal }) {
     let current = obj;
 
     for (const key of path) {
@@ -125,6 +132,14 @@ export class MatchFinder {
       current = current[key];
     }
 
-    return [esclude, null, undefined, ''].includes(current) ? undefined : current;
+    
+    if (Array.isArray(originalVal) && typeof current === 'string') {
+      current = current.split(/[/.?]/).map(v => v.trim()).filter(Boolean);
+      const refSet = new Set(originalVal);
+      current = current.filter(x => !refSet.has(x));
+      return current.length === 1 ? current[0] : undefined;
+    }
+
+    return (current && current != originalVal) ? current : undefined;
   }
 }

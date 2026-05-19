@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { log, showDownloadBtn } from './utils/utils.js';
+import { log, showDownloadBtn, printConfig } from './utils/utils.js';
 import { eventBus } from './utils/eventBus.js';
 import { Bridge } from './modules/state/bridge.js';
 import { StateManager } from './modules/state/stateManager.js';
@@ -20,6 +20,7 @@ export async function instrumentationMain() {
   DOM.init();
   
   log({ module: 'index', msg: "Main module loaded" });
+  printConfig();
 
   // Track HTTP messages
   const tracker = new HTTPTracker();

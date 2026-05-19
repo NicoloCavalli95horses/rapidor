@@ -4,6 +4,8 @@
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
 import { log, isPlainObject, getCurrentDOM } from "../../utils/utils.js";
+import { config } from "../../config.js";
+
 
 
 //===================
@@ -18,7 +20,7 @@ export class ResponseEvaluator {
     this.sensitiveKeys = [
       "premium", "locked", "access", "active", "blocked", "unlocked",
       "role", "plan", "subscription", "subscribed", "free",
-      "entitlement", "tier", "paid"
+      "entitlement", "tier", "paid", "available"
     ];
 
     this.reportedId = new Set();
@@ -45,6 +47,10 @@ export class ResponseEvaluator {
     const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium;
 
     const id = await this.getReportId(current);
+
+    if (config.verbose) {
+      log({ module: "response evaluator", msg: { httpResponses, clientSideAuthZ, canReport } });
+    }
 
     if (!canReport || !id) {
       log({ module: "response evaluator", msg: "Nothing to report" });

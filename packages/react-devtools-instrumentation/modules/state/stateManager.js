@@ -76,8 +76,6 @@ export class StateManager {
 
 
   async handlePreindexingUpdate(event, storeName) {
-    // [TODO] update graphIndex instead of adding new row?
-    // > if so, how to properly delete the right rows when we are out of the analysis window?
     await this.saveToDb({
       data: event.payload,
       type: event.type,

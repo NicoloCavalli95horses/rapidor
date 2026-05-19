@@ -19,7 +19,7 @@ export class PreIndexing {
       // id
       'id', 'user', 'account', 'profile', 'order',
       'resource', 'item', 'object', 'doc',
-      'name', 'key', 'title', 'type',
+      'name', 'key', 'title', 'type', 'url', 'link',
       // roles
       'owner', 'createdBy', 'updatedBy',
       'author', 'creator', 'role', 'permission',
@@ -40,7 +40,8 @@ export class PreIndexing {
     this.iterate(props, ({ key, value, path }) => {
       if (this.isInteresting(key, value)) {
         // only save strings to avoid false negative in comparison ('112' == 112)
-        this.data.push({ graphIndex, nodeId, value: value.toString(), path, depth: path.length });
+        // always save data as array (value can be an URL, in this cases we split it into tokens)
+        this.data.push({ graphIndex, nodeId, value: this.tokenize(value.toString()), path, depth: path.length });
       }
     });
   }
@@ -54,6 +55,18 @@ export class PreIndexing {
     log({ module: 'preindexing', msg: 'Emitted batch' })
 
     this.data = [];
+  }
+
+
+
+  // Split string into tokens if contains / or . or ? 
+  tokenize(value, rule = /[/.?]/) {
+    if (typeof value !== 'string') { return []; }
+
+    return value
+      .split(rule)
+      .map(v => v.trim())
+      .filter(Boolean);
   }
 
 
@@ -87,7 +100,7 @@ export class PreIndexing {
   isInteresting(key, value) {
     if (value == null) { return false; }
 
-    if (!this.matchesKey(key)) { return false; }
+    if (!this.isKeyMatch(key)) { return false; }
 
     if (typeof value === 'string') {
       const hasSquareBrackets = /^\[.*\]$/.test(value);
@@ -104,7 +117,7 @@ export class PreIndexing {
 
 
 
-  matchesKey(str) {
+  isKeyMatch(str) {
     if (!str) { return false; }
     const norm = String(str).toString().trim().toLowerCase();
     const words = this.splitWords(norm);

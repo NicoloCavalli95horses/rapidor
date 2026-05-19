@@ -56,13 +56,19 @@ export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin 
 
 
 // type: info | error | warning
-export function log({ module, type = 'info', msg }) {
+export function log({ module, type = 'info', msg, verboseOnly = false }) {
   const color = {
     error: 'color: red',
     info: 'color: white',
     warning: 'color: orange',
   }
-  console.log(`%c[${config.toolName}] [${module.toUpperCase()}] ${msg}`, color[type]);
+
+  const canLog = config.verbose || !verboseOnly;
+  if (!canLog) { return; }
+
+  const descr = `%c[${config.toolName}] [${module.toUpperCase()}]`;
+  
+  console.log(descr, color[type], msg);
   logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
 }
 
@@ -211,4 +217,15 @@ export function isPlainObject(value) {
 
 export function getCurrentDOM() {
   return new XMLSerializer().serializeToString(document);
+}
+
+export function printConfig() {
+  const table = Object.entries(config).map(([key, value]) => ({
+    key,
+    value: Array.isArray(value) ? value.join(', ')
+      : typeof value === 'object' ? JSON.stringify(value)
+        : value
+  }));
+
+  console.table(table);
 }
