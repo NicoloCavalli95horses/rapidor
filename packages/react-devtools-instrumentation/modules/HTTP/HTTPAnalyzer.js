@@ -8,33 +8,6 @@ import { config } from '../../config.js';
 
 
 //===================
-// Const
-//===================
-const FILE_MIME_HINTS = [
-  'json',
-  'blob',
-  'text',
-  'image',
-  'audio',
-  'video',
-  'pdf',
-  'zip',
-  'arraybuffer',
-  'application',
-  'octet-stream',
-];
-
-
-const FILE_EXTENSIONS = [
-  'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
-  'pdf', 'zip', 'rar', '7z',
-  'mp4', 'mp3', 'avi',
-  'css', 'js', 'json', 'xml', 'html',
-  'woff', 'woff2', 'ttf', 'eot',
-];
-
-
-//===================
 // Functions
 //===================
 export class analyzeHTTP {

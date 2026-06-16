@@ -196,7 +196,6 @@ export class ResponseEvaluator {
 
 
 
-  // [TODO] we are just considering JSON responses. To extend to HTML/JS or other valid responses (?)
   getServerResponseSimilarity(refResponse, currResponse) {
     // 1. Compare response fields
     const { fields, areFieldsEqual } = this.areFieldsEqual(refResponse, currResponse);
