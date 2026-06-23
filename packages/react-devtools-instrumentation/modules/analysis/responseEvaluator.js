@@ -19,9 +19,8 @@ export class ResponseEvaluator {
 
     this.sensitiveKeys = [
       "premium", "locked", "access", 
-      "blocked", "unlocked",
-      "role", "plan", "free",
-      "tier", "paid", "available"
+      "blocked", "unlocked","free",
+      "paid", "available"
     ];
 
     this.reportedId = new Set();
