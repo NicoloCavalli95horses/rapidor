@@ -1,19 +1,34 @@
-![RAPIDOR](./assets/RAPIDOR.png "RAPIDOR")
+<p align="center">
+  <img src="./assets/RAPIDOR.png" alt="Logo" width="200">
+</p>
+
+<h1 align="center">RAPIDOR</h1>
+
+<p align="center" style="font-style:italic">
+  A tool for identifying paid-resource IDORs in React applications
+</p>
 
 
-# RAPIDOR (React APP IDOR)
+RAPIDOR (React Application IDOR) is a browser extension that performs runtime instrumentation of React applications to help identify potential Broken Access Control (BAC) vulnerabilities. Insecure Direct Object Reference (IDOR) is a common subclass of BAC, where resources requiring higher privileges are exposed to lower-privileged users.
 
-RAPIDOR (React Application IDOR) is a browser extension that performs runtime instrumentation of React applications to help QA engineers and security testers identify potential Broken Access Control (BAC) vulnerabilities. Insecure Direct Object Reference (IDOR) is a common subclass of BAC, where resources requiring higher privileges are exposed to lower-privileged users.
+In typical IDOR scenarios, attackers exploit predictable patterns in object identifiers. For instance, if a request such as `GET /api/user/123` succeeds, modifying the identifier to `GET /api/user/124` may also return a valid response, revealing unauthorized data. With paid-resource IDOR, attackers may do the same to access paid resources rather than data belonging to other users. To the best of our knowledge, RAPIDOR is the first tool to offer a solution for this type of BAC vulnerability.
 
-In typical IDOR scenarios, attackers exploit predictable patterns in object identifiers. For instance, if a request such as `GET /api/user/123` succeeds, modifying the identifier to `GET /api/user/124` may also return a valid response, revealing unauthorized data.
+## Challenges
 
-However, detecting such vulnerabilities becomes significantly more challenging when applications use high-entropy or non-sequential identifiers. In these cases, exploitable patterns are not observable, and brute-force approaches quickly become impractical due to the size of the search space.
+- Detecting IDOR vulnerabilities becomes significantly more challenging when applications rely on high-entropy or non-sequential identifiers. In these cases, exploitable patterns are no longer observable, making brute-force exploration impractical.
+- Verifying whether a generated request exposes an IDOR vulnerability requires solving the oracle problem, i.e., determining whether the observed HTTP response reflects an access-control violation.
 
-RAPIDOR addresses this limitation by leveraging the structure of the React component tree. Instead of guessing identifiers, the tool extracts candidate data from sibling components that are rendered within the same UI context as previously observed requests.
+## Approach
 
-A potential BAC vulnerability is reported when similar server responses are obtained using data derived from different sibling components that render structurally similar DOM elements. This approach is particularly effective in scenarios where applications display mixed-access content (e.g., free vs. premium items), which are often implemented as sibling components with subtle differences in their DOM representation (e.g., CSS classes or attributes).
+RAPIDOR addresses these challenges through the following workflow:
 
-By exploiting these structural similarities, RAPIDOR effectively reduces the search space and mitigates the oracle problem, enabling the detection of access control issues even in the absence of predictable identifier patterns.
+1. HTTP requests and responses are continuously tracked through in-band instrumentation (see `modules/HTTP/HTTPTracker.js`).
+2. Client-side state snapshots are reconstructed from events emitted by the React framework (see `modules/state/bridge.js`).
+3. RAPIDOR extracts data from each HTTP request using a heuristic (see `modules/HTTP/HTTPAnalyzer.js`). The extracted values are then searched across all locally stored state snapshots (see `modules/state/IndexedDB.js`).
+4. When a match is found (see `modules/analysis`), the corresponding React component is selected as a reference. RAPIDOR locates other instances of the same component and replays the extraction path used for the reference instance. This process automatically derives mutation rules, enabling the discovery of additional identifiers, keys, and other sensitive values that may be serve as IDOR targets.
+5. New HTTP requests are generated using data extracted from the discovered component instances (see `modules/analysis/requestGenerator.js`).
+6. Responses are evaluated using both HTTP response similarity and metamorphic relations (see `modules/analysis/requestEvaluator.js`). These relations associate the access-control state represented by the involved React components with the expected HTTP behavior, providing an effective solution to the IDOR oracle problem.
+
 
 ## Configuration
 

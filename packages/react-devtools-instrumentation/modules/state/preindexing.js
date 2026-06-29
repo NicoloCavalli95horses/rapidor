@@ -14,7 +14,6 @@ export class PreIndexing {
     this.maxStrLength = 300;
     this.data = [];
 
-    // [TODO] improve set of keys and test matches
     this.interestingKeys = [
       // id
       'id', 'user', 'account', 'profile', 'order',

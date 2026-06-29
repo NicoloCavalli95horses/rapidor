@@ -109,7 +109,6 @@ export class ResponseEvaluator {
 
 
 
-  // [TODO] to test
   compareObj(a, b) {
     const visited = new WeakSet();
     const diffs = [];

@@ -320,7 +320,6 @@ export class RequestGenerator {
           resolve({ error: err });
         });
       } else if (type === events.XML_EVENT) {
-        // [TODO] to test properly
         const xhr = new XMLHttpRequest();
         xhr._requestId = request._requestId;
         xhr.open(request.method, request.url);
