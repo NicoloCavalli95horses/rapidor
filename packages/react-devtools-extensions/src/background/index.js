@@ -12,6 +12,7 @@
 
 import './dynamicallyInjectContentScripts';
 import './tabsManager';
+import { ServiceWorker } from './serviceWorker.js';
 
 import {
   handleDevToolsPageMessage,
@@ -24,6 +25,14 @@ import {
   EXTENSION_BRIDGE_CONNECTION_READY,
 } from '../constants';
 import type {ExtensionBridgeConnectionType} from '../constants';
+
+///////////////////////
+
+(() => {
+  const s = new ServiceWorker();
+})();
+
+///////////////////////
 
 const ports: {
   // TODO: Check why we convert tab IDs to strings, and if we can avoid it

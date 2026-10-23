@@ -72,6 +72,8 @@ module.exports = {
     prepareInjection: './src/contentScripts/prepareInjection.js',
     installHook: './src/contentScripts/installHook.js',
     hookSettingsInjector: './src/contentScripts/hookSettingsInjector.js',
+    instrumentation: '../react-devtools-instrumentation/index.js',
+    backgroundToMainBridge: '../react-devtools-instrumentation/content_scripts/backgroundToMainBridge.js',
   },
   output: {
     path: __dirname + '/build',

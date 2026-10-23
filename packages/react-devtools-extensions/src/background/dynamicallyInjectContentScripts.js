@@ -40,6 +40,22 @@ const contentScriptsToInject = [
     persistAcrossSessions: true,
     runAt: 'document_start',
   },
+  {
+    id: '@react-devtools/instrumentation',
+    js: ['build/instrumentation.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.MAIN,
+  },
+  {
+    id: '@react-devtools/backgroundToMainBridge',
+    js: ['build/backgroundToMainBridge.js'],
+    matches: ['<all_urls>'],
+    persistAcrossSessions: true,
+    runAt: 'document_start',
+    world: chrome.scripting.ExecutionWorld.ISOLATED,
+  }
 ];
 
 async function dynamicallyInjectContentScripts() {
