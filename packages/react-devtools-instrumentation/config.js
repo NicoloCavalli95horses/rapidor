@@ -8,11 +8,25 @@ export const config = Object.freeze({
   timeBetweenRequests: 800,             // [policy] Ms between each generated HTTP request
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
-  tagsWhitelist: [0,7,11,15],           // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
+  tagsWhitelist: [0, 7, 11, 15],        // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long
   maxExplorationKeys: 100,              // [optimization] Trim extremely large objects
   maxSegmentsHistoryLength: 250,        // [optimization] Max length of the history of URL segments
-  testClientSideQueryParamsUsage: true  // [policy] Candidate query parameters are tested on the client-side (eg url.searchParams.set(param, value); window.history.pushState({}, "", url); )
+  testClientSideQueryParamsUsage: true, // [policy] Candidate query parameters are tested on the client-side (eg. url.searchParams.set(param, value); window.history.pushState({}, "", url);)
+  
+  // [policy] the value of the keys matching the following list is considered sensitive/authorization related
+  sensitiveJSONKeys: ["premium", "locked", "access", "blocked", "unlocked", "free", "paid", "available"],
+
+  // [policy] the value of the keys matching the following list is preindexed
+  preindexedKeys: [
+    'id', 'user', 'account', 'profile', 'order',
+    'resource', 'item', 'object', 'doc', 'name', 'key', 'title', 'type', 'url', 'link',
+    'owner', 'author', 'creator', 'role', 'permission', 'scope',
+    'content', 'node', 'slug'
+  ],
 });
 
+//////////////////////////////
+// Notes
+/////////////////////////////
 // (*) Empirically-identified relevant tags

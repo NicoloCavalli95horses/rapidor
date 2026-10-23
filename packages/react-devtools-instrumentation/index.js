@@ -1,8 +1,7 @@
 //===================
 // Import
 //===================
-import { log, showDownloadBtn, printConfig } from './utils/utils.js';
-import { eventBus } from './utils/eventBus.js';
+import { log, printConfig } from './utils/utils.js';
 import { Bridge } from './modules/state/bridge.js';
 import { StateManager } from './modules/state/stateManager.js';
 import { HTTPTracker } from './modules/HTTP/HTTPTracker.js';

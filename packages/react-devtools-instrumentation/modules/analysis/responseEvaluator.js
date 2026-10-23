@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log, isPlainObject, getCurrentDOM } from "../../utils/utils.js";
+import { log, isPlainObject } from "../../utils/utils.js";
 import { config } from "../../config.js";
 
 
@@ -17,11 +17,7 @@ export class ResponseEvaluator {
     // more relaxed [0,1] more strict key's similarity
     this.responseBodyThr = 0.45;
 
-    this.sensitiveKeys = [
-      "premium", "locked", "access", 
-      "blocked", "unlocked","free",
-      "paid", "available"
-    ];
+    this.sensitiveKeys = config.sensitiveJSONKeys;
 
     this.reportedId = new Set();
     this.totIdor = 0;

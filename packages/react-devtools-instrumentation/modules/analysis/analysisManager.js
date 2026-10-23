@@ -2,9 +2,7 @@
 // Import
 //===================
 import { eventBus, events } from "../../utils/eventBus.js";
-import { filter } from 'rxjs/operators';
 import { log } from "../../utils/utils.js";
-import { StateManager } from "../state/stateManager.js";
 import { AnalysisLoop } from "../analysis/analysisLoop.js";
 
 

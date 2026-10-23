@@ -3,7 +3,7 @@
 //==============================
 // Import
 //==============================
-import { log, deepObjCopy } from '../../utils/utils.js';
+import { log } from '../../utils/utils.js';
 import { analyzeHTTP } from './HTTPAnalyzer.js';
 import { events } from '../../utils/eventBus.js';
 

@@ -2,7 +2,6 @@
 // Import
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
-import { filter } from 'rxjs/operators';
 import { ResponseEvaluator } from "./responseEvaluator.js";
 import { log, sleep, getCurrentDOM } from "../../utils/utils.js";
 import { config } from "../../config.js";

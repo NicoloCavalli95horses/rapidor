@@ -1,6 +1,7 @@
 //===================
 // Import
 //===================
+import { config } from "../../config.js";
 import { emit, events } from "../../utils/eventBus.js";
 import { log } from "../../utils/utils.js";
 
@@ -13,19 +14,6 @@ export class PreIndexing {
   constructor() {
     this.maxStrLength = 300;
     this.data = [];
-
-    this.interestingKeys = [
-      // id
-      'id', 'user', 'account', 'profile', 'order',
-      'resource', 'item', 'object', 'doc',
-      'name', 'key', 'title', 'type', 'url', 'link',
-      // roles
-      'owner', 'createdBy', 'updatedBy',
-      'author', 'creator', 'role', 'permission',
-      'scope', 'scopes',
-      // content
-      'content', 'node', 'slug'
-    ];
   }
 
 
@@ -121,7 +109,7 @@ export class PreIndexing {
     const norm = String(str).toString().trim().toLowerCase();
     const words = this.splitWords(norm);
 
-    return this.interestingKeys.some(k => {
+    return config.preindexedKeys.some(k => {
       const key = k.toLowerCase();
 
       return (

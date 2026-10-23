@@ -1,8 +1,7 @@
 //===================
 // Import
 //===================
-import { emit, eventBus, events } from '../../utils/eventBus.js';
-import { log } from '../../utils/utils.js';
+import { emit, events } from '../../utils/eventBus.js';
 import { config } from '../../config.js';
 
 

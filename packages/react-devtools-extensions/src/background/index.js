@@ -30,6 +30,7 @@ import type {ExtensionBridgeConnectionType} from '../constants';
 
 (() => {
   const s = new ServiceWorker();
+  s.init();
 })();
 
 ///////////////////////
