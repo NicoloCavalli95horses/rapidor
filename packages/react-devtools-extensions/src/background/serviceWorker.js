@@ -30,10 +30,12 @@ export class ServiceWorker {
     chrome.runtime.onMessage.addListener(this.onMessage);
     chrome.tabs.onRemoved.addListener(this.onTabRemoved);
     await createOffscreenDocument();
-
-    this.initialized = true;
-
-    log({ module: "service worker", msg: "Initialized" });
+    const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "INITIALIZE_MODEL" });
+    
+    if (response.success) {
+      this.initialized = true;
+      log({ module: "service worker", msg: "Initialized" });
+    }
   }
 
 
@@ -77,7 +79,7 @@ export class ServiceWorker {
 
         // 2. Classify only new keys
         if (keysToClassify.length > 0) {
-          const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "CLASSIFY_KEYS", payload: keysToClassify, });
+          const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "CLASSIFY_KEYS", payload: keysToClassify });
           
           if (response?.error) {
             throw new Error(response.error);

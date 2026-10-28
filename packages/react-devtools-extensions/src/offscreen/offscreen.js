@@ -3,47 +3,89 @@
 //========================
 // Import
 //========================
-import { pipeline } from "@huggingface/transformers";
+import { env, pipeline } from "@huggingface/transformers";
+import { log } from "../../../react-devtools-instrumentation/utils/utils";
 
+// use local models instead of hosted ones (it overrides default behaviour)
+env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("assets/ort/");
 
 
 //========================
 // Const
 //========================
 class OffScreen {
-  constructor() { }
+  constructor() {
+    this.extractor = null;
+    this.initializationPromise = null;
+  }
 
   init() {
     this.addEventListener();
-    console.log('chrome.storage exist', typeof chrome?.storage)
   }
+
+
 
   addEventListener() {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.target !== "offscreen" || message.type !== "CLASSIFY_KEYS") { return; }
-      if (!Array.isArray(message.payload)) { return; }
+      if (message.target != "offscreen") { return; }
 
-      // Keep the channel open while the classification is async
-      this.classifyKeys(message.payload)
-        .then((results) => sendResponse({ results }))
+      if (message.type == "INITIALIZE_MODEL") {
+        this.initializeModel()
+          .then(() => sendResponse({ success: true }))
+          .catch((error) => {
+            log({ module: "offscreen", msg: `Model initialization error:, ${error}`, type: "error" });
+            sendResponse({ success: false, error: error.message });
+          });
+
+        return true; // this keep the channel open 
+      }
+
+      if (message.type == "CLASSIFY_KEYS") {
+        if (!Array.isArray(message.payload)) { return; }
+
+        this.classifyKeys(message.payload)
+          .then((results) => sendResponse({ results }))
+          .catch((error) => {
+            console.error("[offscreen] Classification error:", error);
+            sendResponse({ success: false, error: error.message });
+          });
+
+        return true;
+      }
+    });
+  }
+
+
+
+  async initializeModel() {
+    if (this.extractor) { return this.extractor; }
+
+    if (!this.initializationPromise) {
+      this.initializationPromise = pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2")
+        .then((extractor) => {
+          this.extractor = extractor;
+          console.log("[offscreen] Model successfully initialized");
+          return extractor;
+        })
         .catch((error) => {
-          console.error("[offscreen] Classification error:", error);
-          sendResponse({ error: error.message });
+          // Allow retry after a failed initialization
+          this.initializationPromise = null;
+          throw error;
         });
-
-      return true;
     }
-    );
+
+    return this.initializationPromise;
   }
 
 
 
   async classifyKeys(keys) {
+    await this.initializeModel();
+
     const results = [];
 
     for (const key of keys) {
-      const result = await this.classify(key);
-      results.push(result);
+      results.push(await this.classify(key));
     }
 
     return results;
@@ -52,9 +94,7 @@ class OffScreen {
 
 
   async classify(key) {
-    // TODO: integra qui Transformers.js
-    console.log("[offscreen] cache non trovata, devo classificare:", key);
-
+    // TODO
     return { key, classification: "unknown" };
   }
 }
