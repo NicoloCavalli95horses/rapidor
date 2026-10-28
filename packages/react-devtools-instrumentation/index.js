@@ -8,6 +8,7 @@ import { HTTPTracker } from './modules/HTTP/HTTPTracker.js';
 import { AnalysisManager } from './modules/analysis/analysisManager.js';
 import { DOMhandler } from './modules/DOM/DOMhandler.js';
 import { NavigationTracker } from "./modules/state/navigationTracker.js";
+import { initClientToBridge } from './utils/clientToBridge.js';
 
 
 //===================
@@ -17,6 +18,9 @@ export async function instrumentationMain() {
   // DOM handler
   const DOM = new DOMhandler();
   DOM.init();
+
+  // Client bridge
+  initClientToBridge();
   
   log({ module: 'index', msg: "Main module loaded" });
   printConfig();

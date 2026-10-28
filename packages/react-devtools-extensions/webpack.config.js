@@ -72,6 +72,7 @@ module.exports = {
     prepareInjection: './src/contentScripts/prepareInjection.js',
     installHook: './src/contentScripts/installHook.js',
     hookSettingsInjector: './src/contentScripts/hookSettingsInjector.js',
+    offscreen: "./src/offscreen/offscreen.js",
     instrumentation: '../react-devtools-instrumentation/index.js',
     backgroundToMainBridge: '../react-devtools-instrumentation/content_scripts/backgroundToMainBridge.js',
   },
@@ -252,6 +253,10 @@ module.exports = {
     ],
 
     rules: [
+      {
+        test: /\.wasm$/,
+        type: 'asset/resource',
+      },
       {
         test: /\.worker\.js$/,
         use: [

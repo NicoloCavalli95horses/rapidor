@@ -5,6 +5,7 @@ import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
 import { log, isPlainObject } from "../../utils/utils.js";
 import { config } from "../../config.js";
+import { sendToBridge } from "../../utils/clientToBridge.js";
 
 
 
@@ -39,7 +40,7 @@ export class ResponseEvaluator {
     const { reference, candidate: current } = event;
 
     const httpResponses = this.handleResponseSimilarity(reference.response, current.response);
-    const clientSideAuthZ = this.assessAuthZ(reference.node.props, current.node.props);
+    const clientSideAuthZ = await this.assessAuthZ(reference.node.props, current.node.props);
     const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium;
 
     const id = await this.getReportId(current);
@@ -73,13 +74,31 @@ export class ResponseEvaluator {
 
   // Differential analysis: compare reference props to current props
   // if there are differences for critical keys (eg. isPremium), return true (ie, currProps describes a premium item)
-  assessAuthZ(refProps, currProps) {
-    const diffs = this.compareObj(refProps, currProps);
-    const fields = ["key", "pathStr", "current", "reference"];
-    const sensitiveDiffs = diffs.filter(d => fields.some(f => this.isSensitiveKey(d[f])));
-    const isPremium = sensitiveDiffs.some(d => d.reference != d.current);
+  // authorization-related keys are identified via
+  async assessAuthZ(refProps, currProps) {
+    const differences = this.compareObj(refProps, currProps);
+    const payload = differences.flatMap(({ key, pathStr, current, reference }) => [key, pathStr, current, reference]);
 
-    return { isPremium, sensitiveDiffs };
+    const isValidString = (value) =>
+      typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 50 &&
+      !value.includes(" ") &&
+      !/^\d+$/.test(value) &&
+      /^[a-zA-Z0-9_]+$/.test(value);
+
+    const filteredPayload = [...new Set(payload.filter(isValidString))];
+
+    const results = await sendToBridge({ action: "CLASSIFY_KEYS", payload: filteredPayload });
+    console.log('classified keys:', results);
+    
+    //use results instead: eg.  results.some(res => res.score > config.sensitiveKeyThr);
+    const hasSensitiveValues = false; //filteredPayload.includes('free') || filteredPayload.includes("locked") 
+
+    // true when there are sensitive keys within the prop object, and the current value under test differs from the reference one 
+    const isPremium = differences.some(key => key.reference != key.current) && hasSensitiveValues;
+
+    return { isPremium, differences };
   }
 
 

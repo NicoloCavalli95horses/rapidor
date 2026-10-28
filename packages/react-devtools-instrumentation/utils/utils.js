@@ -31,29 +31,6 @@ export function copyObjKeys(obj = {}, keys = []) {
 
 
 
-/**
- * @param {Object} message
- * @param {Window} targetWindow
- * @param {string} targetOrigin
- */
-export function sendPostMessage(msg, targetWindow = window.parent, targetOrigin = window.location.origin) {
-  try {
-    if (!msg || typeof msg !== 'object') {
-      log({ module: 'utils', msg: 'Message must be a non-null object', type: 'error' });
-    }
-    if (isCloneable(msg)) {
-      targetWindow.postMessage(msg, targetOrigin);
-    } else {
-      log({ module: 'utils', msg: 'Impossible to send. Uncloneable object', type: 'error' });
-      console.log(msg)
-    }
-  } catch (err) {
-    log({ module: 'utils', msg: 'Error sending message', type: 'error' });
-  }
-}
-
-
-
 // type: info | error | warning
 export function log({ module, type = 'info', msg, verboseOnly = false }) {
   const color = {
@@ -66,7 +43,7 @@ export function log({ module, type = 'info', msg, verboseOnly = false }) {
   if (!canLog) { return; }
 
   const descr = `%c[${config.toolName}] [${module.toUpperCase()}]`;
-  
+
   console.log(descr, color[type], msg);
   logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
 }

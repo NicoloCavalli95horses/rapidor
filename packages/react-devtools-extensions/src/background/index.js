@@ -28,9 +28,9 @@ import type {ExtensionBridgeConnectionType} from '../constants';
 
 ///////////////////////
 
-(() => {
+(async () => {
   const s = new ServiceWorker();
-  s.init();
+  await s.init();
 })();
 
 ///////////////////////

@@ -159,5 +159,8 @@
   "resolutions": {
     "react-is": "npm:react-is"
   },
-  "packageManager": "yarn@1.22.22"
+  "packageManager": "yarn@1.22.22",
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.1"
+  }
 }

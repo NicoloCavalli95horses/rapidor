@@ -6,9 +6,8 @@
 //===================
 // Import
 //===================
-import { config } from "../../../react-devtools-instrumentation/config.js";
-import { events } from "../../../react-devtools-instrumentation/utils/eventBus.js";
 import { log } from "../../../react-devtools-instrumentation/utils/utils.js";
+import { classifyKeys, createOffscreenDocument } from "./utils.js";
 
 
 
@@ -25,11 +24,12 @@ export class ServiceWorker {
   }
 
 
-  init() {
+  async init() {
     if (this.initialized) { return; }
 
     chrome.runtime.onMessage.addListener(this.onMessage);
     chrome.tabs.onRemoved.addListener(this.onTabRemoved);
+    await createOffscreenDocument();
 
     this.initialized = true;
 
@@ -37,6 +37,7 @@ export class ServiceWorker {
   }
 
 
+  // This handle messages received from backgroundToMainBridge.js
   async onMessage(message, sender, sendResponse) {
     // Register tabs
     if (message.action === "REGISTER_TAB" && sender.tab?.id != undefined) {
@@ -44,13 +45,68 @@ export class ServiceWorker {
       this.tabs.add(tabId);
 
       log({ module: "service worker", msg: `Registered new tab: ${[...this.tabs]}` });
-      sendResponse({ success: true, tabId }); 
+      sendResponse({ success: true, tabId });
       return;
     }
 
-    if (message.action === "PING" && this.tabs.has(sender.tab?.id)) {
-      log({ module: "service worker", msg: `Received from bridge: ${message}` });
-      await this.broadcast("PONG", {text: "hello back!"})
+    // Classify keys
+    if (message.action === "CLASSIFY_KEYS") {
+      if (!Array.isArray(message.payload)) {
+        sendResponse({ error: "payload must be an array" });
+        return;
+      }
+
+      const keys = message.payload;
+      const results = [];
+
+      try {
+        // 1. Get classification from cache
+        const cacheKeys = keys.map((key) => `classification:${key}`);
+        const cached = await chrome.storage.local.get(cacheKeys);
+        const keysToClassify = [];
+
+        for (const key of keys) {
+          const cacheKey = `classification:${key}`;
+
+          if (cached[cacheKey] !== undefined) {
+            results.push(cached[cacheKey]);
+          } else {
+            keysToClassify.push(key);
+          }
+        }
+
+        // 2. Classify only new keys
+        if (keysToClassify.length > 0) {
+          const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "CLASSIFY_KEYS", payload: keysToClassify, });
+          
+          if (response?.error) {
+            throw new Error(response.error);
+          }
+
+          if (!Array.isArray(response?.results) || response.results.length !== keysToClassify.length) {
+            throw new Error("Invalid classification response");
+          }
+
+          // 3. Save to persistent cache
+          const cacheEntries = {};
+
+          for (let i = 0; i < keysToClassify.length; i++) {
+            const key = keysToClassify[i];
+            const result = response.results[i];
+            results.push(result);
+            cacheEntries[`classification:${key}`] = result;
+          }
+
+          await chrome.storage.local.set(cacheEntries);
+        }
+
+        sendResponse({ results });
+      } catch (error) {
+        console.error("[background] Classification error:", error);
+        sendResponse({ error: error.message });
+      }
+
+      return true;
     }
   }
 
