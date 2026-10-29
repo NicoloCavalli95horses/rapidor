@@ -17,9 +17,6 @@ export class ResponseEvaluator {
     // Similarity threshold in response keys, and within the body
     // more relaxed [0,1] more strict key's similarity
     this.responseBodyThr = 0.45;
-
-    this.sensitiveKeys = config.sensitiveJSONKeys;
-
     this.reportedId = new Set();
     this.totIdor = 0;
   }
@@ -78,48 +75,28 @@ export class ResponseEvaluator {
   async assessAuthZ(refProps, currProps) {
     const differences = this.compareObj(refProps, currProps);
     const payload = differences.flatMap(({ key, pathStr, current, reference }) => [key, pathStr, current, reference]);
-
+    
     const isValidString = (value) =>
       typeof value === "string" &&
-      value.length > 0 &&
-      value.length <= 50 &&
-      !value.includes(" ") &&
-      !/^\d+$/.test(value) &&
-      /^[a-zA-Z0-9_]+$/.test(value);
-
-    const filteredPayload = [...new Set(payload.filter(isValidString))];
-
-    const results = await sendToBridge({ action: "CLASSIFY_KEYS", payload: filteredPayload });
-    console.log('classified keys:', results);
+    value.length > 0 &&
+    value.length <= 50 &&
+    !value.includes(" ") &&
+    !/^\d+$/.test(value) &&
+    /^[a-zA-Z0-9_]+$/.test(value);
     
-    //use results instead: eg.  results.some(res => res.score > config.sensitiveKeyThr);
-    const hasSensitiveValues = false; //filteredPayload.includes('free') || filteredPayload.includes("locked") 
+    const filteredPayload = [...new Set(payload.filter(isValidString))];
+    
+    const {results} = await sendToBridge({ action: "CLASSIFY_KEYS", payload: filteredPayload });
+    let hasSensitiveValues = false;
 
+    if (results.length) {
+      hasSensitiveValues = results.some(i => i?.isAuthZRelevant); 
+    }
+    
     // true when there are sensitive keys within the prop object, and the current value under test differs from the reference one 
     const isPremium = differences.some(key => key.reference != key.current) && hasSensitiveValues;
 
     return { isPremium, differences };
-  }
-
-
-
-  isSensitiveKey(key) {
-    if (key == null) { return false; }
-    if (typeof key === "number" || typeof key === "boolean") { key = String(key); }
-    if (typeof key !== "string") { return false; }
-
-    // "isPremium" > ["is", "premium"]
-    function tokenize(key) {
-      return key
-        .replace(/([a-z])([A-Z])/g, "$1 $2")
-        .replace(/[_-]+/g, " ")
-        .toLowerCase()
-        .split(/\s+/)
-        .filter(Boolean);
-    }
-
-    const tokens = tokenize(key);
-    return tokens.some(token => this.sensitiveKeys.includes(token));
   }
 
 

@@ -15,8 +15,7 @@ export const config = Object.freeze({
   testClientSideQueryParamsUsage: true, // [policy] Candidate query parameters are tested on the client-side (eg. url.searchParams.set(param, value); window.history.pushState({}, "", url);)
   sensitiveKeyThr: 0.6,                 // [policy] Threshold above which a key is classified as relevant for authorization
 
-  // [policy] the value of the keys matching the following list is considered sensitive/authorization related
-  sensitiveJSONKeys: ["premium", "locked", "access", "blocked", "unlocked", "free", "paid", "available"],
+  huggingfaceModel: "Xenova/all-MiniLM-L6-v2", // [policy] model from HuggingFace (https://huggingface.co/docs/transformers.js/en/index)
 
   // [policy] the value of the keys matching the following list is preindexed
   preindexedKeys: [
@@ -25,6 +24,7 @@ export const config = Object.freeze({
     'owner', 'author', 'creator', 'role', 'permission', 'scope',
     'content', 'node', 'slug'
   ],
+
 });
 
 //////////////////////////////
