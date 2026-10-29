@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/RAPIDOR.png" alt="Logo" width="200">
+  <img src="./packages/react-devtools-instrumentation/assets/RAPIDOR.png" alt="Logo" width="200">
 </p>
 
 <h1 align="center">RAPIDOR</h1>
