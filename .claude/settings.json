@@ -1,16 +1,4 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "if [[ \"$PWD\" != */compiler* ]]; then cat .claude/instructions.md 2>/dev/null || true; fi"
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Skill(extract-errors)",
@@ -35,10 +23,19 @@
     "deny": [
       "Bash(yarn download-build:*)",
       "Bash(yarn download-build-for-head:*)",
-      "Bash(npm:*)",
-      "Bash(pnpm:*)",
-      "Bash(bun:*)",
-      "Bash(npx:*)"
+      "Bash(bun:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$PWD\" != */compiler* ]]; then cat .claude/instructions.md 2>/dev/null || true; fi"
+          }
+        ]
+      }
     ]
   }
 }
