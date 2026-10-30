@@ -16,6 +16,7 @@ export class ServiceWorker {
   constructor() {
     this.initialized = false;
     this.tabs = new Set();
+    this.collecting = null; // in-flight collectAllTabsData() promise (single-flight guard)
 
     this.onMessage = this.onMessage.bind(this);
     this.onTabRemoved = this.onTabRemoved.bind(this);
@@ -163,13 +164,30 @@ export class ServiceWorker {
     return results.map((result, index) => ({tabId: tabIds[index], ...result}));
   }
 
+  // Single-flight entry point. The service worker is the only context shared across every tab, so
+  // it is the right place to guarantee one collection at a time: if a crawler triggers this twice
+  // (eg. from two tabs at once, or an accidental double call) while one is still gathering, every
+  // caller shares the same in-flight promise instead of starting a second fan-out. Idempotent reads,
+  // so the shared result is correct for all of them.
+  async collectAllTabsData() {
+    if (this.collecting) {
+      return this.collecting;
+    }
+
+    this.collecting = this.doCollectAllTabsData().finally(() => {
+      this.collecting = null;
+    });
+
+    return this.collecting;
+  }
+
   // Asks every registered tab for its local RAPIDOR snapshot (getData(), via the content-script
   // bridge) and merges them. Logs and stats come back as arrays with one entry per tab, each tagged
   // with its tabId so the crawler can tell them apart, eg.
   //   { logs: [{ tabId, logs: [...] }, ...], stats: [{ tabId, stats: {...} }, ...] }
   // A tab that went away or never answers is dropped (and de-registered) rather than failing the
   // whole collection.
-  async collectAllTabsData() {
+  async doCollectAllTabsData() {
     const tabIds = [...this.tabs];
     const settled = await Promise.allSettled(
       tabIds.map(tabId =>
