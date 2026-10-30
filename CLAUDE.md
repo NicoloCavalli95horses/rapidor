@@ -11,3 +11,4 @@ All files contained in `/packages/react-devtools-instrumentation/`
 - Ignore all the files outside the current active folder, you can look at `/react-devtools/extensions` for larger context
 - Write in plain JavaScript and always use named parameters/arguments
 - Write comments in English
+- Do NOT create other git branches or move to existing branches without permission
