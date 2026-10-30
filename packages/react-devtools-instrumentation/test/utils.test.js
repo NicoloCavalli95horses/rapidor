@@ -1,7 +1,10 @@
 //===================
 // Import
 //===================
-import { debounceWithMaxTime, sleep, metrics, recordMetric, printMetrics } from "../utils/utils.js";
+import {
+  debounceWithMaxTime, sleep, metrics, metricKeys, recordMetric, printMetrics,
+  runWithConcurrency, markExecutionStart, getStats, getLogs, getData, exposeGlobalAPI, log
+} from "../utils/utils.js";
 import assert from "node:assert";
 
 
@@ -126,6 +129,106 @@ describe("utils", function () {
 
     it("printMetrics should not throw even with no metrics recorded", () => {
       assert.doesNotThrow(() => printMetrics());
+    });
+  });
+
+
+
+  describe("Function runWithConcurrency", function () {
+    it("should run every task and return its results, in order", async () => {
+      const tasks = [1, 2, 3, 4].map(n => () => Promise.resolve(n * 10));
+      const results = await runWithConcurrency({ tasks, limit: 2 });
+      assert.deepEqual(results, [10, 20, 30, 40]);
+    });
+
+
+    it("should never run more than `limit` tasks at once", async () => {
+      let running = 0;
+      let maxRunning = 0;
+
+      const tasks = Array.from({ length: 6 }, () => async () => {
+        running++;
+        maxRunning = Math.max(maxRunning, running);
+        await sleep(50);
+        running--;
+      });
+
+      await runWithConcurrency({ tasks, limit: 3 });
+      assert.equal(maxRunning, 3);
+    });
+
+
+    it("should handle an empty task list", async () => {
+      const results = await runWithConcurrency({ tasks: [] });
+      assert.deepEqual(results, []);
+    });
+  });
+
+
+
+  // getStats/getData read from module-level state (set by markExecutionStart), so these tests
+  // rely on execution order: the "not started yet" case must run before markExecutionStart() below.
+  describe("Functions getStats, getLogs, getData, exposeGlobalAPI (crawler-facing API)", function () {
+    it("getStats should report an unstarted execution window as null/0", () => {
+      const stats = getStats();
+      assert.equal(stats.date, null);
+      assert.equal(stats.initialURL, null);
+      assert.equal(stats.executionTimeMs, 0);
+    });
+
+
+    it("getStats should include every canonical metric, defaulting to 0", () => {
+      const stats = getStats();
+      for (const key of Object.values(metricKeys)) {
+        assert.equal(stats[key], metrics[key] ?? 0);
+      }
+    });
+
+
+    it("markExecutionStart should set date/initialURL/executionTimeMs, and be a no-op afterwards", async () => {
+      markExecutionStart();
+      const first = getStats();
+      assert.notEqual(first.date, null);
+      assert.equal(first.initialURL, undefined); // no `window` under Node
+
+      await sleep(20);
+      markExecutionStart(); // second call must not reset the start time
+      const second = getStats();
+
+      assert.equal(first.date, second.date);
+      assert.ok(second.executionTimeMs >= first.executionTimeMs);
+    });
+
+
+    it("getLogs should parse stored log entries back into objects", () => {
+      log({ module: 'test', msg: 'hello getLogs' });
+      const parsed = getLogs();
+      const last = parsed[parsed.length - 1];
+
+      assert.equal(typeof last, 'object');
+      assert.equal(last.module, 'test');
+      assert.equal(last.msg, 'hello getLogs');
+    });
+
+
+    it("getData should bundle logs and stats together", () => {
+      const data = getData();
+      assert.deepEqual(data.logs, getLogs());
+      assert.deepEqual(data.stats, getStats());
+    });
+
+
+    it("exposeGlobalAPI should wire getData onto the given target", () => {
+      const fakeWindow = {};
+      exposeGlobalAPI({ target: fakeWindow });
+
+      assert.equal(fakeWindow.__RAPIDOR__getData, getData);
+      assert.deepEqual(fakeWindow.__RAPIDOR__getData(), getData());
+    });
+
+
+    it("exposeGlobalAPI should not throw with no target available (eg. under Node)", () => {
+      assert.doesNotThrow(() => exposeGlobalAPI());
     });
   });
 });

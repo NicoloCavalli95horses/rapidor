@@ -301,18 +301,74 @@ export function markExecutionStart() {
 
 
 
+// Builds a plain-data snapshot of every RAPIDOR self-metric plus the session metadata
+// (date, initial URL, total execution time). Shared by printMetrics() and getData(), so the
+// console table and the programmatic API (window.__RAPIDOR__getData) never drift apart.
+export function getStats() {
+  const counters = Object.values(metricKeys).reduce((acc, key) => {
+    acc[key] = metrics[key] ?? 0;
+    return acc;
+  }, {});
+
+  return {
+    ...counters,
+    date: executionStartDate ? executionStartDate.toISOString() : null,
+    initialURL: initialURL ?? null,
+    executionTimeMs: executionStartedAt !== null ? (Date.now() - executionStartedAt) : 0,
+  };
+}
+
+
+
 export function printMetrics() {
+  const stats = getStats();
+
   const table = Object.values(metricKeys).map((key) => ({
     metric: key,
-    value: metrics[key] ?? 0
+    value: stats[key]
   }));
 
   // Session metadata, appended after the canonical self-metrics
   table.push(
-    { metric: 'Date', value: executionStartDate ? executionStartDate.toLocaleDateString() : 'n/a' },
-    { metric: 'Initial URL', value: initialURL ?? 'n/a' },
-    { metric: 'Total execution time (ms)', value: executionStartedAt !== null ? (Date.now() - executionStartedAt) : 0 }
+    { metric: 'Date', value: stats.date ? new Date(stats.date).toLocaleDateString() : 'n/a' },
+    { metric: 'Initial URL', value: stats.initialURL ?? 'n/a' },
+    { metric: 'Total execution time (ms)', value: stats.executionTimeMs }
   );
 
   console.table(table);
+}
+
+
+
+// Returns every stored log entry, parsed back into an object (log() stores them as JSON strings).
+// Falls back to the raw string for any entry that, for whatever reason, isn't valid JSON.
+export function getLogs() {
+  return logs.map((entry) => {
+    try {
+      return JSON.parse(entry);
+    } catch {
+      return entry;
+    }
+  });
+}
+
+
+
+// Full data export for an external driver (eg. a crawler controlling the browser via
+// Puppeteer/Playwright/CDP) to pull "from below" instead of going through the DOM overlay.
+export function getData() {
+  return {
+    logs: getLogs(),
+    stats: getStats(),
+  };
+}
+
+
+
+// Exposes getData() on the page's global scope, so a crawler can call it via page.evaluate(),
+// eg. `page.evaluate(() => window.__RAPIDOR__getData())`. Call once, from the extension's entry
+// point: this is not a module-load side effect, so it stays easy to unit test with a fake target.
+export function exposeGlobalAPI({ target = (typeof window !== 'undefined' ? window : undefined) } = {}) {
+  if (!target) { return; } // no global scope available (eg. running under Node in tests)
+  target.__RAPIDOR__getData = getData;
 }

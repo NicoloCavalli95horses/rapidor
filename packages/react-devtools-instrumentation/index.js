@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { log, printConfig } from './utils/utils.js';
+import { log, printConfig, exposeGlobalAPI } from './utils/utils.js';
 import { config } from './config.js';
 import { Bridge } from './modules/state/bridge.js';
 import { StateManager } from './modules/state/stateManager.js';
@@ -16,6 +16,9 @@ import { initClientToBridge } from './utils/clientToBridge.js';
 // Functions
 //===================
 export async function instrumentationMain() {
+  // Public API for an external crawler to pull logs/stats "from below" (page.evaluate), as early as possible
+  exposeGlobalAPI();
+
   // DOM handler (floating "Download logs"/"Print stats" buttons), fully opt-in
   if (config.domHandlerEnabled) {
     const DOM = new DOMhandler();
