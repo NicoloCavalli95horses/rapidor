@@ -1,13 +1,13 @@
-# React
+# RAPIDOR
 
-React is a JavaScript library for building user interfaces.
+RAPIDOR is an instrumentation of the React library - a JavaScript library for building user interfaces.
+Its goal is to detect IDOR vulnerabilities in web applications, focusing on paid resources or feature that present no server-side checks. This tool is an open-source pentesting solution to find vulnerability on the web.
 
-## Monorepo Overview
+## Current Active Folder
 
-- **React**: All files outside `/compiler/`
-- **React Compiler**: `/compiler/` directory (has its own instructions)
+All files contained in `/packages/react-devtools-instrumentation/`
 
-## Current Active Work
-
-- **Rust Compiler Port**: Plans in `compiler/docs/rust-port/`, implementation in `compiler/crates/`
-- Branch: `rust-research`
+## Rules
+- Ignore all the files outside the current active folder, you can look at `/react-devtools/extensions` for larger context
+- Write in plain JavaScript and always use named parameters/arguments
+- Write comments in English

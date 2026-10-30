@@ -3,7 +3,7 @@
 //===================
 import { config } from "../../config.js";
 import { emit, events } from "../../utils/eventBus.js";
-import { log } from "../../utils/utils.js";
+import { log, recordMetric, metricKeys } from "../../utils/utils.js";
 
 
 
@@ -37,6 +37,8 @@ export class PreIndexing {
 
   emit() {
     if (this.data.length === 0) { return; }
+
+    recordMetric({ key: metricKeys.PREINDEXED_VALUES, value: this.data.length });
 
     emit({ type: events.PREINDEXING_UPDATE, payload: this.data });
     log({ module: 'preindexing', msg: 'Emitted batch' })

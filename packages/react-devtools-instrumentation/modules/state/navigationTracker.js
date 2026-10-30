@@ -2,7 +2,7 @@
 // Import
 //===================
 import { emit, events } from '../../utils/eventBus.js';
-import { log, getCurrentDOM } from '../../utils/utils.js';
+import { log, getCurrentDOM, recordMetric, metricKeys } from '../../utils/utils.js';
 import { analyzeHTTP } from '../HTTP/HTTPAnalyzer.js';
 
 
@@ -63,6 +63,7 @@ export class NavigationTracker {
     const response = { isClientSide: true, dom: getCurrentDOM() }
     this.HTTPanalyzer.parseHTTP({ request, response });
 
+    recordMetric({ key: metricKeys.NAV_EVENTS });
     emit({ type: events.NAV, payload: uri });
     this.lastUri = uri;
   }

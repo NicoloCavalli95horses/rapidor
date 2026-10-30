@@ -2,6 +2,7 @@
 // Import
 //===================
 import { log, printConfig } from './utils/utils.js';
+import { config } from './config.js';
 import { Bridge } from './modules/state/bridge.js';
 import { StateManager } from './modules/state/stateManager.js';
 import { HTTPTracker } from './modules/HTTP/HTTPTracker.js';
@@ -15,9 +16,11 @@ import { initClientToBridge } from './utils/clientToBridge.js';
 // Functions
 //===================
 export async function instrumentationMain() {
-  // DOM handler
-  const DOM = new DOMhandler();
-  DOM.init();
+  // DOM handler (floating "Download logs"/"Print stats" buttons), fully opt-in
+  if (config.domHandlerEnabled) {
+    const DOM = new DOMhandler();
+    DOM.init();
+  }
 
   // Client bridge
   initClientToBridge();

@@ -9,6 +9,45 @@ import { config } from "../config.js";
 //===================
 export const logs = [];
 
+// Session metadata: captured once, the first time markExecutionStart() runs (ie. when the first
+// HTTP event is tracked), so that printMetrics() can report how long RAPIDOR has been running.
+let executionStartedAt = null;
+let executionStartDate = null;
+let initialURL = null;
+
+// Centralized, flat store of every RAPIDOR self-metric (see metricKeys below).
+// Values are plain numbers so the whole object can be dumped as-is into console.table.
+export const metrics = {};
+
+// Canonical metric names: every module that calls recordMetric() should use one of these,
+// so metric names stay consistent and discoverable in one place instead of being sparse literals.
+export const metricKeys = Object.freeze({
+  STATES_SAVED: 'States saved',
+  STATES_SKIPPED_DUPLICATE: 'States skipped (duplicate)',
+  COMPONENTS_IN_LAST_SNAPSHOT: 'Components in last snapshot',
+  MAX_COMPONENTS_SEEN: 'Max components seen in a snapshot',
+  NODES_IN_LAST_SNAPSHOT: 'Nodes in last snapshot',
+
+  HTTP_EVENTS_TRACKED: 'HTTP events tracked (in scope)',
+  HTTP_EVENTS_SAVED: 'HTTP events saved',
+  HTTP_EVENTS_SKIPPED_DUPLICATE: 'HTTP events skipped (duplicate)',
+  HTTP_EVENTS_ANALYZED: 'HTTP events analyzed',
+
+  NAV_EVENTS: 'Navigation events',
+
+  PREINDEXED_VALUES: 'Preindexed values extracted',
+  MATCHES_FOUND: 'Preindexed matches found',
+  CANDIDATES_FOUND: 'Candidate instances found',
+
+  REQUESTS_GENERATED: 'HTTP requests generated',
+  REQUESTS_SKIPPED_DUPLICATE: 'Requests skipped (duplicate)',
+
+  EVALUATIONS_PERFORMED: 'Response evaluations performed',
+  PROP_DIFFERENCES_FOUND: 'Prop differences found',
+  SENSITIVE_KEYS_DETECTED: 'Sensitive (authZ-relevant) keys detected',
+  VULNERABILITIES_REPORTED: 'Potential IDOR reported',
+});
+
 
 
 //===================
@@ -202,6 +241,57 @@ export function printConfig() {
       : typeof value === 'object' ? JSON.stringify(value)
         : value
   }));
+
+  console.table(table);
+}
+
+
+
+// Centralizes every RAPIDOR self-metric (how many states/components/HTTP events/etc. were found),
+// which was previously scattered across modules as local counters (eg. responseEvaluator.totIdor).
+// mode: sum (default, cumulative counter) | max (keeps the highest value seen) | set (last value wins, for point-in-time gauges)
+export function recordMetric({ key, value = 1, mode = 'sum' }) {
+  const current = metrics[key] ?? 0;
+
+  switch (mode) {
+    case 'max':
+      metrics[key] = Math.max(current, value);
+      break;
+    case 'set':
+      metrics[key] = value;
+      break;
+    default:
+      metrics[key] = current + value;
+  }
+}
+
+
+
+// Marks the start of the execution window used by printMetrics() for the "Total execution time" stat.
+// Called on every tracked HTTP event, but only the first call has an effect: later calls are no-ops.
+export function markExecutionStart() {
+  if (executionStartedAt !== null) { return; }
+
+  executionStartedAt = Date.now();
+  executionStartDate = new Date();
+  // window is not available outside a browser context (eg. during unit tests)
+  initialURL = (typeof window !== 'undefined' && window.location) ? window.location.href : undefined;
+}
+
+
+
+export function printMetrics() {
+  const table = Object.values(metricKeys).map((key) => ({
+    metric: key,
+    value: metrics[key] ?? 0
+  }));
+
+  // Session metadata, appended after the canonical self-metrics
+  table.push(
+    { metric: 'Date', value: executionStartDate ? executionStartDate.toLocaleDateString() : 'n/a' },
+    { metric: 'Initial URL', value: initialURL ?? 'n/a' },
+    { metric: 'Total execution time (ms)', value: executionStartedAt !== null ? (Date.now() - executionStartedAt) : 0 }
+  );
 
   console.table(table);
 }

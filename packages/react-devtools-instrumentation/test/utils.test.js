@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { debounceWithMaxTime, sleep } from "../utils/utils.js";
+import { debounceWithMaxTime, sleep, metrics, recordMetric, printMetrics } from "../utils/utils.js";
 import assert from "node:assert";
 
 
@@ -82,5 +82,50 @@ describe("utils", function () {
       assert.equal(count, 2);
     });
 
+  });
+
+
+
+  describe("Function recordMetric", function () {
+    // metrics is a shared module-level object: reset the keys under test before each case
+    beforeEach(() => {
+      delete metrics['test_sum'];
+      delete metrics['test_max'];
+      delete metrics['test_set'];
+    });
+
+
+    it("should default to summing values (sum mode)", () => {
+      recordMetric({ key: 'test_sum', value: 2 });
+      recordMetric({ key: 'test_sum', value: 3 });
+      assert.equal(metrics['test_sum'], 5);
+    });
+
+
+    it("should default value to 1 when not provided", () => {
+      recordMetric({ key: 'test_sum' });
+      recordMetric({ key: 'test_sum' });
+      assert.equal(metrics['test_sum'], 2);
+    });
+
+
+    it("should keep the highest value in max mode", () => {
+      recordMetric({ key: 'test_max', value: 5, mode: 'max' });
+      recordMetric({ key: 'test_max', value: 2, mode: 'max' });
+      recordMetric({ key: 'test_max', value: 9, mode: 'max' });
+      assert.equal(metrics['test_max'], 9);
+    });
+
+
+    it("should overwrite with the last value in set mode", () => {
+      recordMetric({ key: 'test_set', value: 1, mode: 'set' });
+      recordMetric({ key: 'test_set', value: 7, mode: 'set' });
+      assert.equal(metrics['test_set'], 7);
+    });
+
+
+    it("printMetrics should not throw even with no metrics recorded", () => {
+      assert.doesNotThrow(() => printMetrics());
+    });
   });
 });

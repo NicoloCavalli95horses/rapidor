@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { ResponseEvaluator } from "./responseEvaluator.js";
-import { log, sleep, getCurrentDOM } from "../../utils/utils.js";
+import { log, sleep, getCurrentDOM, recordMetric, metricKeys } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 
@@ -71,8 +71,11 @@ export class RequestGenerator {
 
         if (this.alreadyDone.has(id)) {
           log({ module: 'request generator', msg: `Request already done, skipping` });
+          recordMetric({ key: metricKeys.REQUESTS_SKIPPED_DUPLICATE });
           continue;
         }
+
+        recordMetric({ key: metricKeys.REQUESTS_GENERATED });
 
         const payload = {
           reference: {

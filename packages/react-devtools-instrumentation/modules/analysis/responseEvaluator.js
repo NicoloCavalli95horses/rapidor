@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { filter } from 'rxjs/operators';
-import { log, isPlainObject } from "../../utils/utils.js";
+import { log, isPlainObject, recordMetric, metricKeys } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { sendToBridge } from "../../utils/clientToBridge.js";
 
@@ -33,12 +33,15 @@ export class ResponseEvaluator {
 
   async handleEvent(event) {
     log({ module: "response evaluator", msg: "Starting evaluation..." });
+    recordMetric({ key: metricKeys.EVALUATIONS_PERFORMED });
 
     const { reference, candidate: current } = event;
 
     const httpResponses = this.handleResponseSimilarity(reference.response, current.response);
     const clientSideAuthZ = await this.assessAuthZ(reference.node.props, current.node.props);
     const canReport = httpResponses.areSimilar && clientSideAuthZ.isPremium;
+
+    recordMetric({ key: metricKeys.PROP_DIFFERENCES_FOUND, value: clientSideAuthZ.differences.length });
 
     const id = await this.getReportId(current);
 
@@ -52,6 +55,7 @@ export class ResponseEvaluator {
     }
 
     this.totIdor++;
+    recordMetric({ key: metricKeys.VULNERABILITIES_REPORTED });
 
     emit({
       type: events.REPORT,
@@ -90,7 +94,9 @@ export class ResponseEvaluator {
     let hasSensitiveValues = false;
 
     if (results.length) {
-      hasSensitiveValues = results.some(i => i?.isAuthZRelevant); 
+      const sensitiveCount = results.filter(i => i?.isAuthZRelevant).length;
+      recordMetric({ key: metricKeys.SENSITIVE_KEYS_DETECTED, value: sensitiveCount });
+      hasSensitiveValues = sensitiveCount > 0;
     }
     
     // true when there are sensitive keys within the prop object, and the current value under test differs from the reference one 

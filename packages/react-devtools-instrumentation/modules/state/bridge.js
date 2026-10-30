@@ -2,7 +2,7 @@
 // Import
 //===================
 import { emit, events, eventBus } from '../../utils/eventBus.js';
-import { debounceWithMaxTime, log, isSerializableValue } from '../../utils/utils.js';
+import { debounceWithMaxTime, log, isSerializableValue, recordMetric, metricKeys } from '../../utils/utils.js';
 import { Graph } from './graph.js';
 import { config } from '../../config.js';
 import { PreIndexing } from './preindexing.js';
@@ -95,6 +95,11 @@ export class Bridge {
     graph.componentIndex = this.buildComponentIndex(); // index of componentId: [node-1, node-2, ...]
     graph.fingerprint = await this.getFingerprint(graph); // used to compare graphs
     graph.graphIndex = this.graphIndex;
+
+    const componentCount = Object.keys(graph.componentIndex).length;
+    recordMetric({ key: metricKeys.COMPONENTS_IN_LAST_SNAPSHOT, value: componentCount, mode: 'set' });
+    recordMetric({ key: metricKeys.MAX_COMPONENTS_SEEN, value: componentCount, mode: 'max' });
+    recordMetric({ key: metricKeys.NODES_IN_LAST_SNAPSHOT, value: Object.keys(graph.nodes).length, mode: 'set' });
 
     return graph;
   }
@@ -223,8 +228,11 @@ export class Bridge {
 
 
   // feature-based (shape-based) fingerprint: create an id considering the relations shape
+  // NOTE: the relation object only exposes `nextSibling`/`prevSibling`/`siblingMeta.relativeIdx`
+  // (see graph.js addRelation); `sibling`/`siblingIdx` do not exist on it and were always undefined,
+  // which made the fingerprint blind to sibling order/structure.
   async getFingerprint(graph) {
-    const edgeLabels = Object.values(graph.relations).map(n => `${n.parent}:${n.child}:${n.sibling}:${n.siblingIdx}`).sort();
+    const edgeLabels = Object.values(graph.relations).map(n => `${n.parent}:${n.child}:${n.nextSibling}:${n.siblingMeta?.relativeIdx}`).sort();
     const signature = JSON.stringify(edgeLabels);
     return await this.digestMessage(signature);
   }

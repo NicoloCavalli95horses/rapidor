@@ -7,6 +7,7 @@ export const config = Object.freeze({
   throttleTimeMs: 7000,                 // [optimization] Component state retrieval
   timeBetweenRequests: 800,             // [policy] Ms between each generated HTTP request
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
+  domHandlerEnabled: false,             // [policy] Enables the DOMhandler module (floating "Download logs"/"Print stats" buttons)
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
   tagsWhitelist: [0, 7, 11, 15],        // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long

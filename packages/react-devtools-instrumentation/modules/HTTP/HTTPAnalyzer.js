@@ -3,6 +3,7 @@
 //===================
 import { emit, events } from '../../utils/eventBus.js';
 import { config } from '../../config.js';
+import { recordMetric, metricKeys, markExecutionStart } from '../../utils/utils.js';
 
 
 
@@ -25,6 +26,9 @@ export class analyzeHTTP {
   parseHTTP({ type = events.FETCH_EVENT, request, response }) {
     const urlObj = this.getURLObject(request?.uri);
     if (!urlObj || !this.isAllowed(urlObj)) { return; }
+
+    recordMetric({ key: metricKeys.HTTP_EVENTS_TRACKED });
+    markExecutionStart(); // starts the "total execution time" stat on the first tracked HTTP event (no-op afterwards)
 
     // full path (hostname + port + protocol, more robust if we then will have to generate a cross-origin request)
     const fullPath = decodeURIComponent(urlObj.origin + urlObj.pathname);

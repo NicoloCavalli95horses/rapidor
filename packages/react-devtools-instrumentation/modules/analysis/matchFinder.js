@@ -2,7 +2,7 @@
 //===================
 // Import
 //===================
-import { log } from "../../utils/utils.js";
+import { log, recordMetric, metricKeys } from "../../utils/utils.js";
 
 
 //===================
@@ -25,9 +25,14 @@ export class MatchFinder {
     const { request, ignore } = httpEvent.value;
     if (ignore) { return data; } // self-generated HTTP events
 
+    recordMetric({ key: metricKeys.HTTP_EVENTS_ANALYZED });
+
     const properties = request.analysis.toEvaluate;
     const matches = await this.getPreIndexedMatches(properties);
     const couples = await this.processResults(matches);
+
+    recordMetric({ key: metricKeys.MATCHES_FOUND, value: matches.length });
+    recordMetric({ key: metricKeys.CANDIDATES_FOUND, value: couples.reduce((tot, c) => tot + c.candidates.length, 0) });
 
     data.success = couples?.length;
     data.results = couples;
@@ -84,7 +89,8 @@ export class MatchFinder {
       const instancesIds = componentIndex[ref.node.componentId];
       const candidates = [];
 
-      if (!instancesIds.length) { continue; }
+      // componentId may be missing from the index (eg. orphan/filtered component), skip defensively
+      if (!instancesIds?.length) { continue; }
 
       ref.node.instancesIds = instancesIds.filter(i => i != ref.node.id);
 

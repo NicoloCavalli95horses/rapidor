@@ -2,7 +2,7 @@
 // Import
 //===================
 import { eventBus, emit, events } from "../../utils/eventBus.js";
-import { log } from "../../utils/utils.js";
+import { log, recordMetric, metricKeys } from "../../utils/utils.js";
 import { IDBManager } from "./indexedDB.js";
 import { config } from "../../config.js";
 
@@ -94,14 +94,22 @@ export class StateManager {
 
   async handleUpdate(event, storeName) {
     const isStored = await this.db.isDataStored({ storeName, fingerprint: event.payload.fingerprint });
+    const isState = storeName === this.dbStores.STATE;
 
     if (isStored) {
       log({ module: 'state manager', msg: `Event ${event.type} already saved to DB, skipping` });
+      recordMetric({ key: isState ? metricKeys.STATES_SKIPPED_DUPLICATE : metricKeys.HTTP_EVENTS_SKIPPED_DUPLICATE });
       return false;
     }
 
     const data = this.prepareData(event.payload);
-    return await this.saveToDb({ data, type: event.type, storeName });
+    const result = await this.saveToDb({ data, type: event.type, storeName });
+
+    if (result) {
+      recordMetric({ key: isState ? metricKeys.STATES_SAVED : metricKeys.HTTP_EVENTS_SAVED });
+    }
+
+    return result;
   }
 
 
