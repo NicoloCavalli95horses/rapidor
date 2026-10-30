@@ -3,7 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { ResponseEvaluator } from "./responseEvaluator.js";
-import { log, sleep, getCurrentDOM, recordMetric, metricKeys } from "../../utils/utils.js";
+import { log, sleep, getCurrentDOM, recordMetric, metricKeys, runWithConcurrency } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
 
@@ -16,7 +16,6 @@ export class RequestGenerator {
     this.evaluator = new ResponseEvaluator();
     this.pendingRequests = new Map();
     this.httpAnalyzer = new analyzeHTTP();
-    this.alreadyDone = new Set();
 
     this.accessedParams = new Set(); // history of query parameters accessed by the AUT
 
@@ -59,72 +58,66 @@ export class RequestGenerator {
 
     const { httpEvent, results } = event;
     const { request: referenceReq, response: referenceRes, type } = httpEvent;
-    this.alreadyDone.clear();
+
+    // Local to this batch: handleEvent() is not awaited by its caller (eventBus subscription), so
+    // multiple httpEvents can be in flight at once. A Set on `this` would be shared/cleared across
+    // those overlapping calls and corrupt the dedup; keeping it local avoids that race entirely.
+    const alreadyDone = new Set();
+    const tasks = [];
 
     for (const { reference, candidates } of results) {
-      for (let i = 0; i < candidates.length; i++) {
-        const candidate = candidates[i];
-        const node = candidate.node;
-        const relations = candidate.relations;
+      for (const candidate of candidates) {
         const request = this.buildRequest({ reference: referenceReq, target: candidate.target });
         const id = this.httpAnalyzer.getFingerprint(request);
 
-        if (this.alreadyDone.has(id)) {
+        if (alreadyDone.has(id)) {
           log({ module: 'request generator', msg: `Request already done, skipping` });
           recordMetric({ key: metricKeys.REQUESTS_SKIPPED_DUPLICATE });
           continue;
         }
 
+        alreadyDone.add(id);
         recordMetric({ key: metricKeys.REQUESTS_GENERATED });
 
-        const payload = {
-          reference: {
-            node: reference.node,
-            relations: reference.relations,
-            analysis: { path: reference.path, target: reference.target },
-            request: referenceReq,
-            response: referenceRes,
-          },
-          candidate: {
-            node,
-            relations,
-            analysis: { path: candidate.path, target: candidate.target },
-            request: await this.serializedReqObj(request),
-            response: await this.navigationHandler(request, type),
-          }
-        }
-
-        emit({ type: events.EVALUATE, payload });
-        this.alreadyDone.add(id);
-        await sleep(config.timeBetweenRequests);
+        tasks.push(() => this.dispatchCandidate({ reference, candidate, request, referenceReq, referenceRes, type }));
       }
     }
-  }
 
-
-  // Implicit navigation queue
-  // We do not immediatly get the server response, we set up a queue in case we need to manually test new query parameters
-  // This function ensures that we do not have overlapping navigations
-  async navigationHandler(request, type) {
-    if (this.navigationQueue) {
-      await this.navigationQueue; // wait for previous navigation to finish
-    }
-
-    this.navigationQueue = (async () => {
-      try {
-        return await this.handleResponse(request, type);
-      } finally {
-        this.navigationQueue = null;
-      }
-    })();
-
-    return this.navigationQueue;
+    // Candidate requests are independent of each other: dispatch them with bounded concurrency
+    // instead of one at a time. Only the client-side SPA routing check (inside handleResponse)
+    // still runs exclusively, since it mutates the shared window.location/DOM.
+    await runWithConcurrency({ tasks, limit: config.maxConcurrentRequests });
   }
 
 
 
-  async handleResponse(request, type) {
-    const response = await this.executeRequest(request, type);
+  // Builds and emits one candidate request/response pair for evaluation
+  async dispatchCandidate({ reference, candidate, request, referenceReq, referenceRes, type }) {
+    const payload = {
+      reference: {
+        node: reference.node,
+        relations: reference.relations,
+        analysis: { path: reference.path, target: reference.target },
+        request: referenceReq,
+        response: referenceRes,
+      },
+      candidate: {
+        node: candidate.node,
+        relations: candidate.relations,
+        analysis: { path: candidate.path, target: candidate.target },
+        request: await this.serializedReqObj(request),
+        response: await this.handleResponse({ request, type }),
+      }
+    };
+
+    emit({ type: events.EVALUATE, payload });
+    await sleep(config.timeBetweenRequests);
+  }
+
+
+
+  async handleResponse({ request, type }) {
+    const response = await this.executeRequest({ request, type });
 
     // Best scenario: return the server-side response
     if ((response.status >= 200 && response.status < 300) || !config.testClientSideQueryParamsUsage) {
@@ -132,13 +125,34 @@ export class RequestGenerator {
     }
 
     // The server has rejected the request, but the new endpoint may still be valid
-    // In the context of a SPA, routing can be handled entirely on the client side
-    const result = await this.isUsingQueryParams(request);
+    // In the context of a SPA, routing can be handled entirely on the client side.
+    // This mutates window.location/the DOM, so only one check can run at a time (see enqueueNavigation).
+    const result = await this.enqueueNavigation(() => this.isUsingQueryParams(request));
 
-    return  {
+    return {
       isClientSide: true,
       ...result,
     }
+  }
+
+
+
+  // Ensures at most one DOM-mutating client-side routing check runs at a time,
+  // regardless of how many candidate requests are being dispatched concurrently
+  async enqueueNavigation(task) {
+    if (this.navigationQueue) {
+      await this.navigationQueue; // wait for the previous check to finish
+    }
+
+    this.navigationQueue = (async () => {
+      try {
+        return await task();
+      } finally {
+        this.navigationQueue = null;
+      }
+    })();
+
+    return this.navigationQueue;
   }
 
 
@@ -308,7 +322,7 @@ export class RequestGenerator {
 
 
   // execute the HTTP request, wait for the payload (req, res) from HTTPTRacker
-  async executeRequest(request, type) {
+  async executeRequest({ request, type }) {
     const requestId = request._requestId;
     const self = this;
 

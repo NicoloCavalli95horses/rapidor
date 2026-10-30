@@ -79,49 +79,49 @@ export class MatchFinder {
 
   // For each matching node, build sub-arrays with candidates
   // [[ {reference: {...}}, {candidates: [{...},{...}] ]]
+  // References/candidates only read IndexedDB-backed state snapshots (no live DOM access), so both
+  // levels are resolved concurrently instead of one await at a time, same as getPreIndexedMatches().
   async processResults(references) {
     if (!references.length) { return []; }
-    const couples = [];
 
-    for (const ref of references) {
+    const couples = await Promise.all(references.map(async (ref) => {
       // Get alternative instances of matching component
       const componentIndex = await this.stateManager.getComponentIndexByID(ref.graphIndex);
       const instancesIds = componentIndex[ref.node.componentId];
-      const candidates = [];
 
       // componentId may be missing from the index (eg. orphan/filtered component), skip defensively
-      if (!instancesIds?.length) { continue; }
+      if (!instancesIds?.length) { return null; }
 
       ref.node.instancesIds = instancesIds.filter(i => i != ref.node.id);
 
-      for (const id of instancesIds) {
-        if (id === ref.nodeId) { continue; }
+      const candidates = (await Promise.all(
+        instancesIds
+          .filter(id => id !== ref.nodeId)
+          .map(async (id) => {
+            const candidateNode = await this.stateManager.getNodeByID(ref.graphIndex, id);
+            const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, originalVal: ref.value });
+            if (!candidateMatch) { return null; }
 
-        const candidateNode = await this.stateManager.getNodeByID(ref.graphIndex, id);
-        const candidateMatch = this.getValueAtPath({ obj: candidateNode, path: ref.path, originalVal: ref.value });
-        if (!candidateMatch) { continue; }
+            candidateNode.graphIndex = ref.graphIndex;
+            candidateNode.instancesIds = instancesIds.filter(i => i != candidateNode.id);
 
-        candidateNode.graphIndex = ref.graphIndex;
-        candidateNode.instancesIds = instancesIds.filter(i => i != candidateNode.id);
+            const candidateTarget = structuredClone(ref.target);
+            candidateTarget.value = candidateMatch;
 
-        const candidateTarget = structuredClone(ref.target);
-        candidateTarget.value = candidateMatch;
+            return {
+              node: candidateNode,
+              graphIndex: ref.graphIndex,
+              path: ref.path,
+              target: candidateTarget,
+              relations: await this.stateManager.getRelationsByID(ref.graphIndex, candidateNode.id),
+            };
+          })
+      )).filter(Boolean);
 
-        candidates.push({
-          node: candidateNode,
-          graphIndex: ref.graphIndex,
-          path: ref.path,
-          target: candidateTarget,
-          relations: await this.stateManager.getRelationsByID(ref.graphIndex, candidateNode.id),
-        });
-      }
+      return candidates.length ? { reference: ref, candidates } : null;
+    }));
 
-      if (candidates.length) {
-        couples.push({ reference: ref, candidates })
-      }
-    }
-
-    return couples;
+    return couples.filter(Boolean);
   }
 
 

@@ -6,6 +6,7 @@ export const config = Object.freeze({
   debounceTimeMs: 1500,                 // [optimization] Component state retrieval
   throttleTimeMs: 7000,                 // [optimization] Component state retrieval
   timeBetweenRequests: 800,             // [policy] Ms between each generated HTTP request
+  maxConcurrentRequests: 3,             // [optimization] Max candidate requests dispatched in parallel (the client-side SPA routing check, when needed, still runs one at a time regardless)
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   domHandlerEnabled: false,             // [policy] Enables the DOMhandler module (floating "Download logs"/"Print stats" buttons)
   maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots

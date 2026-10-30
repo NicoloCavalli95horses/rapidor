@@ -191,6 +191,27 @@ export function debounceWithMaxTime(fn, { debounceT = 1000, maxT = 10000 } = {})
 }
 
 
+// Runs async tasks (zero-arg functions returning a Promise) with at most `limit` running concurrently.
+// Unlike a fixed Promise.all, this caps how many requests/operations are in flight at once.
+export async function runWithConcurrency({ tasks, limit = 1 } = {}) {
+  const results = new Array(tasks.length);
+  let next = 0;
+
+  async function worker() {
+    while (next < tasks.length) {
+      const i = next++;
+      results[i] = await tasks[i]();
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, worker);
+  await Promise.all(workers);
+
+  return results;
+}
+
+
+
 export function isSerializableValue(value) {
   if (value === null) {
     return true;
