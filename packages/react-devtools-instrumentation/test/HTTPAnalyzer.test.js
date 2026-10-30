@@ -84,8 +84,112 @@ describe("analyzeHTTP class", function () {
     });
   });
 
-  
-  it("should return the correct segment of the URL", function () {
-    // HTTPAnalyzer.getPropertyAt() //[TODO]
-  })
+
+  describe("should return the correct segment of the URL (getPropertyAt)", function () {
+    it("extracts the segment at the given index, without an extension", function () {
+      const urlObj = new URL("https://example.com/api/item/id1");
+      const segments = ['api', 'item', 'id1'];
+
+      const prop = HTTPAnalyzer.getPropertyAt({ urlObj, segments, idx: 2, hasTrailingSlash: false });
+      assert.equal(prop.value, 'id1');
+      assert.equal(prop.index, 1);
+      assert.deepEqual(prop.parts, ['https://example.com/api/item/', '']);
+
+      // the value can be re-inserted at `index` to rebuild the original path
+      const parts = [...prop.parts];
+      parts.splice(prop.index, 0, prop.value);
+      assert.equal(parts.join(''), 'https://example.com/api/item/id1');
+    });
+
+
+    it("splits the file extension off the fuzzable value and keeps it in the suffix", function () {
+      const urlObj = new URL("https://example.com/files/photo.jpg");
+      const segments = ['files', 'photo.jpg'];
+
+      const prop = HTTPAnalyzer.getPropertyAt({ urlObj, segments, idx: 1, hasTrailingSlash: false });
+      assert.equal(prop.value, 'photo');
+      assert.deepEqual(prop.parts, ['https://example.com/files/', '.jpg']);
+
+      const parts = [...prop.parts];
+      parts.splice(prop.index, 0, prop.value);
+      assert.equal(parts.join(''), 'https://example.com/files/photo.jpg');
+    });
+
+
+    it("preserves a trailing slash in the suffix", function () {
+      const urlObj = new URL("https://example.com/api/item/id1/");
+      const segments = ['api', 'item', 'id1'];
+
+      const prop = HTTPAnalyzer.getPropertyAt({ urlObj, segments, idx: 2, hasTrailingSlash: true });
+      assert.equal(prop.parts[1], '/');
+    });
+
+
+    it("returns an empty/invalid property when the index is out of range", function () {
+      const urlObj = new URL("https://example.com/api");
+      const segments = ['api'];
+
+      const prop = HTTPAnalyzer.getPropertyAt({ urlObj, segments, idx: 5, hasTrailingSlash: false });
+      assert.deepEqual(prop, { parts: [], value: undefined, index: -1 });
+    });
+  });
+
+
+  describe("getParamsAnalysis should always skip boolean-like values", function () {
+    it("excludes 'true' and 'false' even without valuesToExclude", function () {
+      const urlObj = new URL("https://example.com/?flag=true&off=false&id=42");
+      const fullPath = decodeURIComponent(urlObj.origin + urlObj.pathname);
+      const paramsObj = HTTPAnalyzer.searchParamsToObj(urlObj.searchParams);
+
+      const result = HTTPAnalyzer.getParamsAnalysis({ params: paramsObj, fullPath });
+      assert.equal(result.length, 1);
+      assert.equal(result[0].value, '42');
+      assert.deepEqual(result[0].parts, ['https://example.com/?id=']);
+      assert.equal(result[0].index, 1);
+    });
+
+
+    it("returns an empty array when there are no params", function () {
+      const result = HTTPAnalyzer.getParamsAnalysis({ params: {}, fullPath: 'https://example.com/' });
+      assert.deepEqual(result, []);
+    });
+  });
+
+
+  describe("getFingerprint", function () {
+    it("fingerprints a tracked request (uri + verb)", function () {
+      assert.equal(HTTPAnalyzer.getFingerprint({ uri: '/api/x', verb: 'GET' }), 'get:/api/x');
+    });
+
+
+    it("fingerprints a generated Request (url + method)", function () {
+      assert.equal(HTTPAnalyzer.getFingerprint({ url: 'https://e.com/y', method: 'POST' }), 'post:https://e.com/y');
+    });
+
+
+    it("returns undefined for a missing request", function () {
+      assert.equal(HTTPAnalyzer.getFingerprint(undefined), undefined);
+    });
+  });
+
+
+  describe("getBaseDomain", function () {
+    it("keeps the registrable domain for a subdomain", function () {
+      assert.equal(HTTPAnalyzer.getBaseDomain('a.b.example.com'), 'example.com');
+    });
+
+
+    it("returns the domain unchanged when there is no subdomain", function () {
+      assert.equal(HTTPAnalyzer.getBaseDomain('example.com'), 'example.com');
+    });
+  });
+
+
+  describe("searchParamsToObj should keep the last value of a repeated key", function () {
+    it("collapses duplicate keys", function () {
+      const urlObj = new URL("https://example.com/?id=1&id=2");
+      const paramsObj = HTTPAnalyzer.searchParamsToObj(urlObj.searchParams);
+      assert.equal(paramsObj.id, '2');
+    });
+  });
 });

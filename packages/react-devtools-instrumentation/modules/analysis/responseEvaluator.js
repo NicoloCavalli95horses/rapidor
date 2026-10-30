@@ -2,7 +2,7 @@
 // Import
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
-import { filter } from 'rxjs/operators';
+import { filter } from 'rxjs/operators.js';
 import { log, isPlainObject, recordMetric, metricKeys } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { sendToBridge } from "../../utils/clientToBridge.js";
