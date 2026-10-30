@@ -6,10 +6,8 @@
 //===================
 // Import
 //===================
-import { log } from "../../../react-devtools-instrumentation/utils/utils.js";
-import { classifyKeys, createOffscreenDocument } from "./utils.js";
-
-
+import {log} from '../../../react-devtools-instrumentation/utils/utils.js';
+import {classifyKeys, createOffscreenDocument} from './utils.js';
 
 //===================
 // Class
@@ -23,38 +21,55 @@ export class ServiceWorker {
     this.onTabRemoved = this.onTabRemoved.bind(this);
   }
 
-
   async init() {
-    if (this.initialized) { return; }
+    if (this.initialized) {
+      return;
+    }
 
     chrome.runtime.onMessage.addListener(this.onMessage);
     chrome.tabs.onRemoved.addListener(this.onTabRemoved);
     await createOffscreenDocument();
-    const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "INITIALIZE_MODEL" });
-    
+    const response = await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      type: 'INITIALIZE_MODEL',
+    });
+
     if (response.success) {
       this.initialized = true;
-      log({ module: "service worker", msg: "Initialized" });
+      log({module: 'service worker', msg: 'Initialized'});
     }
   }
-
 
   // This handle messages received from backgroundToMainBridge.js
   async onMessage(message, sender, sendResponse) {
     // Register tabs
-    if (message.action === "REGISTER_TAB" && sender.tab?.id != undefined) {
+    if (message.action === 'REGISTER_TAB' && sender.tab?.id != undefined) {
       const tabId = sender.tab.id;
       this.tabs.add(tabId);
 
-      log({ module: "service worker", msg: `Registered new tab: ${[...this.tabs]}` });
-      sendResponse({ success: true, tabId });
+      log({
+        module: 'service worker',
+        msg: `Registered new tab: ${[...this.tabs]}`,
+      });
+      sendResponse({success: true, tabId});
       return;
     }
 
+    // Crawler aggregation: a single crawler call (on one tab) asks for data from *every* open tab.
+    // Collect each registered tab's local snapshot and merge into one result, so the crawler reports
+    // once across all tabs instead of polling each tab itself.
+    if (message.action === 'GET_ALL_TABS_DATA') {
+      this.collectAllTabsData()
+        .then(data => sendResponse(data))
+        .catch(error => sendResponse({error: error.message}));
+
+      return true; // keep the sendResponse channel open for the async reply
+    }
+
     // Classify keys
-    if (message.action === "CLASSIFY_KEYS") {
+    if (message.action === 'CLASSIFY_KEYS') {
       if (!Array.isArray(message.payload)) {
-        sendResponse({ error: "payload must be an array" });
+        sendResponse({error: 'payload must be an array'});
         return;
       }
 
@@ -63,7 +78,7 @@ export class ServiceWorker {
 
       try {
         // 1. Get classification from cache
-        const cacheKeys = keys.map((key) => `classification:${key}`);
+        const cacheKeys = keys.map(key => `classification:${key}`);
         const cached = await chrome.storage.local.get(cacheKeys);
         const keysToClassify = [];
 
@@ -79,14 +94,21 @@ export class ServiceWorker {
 
         // 2. Classify only new keys
         if (keysToClassify.length > 0) {
-          const response = await chrome.runtime.sendMessage({ target: "offscreen", type: "CLASSIFY_KEYS", payload: keysToClassify });
-          
+          const response = await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            type: 'CLASSIFY_KEYS',
+            payload: keysToClassify,
+          });
+
           if (response?.error) {
             throw new Error(response.error);
           }
 
-          if (!Array.isArray(response?.results) || response.results.length !== keysToClassify.length) {
-            throw new Error("Invalid classification response");
+          if (
+            !Array.isArray(response?.results) ||
+            response.results.length !== keysToClassify.length
+          ) {
+            throw new Error('Invalid classification response');
           }
 
           // 3. Save to persistent cache
@@ -102,47 +124,82 @@ export class ServiceWorker {
           await chrome.storage.local.set(cacheEntries);
         }
 
-        sendResponse({ results });
+        sendResponse({results});
       } catch (error) {
-        console.error("[background] Classification error:", error);
-        sendResponse({ error: error.message });
+        console.error('[background] Classification error:', error);
+        sendResponse({error: error.message});
       }
 
       return true;
     }
   }
 
-
-
   // this is called automatically by Chrome whenever a tab status is changed
   onTabRemoved(tabId) {
     this.tabs.delete(tabId);
-    log({ module: "service worker", msg: `Removed tab: ${tabId}` });
+    log({module: 'service worker', msg: `Removed tab: ${tabId}`});
   }
 
-
-
-  async sendMessage(tabId, action, target = "content-script", payload = {}) {
-    return chrome.tabs.sendMessage(tabId, { target, action, payload });
+  async sendMessage(tabId, action, target = 'content-script', payload = {}) {
+    return chrome.tabs.sendMessage(tabId, {target, action, payload});
   }
-
-
 
   async broadcast(action, payload = {}) {
     const tabIds = [...this.tabs];
-    const results = await Promise.allSettled(tabIds.map(tabId => this.sendMessage(tabId, action, payload)));
+    const results = await Promise.allSettled(
+      tabIds.map(tabId => this.sendMessage(tabId, action, payload)),
+    );
 
     results.forEach((result, index) => {
-      if (result.status === "rejected") {
-        log({ module: "service worker", msg: `Failed to send to tab ${tabIds[index]}: ${result.reason}` });
+      if (result.status === 'rejected') {
+        log({
+          module: 'service worker',
+          msg: `Failed to send to tab ${tabIds[index]}: ${result.reason}`,
+        });
         this.tabs.delete(tabIds[index]);
       }
     });
 
-    return results.map((result, index) => ({ tabId: tabIds[index], ...result }));
+    return results.map((result, index) => ({tabId: tabIds[index], ...result}));
   }
 
+  // Asks every registered tab for its local RAPIDOR snapshot (getData(), via the content-script
+  // bridge) and merges them. Logs and stats come back as arrays with one entry per tab, each tagged
+  // with its tabId so the crawler can tell them apart, eg.
+  //   { logs: [{ tabId, logs: [...] }, ...], stats: [{ tabId, stats: {...} }, ...] }
+  // A tab that went away or never answers is dropped (and de-registered) rather than failing the
+  // whole collection.
+  async collectAllTabsData() {
+    const tabIds = [...this.tabs];
+    const settled = await Promise.allSettled(
+      tabIds.map(tabId =>
+        this.sendMessage(tabId, 'GET_LOCAL_DATA', 'content-script'),
+      ),
+    );
 
+    const logs = [];
+    const stats = [];
+
+    settled.forEach((outcome, index) => {
+      const tabId = tabIds[index];
+      const data =
+        outcome.status === 'fulfilled' ? outcome.value?.result : undefined;
+
+      if (!data) {
+        log({
+          module: 'service worker',
+          msg: `No data from tab ${tabId}, dropping it`,
+        });
+        this.tabs.delete(tabId);
+        return;
+      }
+
+      logs.push({tabId, logs: data.logs});
+      stats.push({tabId, stats: data.stats});
+    });
+
+    return {logs, stats};
+  }
 
   destroy() {
     chrome.runtime.onMessage.removeListener(this.onMessage);

@@ -1,8 +1,8 @@
 //===================
 // Import
 //===================
-import { config } from "../config.js";
-
+import {config} from '../config.js';
+import {sendToBridge} from './clientToBridge.js';
 
 //===================
 // Const
@@ -48,16 +48,12 @@ export const metricKeys = Object.freeze({
   VULNERABILITIES_REPORTED: 'Potential IDOR reported',
 });
 
-
-
 //===================
 // Functions
 //===================
 export function deepObjCopy(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
-
-
 
 export function copyObjKeys(obj = {}, keys = []) {
   return keys.reduce((acc, key) => {
@@ -68,26 +64,26 @@ export function copyObjKeys(obj = {}, keys = []) {
   }, {});
 }
 
-
-
 // type: info | error | warning
-export function log({ module, type = 'info', msg, verboseOnly = false }) {
+export function log({module, type = 'info', msg, verboseOnly = false}) {
   const color = {
     error: 'color: red',
     info: 'color: white',
     warning: 'color: orange',
-  }
+  };
 
   const canLog = config.verbose || !verboseOnly;
-  if (!canLog) { return; }
+  if (!canLog) {
+    return;
+  }
 
   const descr = `%c[${config.toolName}] [${module.toUpperCase()}]`;
 
   console.log(descr, color[type], msg);
-  logs.push(JSON.stringify({ type, module, msg, timestamp: new Date().toISOString() }));
+  logs.push(
+    JSON.stringify({type, module, msg, timestamp: new Date().toISOString()})
+  );
 }
-
-
 
 export function isCloneable(obj) {
   try {
@@ -98,13 +94,9 @@ export function isCloneable(obj) {
   }
 }
 
-
-
 export function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-
 
 export function payloadSize(obj) {
   const json = JSON.stringify(obj);
@@ -113,17 +105,13 @@ export function payloadSize(obj) {
   return {
     bytes,
     kb: (bytes / 1024).toFixed(2),
-    mb: (bytes / (1024 * 1024)).toFixed(2)
+    mb: (bytes / (1024 * 1024)).toFixed(2),
   };
 }
-
-
 
 export async function getEstimatedIndexedDBstorage() {
   await navigator.storage.estimate();
 }
-
-
 
 export function hasOwnKeys(value) {
   return (
@@ -134,12 +122,10 @@ export function hasOwnKeys(value) {
   );
 }
 
-
-
 // Returns a wrapper function that check when fn is executed
 // > Debounce (idle execution): executed after the idle debounceT
 // > Throttling: force execution after throttleT under if under continuous load
-export function debounceWithMaxTime(fn, { debounceT = 1000, maxT = 10000 } = {}) {
+export function debounceWithMaxTime(fn, {debounceT = 1000, maxT = 10000} = {}) {
   let debounceTimer = null;
   let maxTimer = null;
   let lastArgs = null;
@@ -148,12 +134,16 @@ export function debounceWithMaxTime(fn, { debounceT = 1000, maxT = 10000 } = {})
   let running = false;
 
   function clear() {
-    if (debounceTimer) { clearTimeout(debounceTimer); }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
     debounceTimer = null;
   }
 
   function clearMax() {
-    if (maxTimer) { clearTimeout(maxTimer); }
+    if (maxTimer) {
+      clearTimeout(maxTimer);
+    }
     maxTimer = null;
     startedAt = null;
   }
@@ -190,10 +180,9 @@ export function debounceWithMaxTime(fn, { debounceT = 1000, maxT = 10000 } = {})
   };
 }
 
-
 // Runs async tasks (zero-arg functions returning a Promise) with at most `limit` running concurrently.
 // Unlike a fixed Promise.all, this caps how many requests/operations are in flight at once.
-export async function runWithConcurrency({ tasks, limit = 1 } = {}) {
+export async function runWithConcurrency({tasks, limit = 1} = {}) {
   const results = new Array(tasks.length);
   let next = 0;
 
@@ -204,13 +193,11 @@ export async function runWithConcurrency({ tasks, limit = 1 } = {}) {
     }
   }
 
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, worker);
+  const workers = Array.from({length: Math.min(limit, tasks.length)}, worker);
   await Promise.all(workers);
 
   return results;
 }
-
-
 
 export function isSerializableValue(value) {
   if (value === null) {
@@ -219,11 +206,11 @@ export function isSerializableValue(value) {
 
   const t = typeof value;
 
-  if (t === "string" || t === "boolean") {
+  if (t === 'string' || t === 'boolean') {
     return true;
   }
 
-  if (t === "number") {
+  if (t === 'number') {
     return Number.isFinite(value);
   }
 
@@ -231,7 +218,7 @@ export function isSerializableValue(value) {
     return true;
   }
 
-  if (t === "object") {
+  if (t === 'object') {
     if (isPlainObject(value)) {
       return true;
     }
@@ -241,15 +228,13 @@ export function isSerializableValue(value) {
   return false;
 }
 
-
-
 export function isPlainObject(value) {
-  if (value === null || typeof value !== "object") { return false; }
+  if (value === null || typeof value !== 'object') {
+    return false;
+  }
   const proto = Object.getPrototypeOf(value);
-  return (proto === Object.prototype || proto === null);
+  return proto === Object.prototype || proto === null;
 }
-
-
 
 export function getCurrentDOM() {
   return new XMLSerializer().serializeToString(document);
@@ -258,20 +243,20 @@ export function getCurrentDOM() {
 export function printConfig() {
   const table = Object.entries(config).map(([key, value]) => ({
     key,
-    value: Array.isArray(value) ? value.join(', ')
-      : typeof value === 'object' ? JSON.stringify(value)
-        : value
+    value: Array.isArray(value)
+      ? value.join(', ')
+      : typeof value === 'object'
+        ? JSON.stringify(value)
+        : value,
   }));
 
   console.table(table);
 }
 
-
-
 // Centralizes every RAPIDOR self-metric (how many states/components/HTTP events/etc. were found),
 // which was previously scattered across modules as local counters (eg. responseEvaluator.totIdor).
 // mode: sum (default, cumulative counter) | max (keeps the highest value seen) | set (last value wins, for point-in-time gauges)
-export function recordMetric({ key, value = 1, mode = 'sum' }) {
+export function recordMetric({key, value = 1, mode = 'sum'}) {
   const current = metrics[key] ?? 0;
 
   switch (mode) {
@@ -286,20 +271,21 @@ export function recordMetric({ key, value = 1, mode = 'sum' }) {
   }
 }
 
-
-
 // Marks the start of the execution window used by printMetrics() for the "Total execution time" stat.
 // Called on every tracked HTTP event, but only the first call has an effect: later calls are no-ops.
 export function markExecutionStart() {
-  if (executionStartedAt !== null) { return; }
+  if (executionStartedAt !== null) {
+    return;
+  }
 
   executionStartedAt = Date.now();
   executionStartDate = new Date();
   // window is not available outside a browser context (eg. during unit tests)
-  initialURL = (typeof window !== 'undefined' && window.location) ? window.location.href : undefined;
+  initialURL =
+    typeof window !== 'undefined' && window.location
+      ? window.location.href
+      : undefined;
 }
-
-
 
 // Builds a plain-data snapshot of every RAPIDOR self-metric plus the session metadata
 // (date, initial URL, total execution time). Shared by printMetrics() and getData(), so the
@@ -314,36 +300,36 @@ export function getStats() {
     ...counters,
     date: executionStartDate ? executionStartDate.toISOString() : null,
     initialURL: initialURL ?? null,
-    executionTimeMs: executionStartedAt !== null ? (Date.now() - executionStartedAt) : 0,
+    executionTimeMs:
+      executionStartedAt !== null ? Date.now() - executionStartedAt : 0,
   };
 }
-
-
 
 export function printMetrics() {
   const stats = getStats();
 
-  const table = Object.values(metricKeys).map((key) => ({
+  const table = Object.values(metricKeys).map(key => ({
     metric: key,
-    value: stats[key]
+    value: stats[key],
   }));
 
   // Session metadata, appended after the canonical self-metrics
   table.push(
-    { metric: 'Date', value: stats.date ? new Date(stats.date).toLocaleDateString() : 'n/a' },
-    { metric: 'Initial URL', value: stats.initialURL ?? 'n/a' },
-    { metric: 'Total execution time (ms)', value: stats.executionTimeMs }
+    {
+      metric: 'Date',
+      value: stats.date ? new Date(stats.date).toLocaleDateString() : 'n/a',
+    },
+    {metric: 'Initial URL', value: stats.initialURL ?? 'n/a'},
+    {metric: 'Total execution time (ms)', value: stats.executionTimeMs}
   );
 
   console.table(table);
 }
 
-
-
 // Returns every stored log entry, parsed back into an object (log() stores them as JSON strings).
 // Falls back to the raw string for any entry that, for whatever reason, isn't valid JSON.
 export function getLogs() {
-  return logs.map((entry) => {
+  return logs.map(entry => {
     try {
       return JSON.parse(entry);
     } catch {
@@ -351,8 +337,6 @@ export function getLogs() {
     }
   });
 }
-
-
 
 // Full data export for an external driver (eg. a crawler controlling the browser via
 // Puppeteer/Playwright/CDP) to pull "from below" instead of going through the DOM overlay.
@@ -363,12 +347,27 @@ export function getData() {
   };
 }
 
+// Crawler-facing entry point (exposed as window.__RAPIDOR__getData). A crawler drives several tabs
+// in parallel but should pull RAPIDOR's results just once: this asks the service worker — which
+// already tracks every registered tab — to collect each tab's local getData() and merge them.
+// Logs and stats come back as arrays with one entry per tab, eg.
+//   { logs: [{tab1}, {tab2}, ...], stats: [{tab1}, {tab2}, ...] }
+export async function getAllTabsData({timeoutMs = 15000} = {}) {
+  return sendToBridge({action: 'GET_ALL_TABS_DATA', timeoutMs});
+}
 
-
-// Exposes getData() on the page's global scope, so a crawler can call it via page.evaluate(),
+// Exposes the crawler API on the page's global scope, so a crawler can call it via page.evaluate(),
 // eg. `page.evaluate(() => window.__RAPIDOR__getData())`. Call once, from the extension's entry
 // point: this is not a module-load side effect, so it stays easy to unit test with a fake target.
-export function exposeGlobalAPI({ target = (typeof window !== 'undefined' ? window : undefined) } = {}) {
-  if (!target) { return; } // no global scope available (eg. running under Node in tests)
-  target.__RAPIDOR__getData = getData;
+export function exposeGlobalAPI({
+  target = typeof window !== 'undefined' ? window : undefined,
+} = {}) {
+  if (!target) {
+    return;
+  } // no global scope available (eg. running under Node in tests)
+  // One call aggregates data from every open tab (round-trip through the service worker).
+  target.__RAPIDOR__getData = getAllTabsData;
+  // This tab's local snapshot only. The service worker invokes it (via the bridge) in each tab to
+  // build the aggregate above; exposed separately so collecting one tab never re-enters aggregation.
+  target.__RAPIDOR__getLocalData = getData;
 }
