@@ -251,7 +251,7 @@ describe('utils', function () {
       delete global.window;
     });
 
-    it('returns logs and stats aggregated from 3 open tabs, one array entry per tab', async function () {
+    it('returns logs and stats from 3 open tabs, one {tabId, logs, stats} entry per tab', async function () {
       // One getData() snapshot per open tab, as the service worker collects them.
       const perTab = [
         {
@@ -273,28 +273,17 @@ describe('utils', function () {
 
       attachFakeBridge({
         win: global.window,
-        // Stand in for the service worker: it merges each tab's snapshot into per-tab, tabId-tagged arrays.
+        // Stand in for the service worker: it returns one tabId-tagged {logs, stats} entry per tab.
         classify: msg => {
           assert.equal(msg.action, 'GET_ALL_TABS_DATA');
-          return {
-            logs: perTab.map(tab => ({tabId: tab.tabId, logs: tab.logs})),
-            stats: perTab.map(tab => ({tabId: tab.tabId, stats: tab.stats})),
-          };
+          return perTab;
         },
       });
 
       const data = await getAllTabsData();
 
-      assert.equal(data.logs.length, 3);
-      assert.equal(data.stats.length, 3);
-      assert.deepEqual(
-        data.logs,
-        perTab.map(tab => ({tabId: tab.tabId, logs: tab.logs}))
-      );
-      assert.deepEqual(
-        data.stats,
-        perTab.map(tab => ({tabId: tab.tabId, stats: tab.stats}))
-      );
+      assert.equal(data.length, 3);
+      assert.deepEqual(data, perTab);
     });
   });
 });

@@ -350,8 +350,8 @@ export function getData() {
 // Crawler-facing entry point (exposed as window.__RAPIDOR__getData). A crawler drives several tabs
 // in parallel but should pull RAPIDOR's results just once: this asks the service worker — which
 // already tracks every registered tab — to collect each tab's local getData() and merge them.
-// Logs and stats come back as arrays with one entry per tab, eg.
-//   { logs: [{tab1}, {tab2}, ...], stats: [{tab1}, {tab2}, ...] }
+// Returns an array with one entry per tab, eg.
+//   [{ tabId, logs: [...], stats: {...} }, ...]
 export async function getAllTabsData({timeoutMs = 15000} = {}) {
   return sendToBridge({action: 'GET_ALL_TABS_DATA', timeoutMs});
 }
