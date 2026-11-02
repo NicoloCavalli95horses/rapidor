@@ -3,7 +3,7 @@ export const config = Object.freeze({
   toolName: 'RAPIDOR',
   sessionID: crypto.randomUUID(),       // [meta] ID of stored data
   verbose: false,                       // [policy] logs extra information
-  debounceTimeMs: 1500,                 // [optimization] Component state retrieval
+  debounceTimeMs: 500,                  // [optimization] Idle time before capturing a state snapshot. Kept in sync with the crawler's 500ms stability window: a headless browser settles faster than the 1500ms chosen for headful browsing, where it absorbed user scrolling/typing
   throttleTimeMs: 7000,                 // [optimization] Component state retrieval
   timeBetweenRequests: 800,             // [policy] Ms between each generated HTTP request
   maxConcurrentRequests: 3,             // [optimization] Max candidate requests dispatched in parallel (the client-side SPA routing check, when needed, still runs one at a time regardless)

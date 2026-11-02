@@ -2,6 +2,7 @@
 // Import
 //===================
 import {PreIndexing} from '../modules/state/preindexing.js';
+import {eventBus, events} from '../utils/eventBus.js';
 import assert from 'node:assert';
 
 //===================
@@ -159,12 +160,52 @@ describe('PreIndexing', function () {
       const pre = new PreIndexing();
       // key is undefined (no React key) and no prop name matches the configured identifier list
       pre.prepareData({
-        graphIndex: 0,
         nodeId: 'n1',
         key: undefined,
         props: {style: 'red', className: 'box'},
       });
       assert.equal(pre.data.length, 0);
+    });
+
+    it('does not stamp graphIndex at prepareData time (the DB key is not known yet)', function () {
+      const pre = new PreIndexing();
+      pre.prepareData({nodeId: 'n1', key: 'userId', props: {id: 'abc123'}});
+      assert.ok(pre.data.length > 0);
+      assert.ok(pre.data.every(row => !('graphIndex' in row)));
+    });
+  });
+
+  describe('emit', function () {
+    it('stamps every buffered row with the snapshot graphIndex, then clears the buffer', function () {
+      const pre = new PreIndexing();
+      pre.prepareData({nodeId: 'n1', key: 'userId', props: {id: 'abc123'}});
+
+      let payload;
+      const sub = eventBus.subscribe(e => {
+        if (e.type === events.PREINDEXING_UPDATE) {
+          payload = e.payload;
+        }
+      });
+      pre.emit({graphIndex: 7});
+      sub.unsubscribe();
+
+      assert.ok(payload.length > 0);
+      assert.ok(payload.every(row => row.graphIndex === 7));
+      assert.equal(pre.data.length, 0); // buffer flushed
+    });
+
+    it('emits nothing when the buffer is empty', function () {
+      const pre = new PreIndexing();
+      let emitted = false;
+      const sub = eventBus.subscribe(e => {
+        if (e.type === events.PREINDEXING_UPDATE) {
+          emitted = true;
+        }
+      });
+      pre.emit({graphIndex: 1});
+      sub.unsubscribe();
+
+      assert.equal(emitted, false);
     });
   });
 });

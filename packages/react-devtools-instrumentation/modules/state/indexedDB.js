@@ -10,7 +10,10 @@ import { log } from "../../utils/utils.js";
 // Class
 //===================
 export class IDBManager {
-  constructor(name = `${config.toolName}_DB`, version = 1) {
+  // version 2: the STATE store became autoIncrement so snapshots from several tabs no longer
+  // collide on the same key (see onupgradeneeded). A persistent profile still holding a v1 DB is
+  // migrated on first open.
+  constructor(name = `${config.toolName}_DB`, version = 2) {
     this.name = name;
     this.version = version;
     this.db = null;
@@ -31,12 +34,25 @@ export class IDBManager {
   // Init
   // ====================================
 
+  // The DB is NOT wiped on load: it is shared across every tab of the same origin and must survive
+  // page reloads, so it can act as the single source of truth (duplicate states, saved across tabs,
+  // are recognised by their fingerprint instead of being captured again). A crawler that drives a
+  // fresh run clears it once up front via window.__RAPIDOR__reset() (StateManager.reset()).
   async init() {
-    await this.deleteDB(this.name);
-
-    log({ module: 'indexed db', msg: 'Deleted existing data' });
-
     this.db = await this.connectToDb();
+
+    log({ module: 'indexed db', msg: 'Connected' });
+  }
+
+
+  // Clears every store without tearing down the connection, so other tabs' open connections are not
+  // blocked. Preferred over deleteDatabase() for a cross-tab run.
+  async clearAll() {
+    for (const storeName of Object.values(IDBManager.STORES)) {
+      await this.clearStore(this.name, storeName);
+    }
+
+    log({ module: 'indexed db', msg: 'Cleared all stores' });
   }
 
 
@@ -55,11 +71,17 @@ export class IDBManager {
         // runs initially when the db is created or a new db version is declared
         const db = event.target.result;
 
-        if (!db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
-          const state = db.createObjectStore(IDBManager.STORES.STATE, { keyPath: "graphIndex" });
-          state.createIndex("url", "url", { unique: false });
-          state.createIndex("fingerprint", "fingerprint", { unique: true });
+        // STATE uses autoIncrement so each saved snapshot gets a key unique across every tab and
+        // reload. With the old per-tab "graphIndex" counter (keyPath only) two tabs both started at
+        // 0 and overwrote each other's snapshots. autoIncrement still writes the assigned key into
+        // the record's `graphIndex` field, so preindexing rows and matchFinder keep linking by it.
+        // Recreated on upgrade from v1, where the store had no autoIncrement.
+        if (db.objectStoreNames.contains(IDBManager.STORES.STATE)) {
+          db.deleteObjectStore(IDBManager.STORES.STATE);
         }
+        const state = db.createObjectStore(IDBManager.STORES.STATE, { keyPath: "graphIndex", autoIncrement: true });
+        state.createIndex("url", "url", { unique: false });
+        state.createIndex("fingerprint", "fingerprint", { unique: true });
 
         if (!db.objectStoreNames.contains(IDBManager.STORES.HTTP_EVENT)) {
           const httpEvent = db.createObjectStore(IDBManager.STORES.HTTP_EVENT, { autoIncrement: true }); // primary key (id) handled by indexedDB
@@ -84,7 +106,11 @@ export class IDBManager {
 
       request.onsuccess = (event) => {
         // runs after the 'onpugradeneeded' event, in case of success
-        resolve(event.target.result);
+        const db = event.target.result;
+        // Another tab opening a newer version (or deleting the DB) would otherwise be blocked by
+        // this still-open connection: close it so the upgrade/delete can proceed everywhere.
+        db.onversionchange = () => db.close();
+        resolve(db);
       };
 
       request.onblocked = () => {
@@ -199,7 +225,9 @@ export class IDBManager {
       const req = indexedDB.deleteDatabase(name);
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
-      req.onblocked = () => console.error("Error during DB deletion");
+      // Another tab's open connection is blocking the delete. onversionchange (see connectToDb)
+      // asks every connection to close, so this should clear quickly; reject rather than hang.
+      req.onblocked = () => reject(new Error("Database deletion blocked by another open connection"));
     });
   }
 

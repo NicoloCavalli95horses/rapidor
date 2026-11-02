@@ -39,6 +39,13 @@ export async function instrumentationMain() {
   const stateManager = new StateManager();
   await stateManager.init();
 
+  // Lets a crawler wipe the shared IndexedDB once at the start of a run (the DB is no longer reset
+  // on page load, so it survives reloads and is shared across tabs). Exposed here, after the DB is
+  // ready, rather than in exposeGlobalAPI() which runs before initialisation.
+  if (typeof window !== 'undefined') {
+    window.__RAPIDOR__reset = () => stateManager.reset();
+  }
+
   // Connect to framework-specific APIs and listen to component tree changes
   const bridge = new Bridge(stateManager);
   bridge.init();

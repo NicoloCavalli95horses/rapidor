@@ -21,7 +21,6 @@ export class Bridge {
     this.componentTypes = new WeakMap(); // componentType -> componentId
     this.componentId = 0;
 
-    this.graphIndex = 0; // order of snapshots in DB
     this._lastState = undefined; // save last state locally to be read from other scripts
   }
 
@@ -30,8 +29,9 @@ export class Bridge {
   init() {
     eventBus.subscribe(e => {
       if (e.type === events.DB_SUCCESS && e.payload.type === events.STATE_UPDATE) {
-        this.preindexing.emit(); // if graph was saved successfully, save the preindexed data
-        this.graphIndex++; // update graph index only in case of success
+        // The STATE store (autoIncrement) assigned this snapshot's key; stamp the buffered
+        // preindexing rows with it so they link to the snapshot actually saved, then persist them.
+        this.preindexing.emit({ graphIndex: e.payload.response?.key });
         this._lastState = e.payload.response?.data;
       }
     });
@@ -94,7 +94,8 @@ export class Bridge {
 
     graph.componentIndex = this.buildComponentIndex(); // index of componentId: [node-1, node-2, ...]
     graph.fingerprint = await this.getFingerprint(graph); // used to compare graphs
-    graph.graphIndex = this.graphIndex;
+    // graphIndex is left unset on purpose: the autoIncrement STATE store assigns it on save, which
+    // keeps keys unique across tabs. The assigned key is read back and used to stamp preindexing.
 
     const componentCount = Object.keys(graph.componentIndex).length;
     recordMetric({ key: metricKeys.COMPONENTS_IN_LAST_SNAPSHOT, value: componentCount, mode: 'set' });
@@ -120,9 +121,9 @@ export class Bridge {
       // add node
       g.addNode({ graph, id: context.id, data: context.data });
 
-      // process primitive values for preindexing
+      // process primitive values for preindexing. The graphIndex is not known yet (the store
+      // assigns it on save); the rows are stamped with it in preindexing.emit().
       this.preindexing.prepareData({
-        graphIndex: this.graphIndex,
         nodeId: context.id,
         key: context.data.key,
         props: context.data.props

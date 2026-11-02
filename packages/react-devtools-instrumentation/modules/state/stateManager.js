@@ -51,6 +51,15 @@ export class StateManager {
 
 
 
+  // Clears every store, giving a fresh run on a shared/persistent profile without deleting the DB
+  // (which would block other tabs). Exposed as window.__RAPIDOR__reset() for a crawler to call once
+  // at the start of a run, before the other tabs have navigated to the target.
+  async reset() {
+    await this.db.clearAll();
+  }
+
+
+
   async handleStateUpdate(event, storeName) {
     await this.handleUpdate(event, storeName);
 

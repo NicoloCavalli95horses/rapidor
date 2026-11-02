@@ -18,29 +18,34 @@ export class PreIndexing {
 
 
 
-  // Create data to preindex
-  prepareData({ graphIndex, nodeId, key, props }) {
+  // Create data to preindex. The graphIndex (the snapshot's DB key) is unknown here: the STATE
+  // store assigns it on save, so the rows are stamped with it later, in emit({ graphIndex }).
+  prepareData({ nodeId, key, props }) {
     if (this.isInteresting('key', key)) {
-      this.data.push({ graphIndex, nodeId, value: key, path: ['key'], depth: 0 });
+      this.data.push({ nodeId, value: key, path: ['key'], depth: 0 });
     }
 
     this.iterate(props, ({ key, value, path }) => {
       if (this.isInteresting(key, value)) {
         // only save strings to avoid false negative in comparison ('112' == 112)
         // always save data as array (value can be an URL, in this cases we split it into tokens)
-        this.data.push({ graphIndex, nodeId, value: this.tokenize(value.toString()), path, depth: path.length });
+        this.data.push({ nodeId, value: this.tokenize(value.toString()), path, depth: path.length });
       }
     });
   }
 
 
 
-  emit() {
+  // Stamps the buffered rows with the snapshot's graphIndex (the key the STATE store assigned on
+  // save) and emits them, so each preindexing row links to the snapshot actually persisted.
+  emit({ graphIndex } = {}) {
     if (this.data.length === 0) { return; }
 
-    recordMetric({ key: metricKeys.PREINDEXED_VALUES, value: this.data.length });
+    const rows = this.data.map(row => ({ ...row, graphIndex }));
 
-    emit({ type: events.PREINDEXING_UPDATE, payload: this.data });
+    recordMetric({ key: metricKeys.PREINDEXED_VALUES, value: rows.length });
+
+    emit({ type: events.PREINDEXING_UPDATE, payload: rows });
     log({ module: 'preindexing', msg: 'Emitted batch' })
 
     this.data = [];
