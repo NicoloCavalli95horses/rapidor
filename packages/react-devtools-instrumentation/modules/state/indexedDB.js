@@ -150,6 +150,13 @@ export class IDBManager {
             results = { key: e.target.result, storeName, data };
           };
           request.onerror = (e) => {
+            // A unique index (eg. the state fingerprint) already holds an equivalent row: another
+            // tab saved it first in the shared DB. Treat it as a duplicate (resolve null) instead of
+            // failing. preventDefault keeps the transaction alive so it can still complete.
+            if (e.target.error && e.target.error.name === "ConstraintError") {
+              e.preventDefault();
+              return;   // results stays null -> resolved as "nothing new saved"
+            }
             console.error("DB SAVE ERROR PAYLOAD:", data);
             console.error("DB ERROR:", e.target.error);
             reject(e.target.error);

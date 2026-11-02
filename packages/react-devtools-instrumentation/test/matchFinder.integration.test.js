@@ -112,6 +112,24 @@ describe('MatchFinder.find (integration with a mocked stateManager)', function (
     assert.deepEqual(data.results, []);
   });
 
+  it('skips a match whose snapshot was pruned (componentIndex gone) without throwing', async function () {
+    // the preindexed match's node still resolves, but its snapshot's componentIndex is gone (the
+    // analysis window pruned the state): the match must be skipped, not crash the analysis pass.
+    const stateManager = createFakeStateManager({
+      preIndexed: {
+        gone: [{graphIndex: 86, nodeId: 'ref1', value: 'gone', path: ['props', 'id']}],
+      },
+      nodes: {ref1: {id: 'ref1', componentId: 'CompA', props: {id: 'gone'}}},
+      componentIndex: undefined, // getComponentIndexByID(86) -> undefined (snapshot pruned)
+    });
+
+    const finder = new MatchFinder(stateManager);
+    const data = await finder.find(httpEventWith({toEvaluate: [{value: 'gone'}]}));
+
+    assert.ok(!data.success);
+    assert.deepEqual(data.results, []);
+  });
+
   it('drops a couple when the only sibling shares the reference value (no swap)', async function () {
     const stateManager = createFakeStateManager({
       preIndexed: {

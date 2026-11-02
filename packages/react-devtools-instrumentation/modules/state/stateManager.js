@@ -130,8 +130,12 @@ export class StateManager {
     const data = this.prepareData(event.payload);
     const result = await this.saveToDb({ data, type: event.type, storeName });
 
+    // result is null when a concurrent tab saved the same fingerprint first (unique-constraint
+    // duplicate): count it as skipped, not saved.
     if (result) {
       recordMetric({ key: isState ? metricKeys.STATES_SAVED : metricKeys.HTTP_EVENTS_SAVED });
+    } else {
+      recordMetric({ key: isState ? metricKeys.STATES_SKIPPED_DUPLICATE : metricKeys.HTTP_EVENTS_SKIPPED_DUPLICATE });
     }
 
     return result;
@@ -164,6 +168,9 @@ export class StateManager {
     const promise = (async () => {
       try {
         const response = await this.db.saveState({ data, storeName, batch });
+        // null => a concurrent tab already saved this (unique-constraint duplicate): nothing new, so
+        // do not announce a DB_SUCCESS (it would trigger analysis/preindexing for a save that is not ours).
+        if (!response) { return null; }
         log({ module: 'state manager', msg: `Saved ${type} to DB` });
         emit({ type: events.DB_SUCCESS, payload: { type, response } });
         return response;
@@ -179,18 +186,27 @@ export class StateManager {
 
 
 
+  // Reads a state snapshot, returning null (not throwing) if it is gone. A preindexed match can
+  // point at a snapshot the analysis window has since pruned (states churn fast when several tabs
+  // share the DB); the match must then be skipped, not crash the whole analysis pass.
+  async getStateOrNull(graphIndex) {
+    return (await this.db.query({ storeName: this.dbStores.STATE, method: 'get', query: graphIndex })) ?? null;
+  }
+
+
+
   // returns node
   async getNodeByID(graphIndex, nodeId) {
-    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
-    return state.nodes[nodeId];
+    const state = await this.getStateOrNull(graphIndex);
+    return state?.nodes?.[nodeId];
   }
 
 
 
   // returns node relations
   async getRelationsByID(graphIndex, nodeId) {
-    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
-    return state.relations[nodeId];
+    const state = await this.getStateOrNull(graphIndex);
+    return state?.relations?.[nodeId];
   }
 
 
@@ -203,8 +219,8 @@ export class StateManager {
 
   // returns component index
   async getComponentIndexByID(graphIndex) {
-    const state = await this.db.getByID({ id: graphIndex, storeName: this.dbStores.STATE });
-    return state.componentIndex;
+    const state = await this.getStateOrNull(graphIndex);
+    return state?.componentIndex;
   }
 
 

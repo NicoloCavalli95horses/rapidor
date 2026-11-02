@@ -9,7 +9,7 @@ export const config = Object.freeze({
   maxConcurrentRequests: 3,             // [optimization] Max candidate requests dispatched in parallel (the client-side SPA routing check, when needed, still runs one at a time regardless)
   domainRequestOnly: true,              // [optimization] Intercept only HTTP events to the domain's web server
   domHandlerEnabled: false,             // [policy] Enables the DOMhandler module (floating "Download logs"/"Print stats" buttons)
-  maxStateSnapshots: 10,                // [optimization] For each HTTP event, analysis is performed on the N most recent state snapshots
+  maxStateSnapshots: 25,                // [optimization] For each HTTP event, analysis runs on the N most recent state snapshots. The store is shared across tabs, so this is kept generous enough that several tabs exploring at once do not prune each other's snapshots out from under an in-flight analysis
   tagsWhitelist: [0, 7, 11, 15],        // [optimization] Eligible node.tags (see ReactWorkTags.js) (*)
   maxExplorationDepth: 5,               // [optimization] Matching nodes are discarded if the path to the property being searched is too long
   maxExplorationKeys: 100,              // [optimization] Trim extremely large objects

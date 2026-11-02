@@ -87,6 +87,8 @@ export class MatchFinder {
     const couples = await Promise.all(references.map(async (ref) => {
       // Get alternative instances of matching component
       const componentIndex = await this.stateManager.getComponentIndexByID(ref.graphIndex);
+      // the snapshot may have been pruned since this match was indexed: skip rather than crash
+      if (!componentIndex) { return null; }
       const instancesIds = componentIndex[ref.node.componentId];
 
       // componentId may be missing from the index (eg. orphan/filtered component), skip defensively
