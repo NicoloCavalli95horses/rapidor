@@ -3,6 +3,7 @@
 //===================
 import { eventBus, events, emit } from "../../utils/eventBus.js";
 import { ResponseEvaluator } from "./responseEvaluator.js";
+import { analysisActivity } from "./activity.js";
 import { log, sleep, getCurrentDOM, recordMetric, metricKeys, runWithConcurrency } from "../../utils/utils.js";
 import { config } from "../../config.js";
 import { analyzeHTTP } from "../HTTP/HTTPAnalyzer.js";
@@ -30,7 +31,8 @@ export class RequestGenerator {
     eventBus.subscribe(e => {
       switch (e.type) {
         case events.GEN_REQ:
-          this.handleEvent(e.payload);
+          // tracked so waitForAnalysis() waits for the generated requests (and their evaluation) to finish
+          analysisActivity.track(this.handleEvent(e.payload));
           break;
         case events.HTTP_EVENT:
           this.handleTracked(e.payload);

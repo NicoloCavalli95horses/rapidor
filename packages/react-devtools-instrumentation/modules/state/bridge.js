@@ -6,6 +6,7 @@ import { debounceWithMaxTime, log, isSerializableValue, recordMetric, metricKeys
 import { Graph } from './graph.js';
 import { config } from '../../config.js';
 import { PreIndexing } from './preindexing.js';
+import { analysisActivity } from '../analysis/activity.js';
 
 
 //===================
@@ -130,6 +131,22 @@ export class Bridge {
     } while (Date.now() < deadline);
 
     return false;
+  }
+
+
+
+  // Analysis handshake: a crawler calls this (window.__RAPIDOR__waitForAnalysis) after acting on the
+  // page, so RAPIDOR can finish analysing the result (the query-param probing and the swapped-id
+  // request/response evaluation) before the crawler reloads to the next element. It first settles the
+  // current state (which, via its DB_SUCCESS, kicks off the analysis), then waits for the analysis
+  // pipeline to go idle. Returns true when idle, false if it timed out; never throws.
+  async waitForAnalysis({ timeoutMs = 8000, quietMs = 400 } = {}) {
+    try {
+      await this.settle();
+      return await analysisActivity.whenIdle({ timeoutMs, quietMs });
+    } catch {
+      return false;
+    }
   }
 
 

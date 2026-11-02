@@ -2,6 +2,7 @@
 // Import
 //===================
 import { eventBus, events, emit } from '../../utils/eventBus.js';
+import { analysisActivity } from './activity.js';
 import { filter } from 'rxjs/operators.js';
 import {
   log,
@@ -27,7 +28,8 @@ export class ResponseEvaluator {
   init() {
     eventBus
       .pipe(filter(e => e.type === events.EVALUATE))
-      .subscribe(e => this.handleEvent(e.payload));
+      // tracked so waitForAnalysis() waits until each response has been evaluated (and possibly reported)
+      .subscribe(e => analysisActivity.track(this.handleEvent(e.payload)));
   }
 
   async handleEvent(event) {

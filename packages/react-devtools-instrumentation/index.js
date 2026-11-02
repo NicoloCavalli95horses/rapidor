@@ -49,9 +49,12 @@ export async function instrumentationMain() {
   //    load, so it survives reloads and is shared across tabs).
   //  - waitToAction(): resolves true once the current page has at least one captured state in the
   //    DB, so the crawler does not navigate away before RAPIDOR has recorded it.
+  //  - waitForAnalysis(): resolves once the analysis pipeline has gone idle, so the crawler lets
+  //    RAPIDOR finish analysing a clicked result before it reloads to the next element.
   if (typeof window !== 'undefined') {
     window.__RAPIDOR__reset = () => stateManager.reset();
     window.__RAPIDOR__waitToAction = (opts) => bridge.waitToAction(opts);
+    window.__RAPIDOR__waitForAnalysis = (opts) => bridge.waitForAnalysis(opts);
   }
 
   // Navigation tracker

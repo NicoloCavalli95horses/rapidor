@@ -4,6 +4,7 @@
 import { eventBus, events } from "../../utils/eventBus.js";
 import { log } from "../../utils/utils.js";
 import { AnalysisLoop } from "../analysis/analysisLoop.js";
+import { analysisActivity } from "./activity.js";
 
 
 
@@ -33,10 +34,14 @@ export class AnalysisManager {
     if (this.running) { return; }
     this.running = true;
 
+    // counted as in-flight analysis so a crawler's waitForAnalysis() blocks until the loop (and the
+    // request generation / evaluation it triggers) has drained
+    analysisActivity.begin();
     try {
       await this.startAnalysis();
     } finally {
       this.running = false;
+      analysisActivity.end();
     }
   }
 
