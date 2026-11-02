@@ -1,16 +1,16 @@
 //===================
 // Import
 //===================
-import {eventBus, events, emit} from '../../utils/eventBus.js';
-import {filter} from 'rxjs/operators.js';
+import { eventBus, events, emit } from '../../utils/eventBus.js';
+import { filter } from 'rxjs/operators.js';
 import {
   log,
   isPlainObject,
   recordMetric,
   metricKeys,
 } from '../../utils/utils.js';
-import {config} from '../../config.js';
-import {sendToBridge} from '../../utils/clientToBridge.js';
+import { config } from '../../config.js';
+import { sendToBridge } from '../../utils/clientToBridge.js';
 
 //===================
 // Functions
@@ -31,10 +31,10 @@ export class ResponseEvaluator {
   }
 
   async handleEvent(event) {
-    log({module: 'response evaluator', msg: 'Starting evaluation...'});
-    recordMetric({key: metricKeys.EVALUATIONS_PERFORMED});
+    log({ module: 'response evaluator', msg: 'Starting evaluation...' });
+    recordMetric({ key: metricKeys.EVALUATIONS_PERFORMED });
 
-    const {reference, candidate: current} = event;
+    const { reference, candidate: current } = event;
 
     const httpResponses = this.handleResponseSimilarity(
       reference.response,
@@ -56,28 +56,28 @@ export class ResponseEvaluator {
     if (config.verbose) {
       log({
         module: 'response evaluator',
-        msg: {httpResponses, clientSideAuthZ, canReport},
+        msg: { httpResponses, clientSideAuthZ, canReport },
       });
     }
 
     if (!canReport || !id) {
-      log({module: 'response evaluator', msg: 'Nothing to report'});
+      log({ module: 'response evaluator', msg: 'Nothing to report' });
       return;
     }
 
     this.totIdor++;
-    recordMetric({key: metricKeys.VULNERABILITIES_REPORTED});
+    
+    const payload = {
+      id,
+      reference,
+      current,
+      analysis: { clientSideAuthZ, httpResponses },
+      description: 'potential access control vulnerability',
+    }
+    
+    recordMetric({ key: metricKeys.VULNERABILITIES_REPORTED, value: payload });
 
-    emit({
-      type: events.REPORT,
-      payload: {
-        id,
-        reference,
-        current,
-        analysis: {clientSideAuthZ, httpResponses},
-        description: 'potential access control vulnerability',
-      },
-    });
+    emit({ type: events.REPORT, payload });
 
     log({
       module: 'response evaluator',
@@ -92,7 +92,7 @@ export class ResponseEvaluator {
   async assessAuthZ(refProps, currProps) {
     const differences = this.compareObj(refProps, currProps);
     const payload = differences.flatMap(
-      ({key, pathStr, current, reference}) => [key, pathStr, current, reference]
+      ({ key, pathStr, current, reference }) => [key, pathStr, current, reference]
     );
 
     const isValidString = value =>
@@ -105,19 +105,25 @@ export class ResponseEvaluator {
 
     const filteredPayload = [...new Set(payload.filter(isValidString))];
 
-    const {results} = await sendToBridge({
+    const { results } = await sendToBridge({
       action: 'CLASSIFY_KEYS',
       payload: filteredPayload,
     });
     let hasSensitiveValues = false;
 
     if (results.length) {
-      const sensitiveCount = results.filter(i => i?.isAuthZRelevant).length;
-      recordMetric({
-        key: metricKeys.SENSITIVE_KEYS_DETECTED,
-        value: sensitiveCount,
-      });
-      hasSensitiveValues = sensitiveCount > 0;
+      const sensitiveKeys = results
+        .filter(i => i?.isAuthZRelevant)
+        .map(i => i.key);
+      // The metric holds the explicit, deduplicated key names detected across every evaluation
+      for (const sensitiveKey of sensitiveKeys) {
+        recordMetric({
+          key: metricKeys.SENSITIVE_KEYS_DETECTED,
+          value: sensitiveKey,
+          mode: 'unique',
+        });
+      }
+      hasSensitiveValues = sensitiveKeys.length > 0;
     }
 
     // true when there are sensitive keys within the prop object, and the current value under test differs from the reference one
@@ -125,7 +131,7 @@ export class ResponseEvaluator {
       differences.some(key => key.reference != key.current) &&
       hasSensitiveValues;
 
-    return {isPremium, differences};
+    return { isPremium, differences };
   }
 
   compareObj(a, b) {
@@ -233,17 +239,17 @@ export class ResponseEvaluator {
 
   getServerResponseSimilarity(refResponse, currResponse) {
     // 1. Compare response fields
-    const {fields, areFieldsEqual} = this.areFieldsEqual(
+    const { fields, areFieldsEqual } = this.areFieldsEqual(
       refResponse,
       currResponse
     );
 
     // 2. Compare response body length
-    const {refBodyLength, currBodyLength, isBodyLengthSimilar} =
+    const { refBodyLength, currBodyLength, isBodyLengthSimilar } =
       this.getBodyLengthSimilarity(refResponse, currResponse);
 
     // 3. Compare response body shape
-    const {refBodyKeys, currBodyKeys, isBodyShapeSimilar} =
+    const { refBodyKeys, currBodyKeys, isBodyShapeSimilar } =
       this.getBodyShapeSimilarity(refResponse, currResponse);
 
     return {
@@ -286,12 +292,12 @@ export class ResponseEvaluator {
       currBodyKeys.length
     );
 
-    return {refBodyKeys, currBodyKeys, isBodyShapeSimilar};
+    return { refBodyKeys, currBodyKeys, isBodyShapeSimilar };
   }
 
   // Returns a flat array of all the keys, including nested ones
   // Consider the path to improve matching efficacy
-  extractKeyPaths({obj = {}, depth = Infinity, prefix = ''} = {}) {
+  extractKeyPaths({ obj = {}, depth = Infinity, prefix = '' } = {}) {
     if (!obj || depth <= 0) {
       return [];
     }
@@ -330,7 +336,7 @@ export class ResponseEvaluator {
       currBodyLength
     );
 
-    return {refBodyLength, currBodyLength, isBodyLengthSimilar};
+    return { refBodyLength, currBodyLength, isBodyLengthSimilar };
   }
 
   areFieldsEqual(reference, current) {
@@ -343,7 +349,7 @@ export class ResponseEvaluator {
       }
     }
 
-    return {fields, areFieldsEqual};
+    return { fields, areFieldsEqual };
   }
 
   checkIntSimilarity(a, b, thr = this.responseBodyThr) {

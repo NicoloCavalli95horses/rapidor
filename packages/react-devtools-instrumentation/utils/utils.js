@@ -45,7 +45,7 @@ export const metricKeys = Object.freeze({
   EVALUATIONS_PERFORMED: 'Response evaluations performed',
   PROP_DIFFERENCES_FOUND: 'Prop differences found',
   SENSITIVE_KEYS_DETECTED: 'Sensitive (authZ-relevant) keys detected',
-  VULNERABILITIES_REPORTED: 'Potential IDOR reported',
+  VULNERABILITIES_REPORTED: 'Vulnerability report',
 });
 
 //===================
@@ -256,7 +256,26 @@ export function printConfig() {
 // Centralizes every RAPIDOR self-metric (how many states/components/HTTP events/etc. were found),
 // which was previously scattered across modules as local counters (eg. responseEvaluator.totIdor).
 // mode: sum (default, cumulative counter) | max (keeps the highest value seen) | set (last value wins, for point-in-time gauges)
+//       | unique (adds the value to a Set, deduplicated, eg. the names of the sensitive keys detected)
+// Objects (eg. a vulnerability report) can't be summed: whatever the mode, they are collected into
+// a list instead, so the metric keeps the full details and its count is the list length.
 export function recordMetric({key, value = 1, mode = 'sum'}) {
+  if (mode === 'unique') {
+    if (!(metrics[key] instanceof Set)) {
+      metrics[key] = new Set();
+    }
+    metrics[key].add(value);
+    return;
+  }
+
+  if (value !== null && typeof value === 'object') {
+    if (!Array.isArray(metrics[key])) {
+      metrics[key] = [];
+    }
+    metrics[key].push(value);
+    return;
+  }
+
   const current = metrics[key] ?? 0;
 
   switch (mode) {
@@ -292,7 +311,11 @@ export function markExecutionStart() {
 // console table and the programmatic API (window.__RAPIDOR__getData) never drift apart.
 export function getStats() {
   const counters = Object.values(metricKeys).reduce((acc, key) => {
-    acc[key] = metrics[key] ?? 0;
+    // List and Set metrics are copied into a plain array: callers can't mutate the internal store,
+    // and a Set wouldn't survive JSON serialization (eg. chrome messaging turns it into {})
+    const value = metrics[key];
+    acc[key] =
+      Array.isArray(value) || value instanceof Set ? [...value] : value ?? 0;
     return acc;
   }, {});
 
@@ -308,9 +331,10 @@ export function getStats() {
 export function printMetrics() {
   const stats = getStats();
 
+  // Collected (object) metrics are shown as their count, the full details stay in getStats()
   const table = Object.values(metricKeys).map(key => ({
     metric: key,
-    value: stats[key],
+    value: Array.isArray(stats[key]) ? stats[key].length : stats[key],
   }));
 
   // Session metadata, appended after the canonical self-metrics

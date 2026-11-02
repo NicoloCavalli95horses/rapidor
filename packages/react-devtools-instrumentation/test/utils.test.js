@@ -116,6 +116,7 @@ describe('utils', function () {
       delete metrics['test_sum'];
       delete metrics['test_max'];
       delete metrics['test_set'];
+      delete metrics['test_objects'];
     });
 
     it('should default to summing values (sum mode)', () => {
@@ -141,6 +142,21 @@ describe('utils', function () {
       recordMetric({key: 'test_set', value: 1, mode: 'set'});
       recordMetric({key: 'test_set', value: 7, mode: 'set'});
       assert.equal(metrics['test_set'], 7);
+    });
+
+    it('should collect object values into a list instead of summing them', () => {
+      const first = {id: 'a'};
+      const second = {id: 'b'};
+      recordMetric({key: 'test_objects', value: first});
+      recordMetric({key: 'test_objects', value: second});
+      assert.deepEqual(metrics['test_objects'], [first, second]);
+    });
+
+    it('should collect deduplicated values into a Set in unique mode', () => {
+      recordMetric({key: 'test_objects', value: 'isPremium', mode: 'unique'});
+      recordMetric({key: 'test_objects', value: 'role', mode: 'unique'});
+      recordMetric({key: 'test_objects', value: 'isPremium', mode: 'unique'});
+      assert.deepEqual([...metrics['test_objects']], ['isPremium', 'role']);
     });
 
     it('printMetrics should not throw even with no metrics recorded', () => {
@@ -189,7 +205,10 @@ describe('utils', function () {
     it('getStats should include every canonical metric, defaulting to 0', () => {
       const stats = getStats();
       for (const key of Object.values(metricKeys)) {
-        assert.equal(stats[key], metrics[key] ?? 0);
+        // deepEqual: list and Set metrics are returned as a plain-array copy, not the same reference
+        const expected =
+          metrics[key] instanceof Set ? [...metrics[key]] : metrics[key] ?? 0;
+        assert.deepEqual(stats[key], expected);
       }
     });
 
