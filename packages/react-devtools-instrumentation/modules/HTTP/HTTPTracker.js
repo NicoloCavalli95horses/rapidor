@@ -126,14 +126,35 @@ export class HTTPTracker {
 
 
     try {
+      // Server-Sent Events: a stream of "event:/data:" blocks, not a single JSON document.
+      // Handle it explicitly (parse the data: payloads) instead of JSON.parse-ing the whole blob,
+      // which throws. Some servers mislabel the stream as JSON, so the JSON branch below also falls
+      // back here when a parse fails on SSE-looking text.
+      if (contentType.includes('event-stream')) {
+        ret.body = this.parseEventStream(await this.asText(data));
+        ret.type = 'event-stream';
+        return ret;
+      }
+
       // JSON
       if (contentType.includes('json')) {
-        if (data instanceof Response) { // using a Response object (Fetch case)
-          const text = await data.clone().text();
-          // JSON was declared, but we receive an empty body
-          ret.body = text.length ? JSON.parse(text) : null;
-        } else if (typeof data === 'string') {
-          ret.body = data.length ? JSON.parse(data) : null; // XMLHttpRequest case
+        if (data instanceof Response || typeof data === 'string') { // Fetch / XMLHttpRequest
+          const text = data instanceof Response ? await data.clone().text() : data;
+          if (!text.length) {
+            ret.body = null; // JSON was declared, but we receive an empty body
+          } else {
+            try {
+              ret.body = JSON.parse(text);
+            } catch (parseError) {
+              // declared JSON but the body is actually an SSE stream: handle it as such
+              if (this.looksLikeEventStream(text)) {
+                ret.body = this.parseEventStream(text);
+                ret.type = 'event-stream';
+                return ret;
+              }
+              throw parseError; // a genuinely malformed JSON body: keep reporting it
+            }
+          }
         } else if (typeof data === 'object') {
           ret.body = data;
         }
@@ -167,6 +188,40 @@ export class HTTPTracker {
     }
 
     return ret;
+  }
+
+
+
+  // Reads a response body as text, from a Response (Fetch) or a string (XMLHttpRequest).
+  async asText(data) {
+    if (data instanceof Response) { return await data.clone().text(); }
+    return typeof data === 'string' ? data : String(data ?? '');
+  }
+
+
+
+  // Heuristic: does this body look like a Server-Sent Events stream? SSE blocks are lines prefixed
+  // by one of the event-stream field names (used to recognise a stream mislabelled as JSON).
+  looksLikeEventStream(text) {
+    return typeof text === 'string' && /^\s*(event|data|id|retry):/.test(text);
+  }
+
+
+
+  // Parses an SSE stream into the list of its `data:` payloads, each decoded as JSON when possible
+  // (SSE data fields usually carry JSON), so the analysis sees structured values instead of a blob.
+  parseEventStream(text) {
+    const events = [];
+    for (const block of String(text).split(/\r?\n\r?\n/)) {
+      const payload = block
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice('data:'.length).trim())
+        .join('\n');
+      if (!payload) { continue; }
+      try { events.push(JSON.parse(payload)); } catch { events.push(payload); }
+    }
+    return events;
   }
 
 
