@@ -15,6 +15,7 @@ import {
   getData,
   getAllTabsData,
   exposeGlobalAPI,
+  captureRuntimeErrors,
   log,
 } from '../utils/utils.js';
 import {initClientToBridge} from '../utils/clientToBridge.js';
@@ -254,6 +255,24 @@ describe('utils', function () {
 
     it('exposeGlobalAPI should not throw with no target available (eg. under Node)', () => {
       assert.doesNotThrow(() => exposeGlobalAPI());
+    });
+  });
+
+  describe('Function captureRuntimeErrors (surfacing errors to a crawler)', function () {
+    afterEach(function () { delete global.window; });
+
+    it('records an uncaught error and an unhandled rejection into the logs', function () {
+      global.window = createFakeWindow();
+      const before = getLogs().length;
+
+      captureRuntimeErrors();
+      global.window.dispatchEvent({ type: 'error', message: 'boom-sync' });
+      global.window.dispatchEvent({ type: 'unhandledrejection', reason: { message: 'boom-async' } });
+
+      const added = getLogs().slice(before);
+      const errors = added.filter(l => l.type === 'error' && l.module === 'runtime').map(l => l.msg);
+      assert.ok(errors.some(m => /boom-sync/.test(m)), `sync error logged: ${JSON.stringify(errors)}`);
+      assert.ok(errors.some(m => /boom-async/.test(m)), `async error logged: ${JSON.stringify(errors)}`);
     });
   });
 

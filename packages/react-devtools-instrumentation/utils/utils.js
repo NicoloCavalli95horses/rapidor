@@ -85,6 +85,26 @@ export function log({module, type = 'info', msg, verboseOnly = false}) {
   );
 }
 
+// Routes uncaught errors and unhandled promise rejections into the logs, so an external crawler
+// sees RAPIDOR failures through __RAPIDOR__getData() instead of only in the page console. Installed
+// once; identical messages are logged once to avoid flooding on a looping error.
+let runtimeErrorsCaptured = false;
+export function captureRuntimeErrors() {
+  if (runtimeErrorsCaptured || typeof window === 'undefined') { return; }
+  runtimeErrorsCaptured = true;
+
+  const seen = new Set();
+  const report = (msg) => {
+    const text = String(msg ?? 'unknown error');
+    if (seen.has(text)) { return; }
+    seen.add(text);
+    log({ module: 'runtime', type: 'error', msg: text });
+  };
+
+  window.addEventListener('error', (e) => report(e?.error?.stack ?? e?.message ?? e?.error));
+  window.addEventListener('unhandledrejection', (e) => report(e?.reason?.stack ?? e?.reason?.message ?? e?.reason));
+}
+
 export function isCloneable(obj) {
   try {
     structuredClone(obj);

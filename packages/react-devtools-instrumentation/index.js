@@ -1,7 +1,7 @@
 //===================
 // Import
 //===================
-import { log, printConfig, exposeGlobalAPI } from './utils/utils.js';
+import { log, printConfig, exposeGlobalAPI, captureRuntimeErrors } from './utils/utils.js';
 import { config } from './config.js';
 import { Bridge } from './modules/state/bridge.js';
 import { StateManager } from './modules/state/stateManager.js';
@@ -16,6 +16,10 @@ import { initClientToBridge } from './utils/clientToBridge.js';
 // Functions
 //===================
 export async function instrumentationMain() {
+  // Record runtime errors into the logs so a crawler sees them via __RAPIDOR__getData (which returns
+  // { logs, stats }); installed first so failures during init are captured too.
+  captureRuntimeErrors();
+
   // Public API for an external crawler to pull logs/stats "from below" (page.evaluate), as early as possible
   exposeGlobalAPI();
 
