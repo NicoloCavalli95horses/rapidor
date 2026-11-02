@@ -18,35 +18,51 @@ export class StateManager {
     this.dbStores = IDBManager.STORES;
 
     this.pending = new Map();
+    this.active = new Set(); // event handlers currently in flight (for waitForIdle)
   }
 
   async init() {
     await this.db.init();
 
-    eventBus.subscribe(async (event) => {
-
-      switch (event.type) {
-        case events.STATE_UPDATE:
-          await this.handleStateUpdate(event, this.dbStores.STATE);
-          break;
-
-        case events.HTTP_EVENT:
-          await this.handleHTTPUpdate(event, this.dbStores.HTTP_EVENT);
-          break;
-
-        case events.NAV:
-          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.NAV });
-          break;
-
-        case events.PREINDEXING_UPDATE:
-          await this.handlePreindexingUpdate(event, this.dbStores.PREINDEXING);
-          break;
-
-        case events.REPORT:
-          await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.REPORT });
-          break;
-      }
+    // Each event is handled asynchronously; its promise is tracked so waitForIdle() (used by the
+    // crawler's wait-to-action) can tell when the save pipeline has fully drained.
+    eventBus.subscribe((event) => {
+      const task = this.handleEvent(event).catch(() => {});
+      this.active.add(task);
+      task.finally(() => this.active.delete(task));
     });
+  }
+
+
+
+  async handleEvent(event) {
+    switch (event.type) {
+      case events.STATE_UPDATE:
+        return await this.handleStateUpdate(event, this.dbStores.STATE);
+
+      case events.HTTP_EVENT:
+        return await this.handleHTTPUpdate(event, this.dbStores.HTTP_EVENT);
+
+      case events.NAV:
+        return await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.NAV });
+
+      case events.PREINDEXING_UPDATE:
+        return await this.handlePreindexingUpdate(event, this.dbStores.PREINDEXING);
+
+      case events.REPORT:
+        return await this.saveToDb({ data: event.payload, type: event.type, storeName: this.dbStores.REPORT });
+    }
+  }
+
+
+
+  // Resolves once no event handler is in flight. A handler can emit another event (eg. STATE_UPDATE
+  // -> DB_SUCCESS -> PREINDEXING_UPDATE), so we drain repeatedly until a round adds nothing new.
+  async waitForIdle({ maxRounds = 20 } = {}) {
+    for (let round = 0; round < maxRounds && this.active.size > 0; round++) {
+      await Promise.allSettled([...this.active]);
+      await Promise.resolve(); // let any synchronously-chained emit register its handler
+    }
   }
 
 

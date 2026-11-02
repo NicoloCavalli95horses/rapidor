@@ -12,7 +12,8 @@ import { PreIndexing } from './preindexing.js';
 // Class
 //===================
 export class Bridge {
-  constructor() {
+  constructor(stateManager) {
+    this.stateManager = stateManager; // needed to wait for the save pipeline to drain (waitToAction)
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
     this.preindexing = new PreIndexing();
@@ -22,6 +23,8 @@ export class Bridge {
     this.componentId = 0;
 
     this._lastState = undefined; // save last state locally to be read from other scripts
+    this._lastRoot = undefined;  // most recent fiber root seen on a commit (for a forced capture)
+    this._captureChain = Promise.resolve(); // serialises captures: shared id maps must not interleave
   }
 
 
@@ -51,12 +54,15 @@ export class Bridge {
     original = wrap(original);
 
     const handleCommit = debounceWithMaxTime(async (fiber) => {
-      await self.handleStateGraph(fiber);
+      await self.capture(fiber);
     }, {debounceT: config.debounceTimeMs, maxT: config.throttleTimeMs});
 
     function wrap(fn) {
       return function (rendererID, root, ...args) {
-        if (root && root?.current) { handleCommit(root.current); }
+        if (root && root?.current) {
+          self._lastRoot = root.current; // remember it so waitToAction can force a capture on demand
+          handleCommit(root.current);
+        }
         return fn?.apply(this, [rendererID, root, ...args]);
       };
     }
@@ -81,6 +87,49 @@ export class Bridge {
   async handleStateGraph(fiber) {
     const payload = await this.getStateGraph(fiber);
     emit({ type: events.STATE_UPDATE, payload });
+  }
+
+
+
+  // Captures a snapshot of `fiber`, serialised: getStateGraph mutates shared id maps (resetIds), so
+  // a debounced commit and a forced capture (settle) must never run at the same time.
+  capture(fiber) {
+    this._captureChain = this._captureChain
+      .catch(() => {})
+      .then(() => this.handleStateGraph(fiber));
+    return this._captureChain;
+  }
+
+
+
+  // Forces a snapshot of the current component tree now (skipping the debounce) and waits for it to
+  // reach the DB (saved, or recognised as an existing duplicate). Returns true once the page under
+  // exploration has at least one state in the DB; false if React has not committed yet.
+  async settle() {
+    if (!this._lastRoot) { return false; } // React has not rendered yet: nothing to capture
+    await this.capture(this._lastRoot);
+    await this.stateManager?.waitForIdle();
+    return true;
+  }
+
+
+
+  // Wait-to-action handshake: a crawler calls this (window.__RAPIDOR__waitToAction) before acting on
+  // the page. It resolves true once the current page's state has been captured and persisted, so the
+  // crawler never navigates away before RAPIDOR has recorded at least one state. It polls because
+  // React may not have committed the instant the page looks stable to the crawler. Never throws:
+  // false means "not ready within timeoutMs", and the crawler proceeds anyway.
+  async waitToAction({ timeoutMs = 5000, pollMs = 150 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      try {
+        if (await this.settle()) { return true; }
+      } catch { /* fall through and retry until the deadline */ }
+      if (Date.now() >= deadline) { break; }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    } while (Date.now() < deadline);
+
+    return false;
   }
 
 
