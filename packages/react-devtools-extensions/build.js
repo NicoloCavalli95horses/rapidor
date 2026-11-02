@@ -13,6 +13,31 @@ const {getGitCommit} = require('./utils');
 // to produce the final web extension
 const STATIC_FILES = ['icons', 'popups', 'main.html', 'panel.html'];
 
+// Local, git-ignored counter bumped on every Chrome build (see nextBuildNumber below).
+// It lives outside chrome/build, which preProcess() wipes on every build.
+const CHROME_BUILD_NUMBER_PATH = join(__dirname, 'chrome', '.build-number');
+const MAX_VERSION_SEGMENT = 65535;
+
+// Chrome caches an extension by its manifest version, so every build needs a higher one.
+// Returns the next build number, appended to the manifest as the 4th version segment
+// (eg. 1.0.0 -> 1.0.0.42). Chrome only accepts up to 4 integers in 0-65535 with no leading
+// zeros, so a zero-padded form such as 1.0.001 would be rejected.
+const nextBuildNumber = ({filePath}) => {
+  const current = pathExistsSync(filePath)
+    ? parseInt(readFileSync(filePath).toString(), 10) || 0
+    : 0;
+  const next = current + 1;
+
+  if (next > MAX_VERSION_SEGMENT) {
+    throw new Error(
+      `Build number exceeded ${MAX_VERSION_SEGMENT}: bump the version in the manifest and delete ${filePath}`,
+    );
+  }
+
+  writeFileSync(filePath, String(next));
+  return next;
+};
+
 /**
  * Ensures that a local build of the dependencies exist either by downloading
  * or running a local build via one of the `react-build-fordevtools*` scripts.
@@ -99,6 +124,12 @@ const build = async (tempPath, manifestPath, envExtension = {}) => {
   const commit = getGitCommit();
   const manifest = JSON.parse(readFileSync(copiedManifestPath).toString());
   manifest.description += `\n\nCreated from revision ${commit}.`;
+
+  if (envExtension.IS_CHROME) {
+    const buildNumber = nextBuildNumber({filePath: CHROME_BUILD_NUMBER_PATH});
+    manifest.version = `${manifest.version}.${buildNumber}`;
+    manifest.version_name = `${manifest.version_name} (build ${buildNumber})`;
+  }
 
   if (process.env.NODE_ENV === 'development') {
     // When building the local development version of the
