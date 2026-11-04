@@ -13,8 +13,12 @@ import { analysisActivity } from '../analysis/activity.js';
 // Class
 //===================
 export class Bridge {
-  constructor(stateManager) {
+  // `mode` defaults from the global config (production wiring, index.js) but is accepted as a
+  // parameter so tests can exercise 'full' vs 'minimal' without mutating config.js's frozen
+  // singleton (Object.freeze — reassigning config.mode would throw under ESM's strict mode anyway).
+  constructor(stateManager, { mode = config.mode } = {}) {
     this.stateManager = stateManager; // needed to wait for the save pipeline to drain (waitToAction)
+    this.mode = mode;
     this.nodeMap = new WeakMap();
     this.nodeId = 0;
     this.preindexing = new PreIndexing();
@@ -35,8 +39,9 @@ export class Bridge {
       if (e.type === events.DB_SUCCESS && e.payload.type === events.STATE_UPDATE) {
         // The STATE store (autoIncrement) assigned this snapshot's key; stamp the buffered
         // preindexing rows with it so they link to the snapshot actually saved, then persist them.
+        // (_lastState itself is no longer set here: handleStateGraph already sets it eagerly, as
+        // soon as the graph is computed — see its own comment for why that matters.)
         this.preindexing.emit({ graphIndex: e.payload.response?.key });
-        this._lastState = e.payload.response?.data;
       }
     });
 
@@ -85,9 +90,32 @@ export class Bridge {
 
 
 
+  // Computes the graph and sets _lastState right away, synchronously with this call — NOT from the
+  // DB_SUCCESS event emitted below. StateManager.handleUpdate() skips emitting DB_SUCCESS entirely
+  // when this fingerprint is already stored (a legitimate, common case: the crawler reloads and
+  // replays the same page many times while backtracking its DFS, and most remounts land on a
+  // fingerprint already seen earlier in this same run). Without this, a crawler calling
+  // waitToAction() (which only waits for the save pipeline to go idle, duplicate or not) then
+  // getLatestState() right after would get `undefined` on every one of those duplicate remounts —
+  // not because nothing was captured, but because the one DB-confirmed signal _lastState used to
+  // depend on never fires for a dup. Setting it here instead means getLatestState() always reflects
+  // the most recently computed graph for the current page, independently of whether StateManager
+  // decides there is anything new to persist for it.
   async handleStateGraph(fiber) {
     const payload = await this.getStateGraph(fiber);
-    emit({ type: events.STATE_UPDATE, payload });
+    this._lastState = payload;
+
+    // 'minimal' mode: a crawler is driving (HTTPTracker/AnalysisManager are not even instantiated —
+    // see index.js), and it does its own fingerprint-based novelty check and preindexing on the
+    // graph it reads back via getLatestState() (already up to date above, regardless of mode).
+    // Routing this graph through StateManager here would only duplicate that work for no reader:
+    // nothing in minimal mode ever queries RAPIDOR's own STATE/PREINDEXING stores back (full mode's
+    // panel/AnalysisManager do). Skipping the emit skips the whole save+dedup+preindexing pipeline
+    // this one event triggers, which also means waitToAction()'s waitForIdle() has nothing to wait
+    // on: minimal mode stays as fast as the capture itself.
+    if (this.mode !== 'minimal') {
+      emit({ type: events.STATE_UPDATE, payload });
+    }
   }
 
 
@@ -187,13 +215,19 @@ export class Bridge {
       // add node
       g.addNode({ graph, id: context.id, data: context.data });
 
-      // process primitive values for preindexing. The graphIndex is not known yet (the store
-      // assigns it on save); the rows are stamped with it in preindexing.emit().
-      this.preindexing.prepareData({
-        nodeId: context.id,
-        key: context.data.key,
-        props: context.data.props
-      });
+      // Process primitive values for preindexing — 'full' mode only (its own AnalysisManager is the
+      // only reader of these rows; in 'minimal' mode the crawler preindexes the same graph itself
+      // from getLatestState(), so buffering here would just grow this.preindexing.data forever with
+      // nothing to ever flush it: handleStateGraph() skips the STATE_UPDATE that normally triggers
+      // preindexing.emit() in minimal mode, see its own comment). The graphIndex is not known yet
+      // (the store assigns it on save); the rows are stamped with it in preindexing.emit().
+      if (this.mode !== 'minimal') {
+        this.preindexing.prepareData({
+          nodeId: context.id,
+          key: context.data.key,
+          props: context.data.props
+        });
+      }
 
       if (parentId) {
         // link to parent

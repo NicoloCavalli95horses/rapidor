@@ -1,7 +1,7 @@
 // Global configuration
 export const config = Object.freeze({
   toolName: 'RAPIDOR',
-  mode: 'full',                         // [policy] 'full' (default) | 'minimal': minimal only emits React state (Bridge+StateManager), skipping HTTP tracking and analysis
+  mode: 'minimal',                      // [policy] 'full' | 'minimal' (default): minimal only emits React state (Bridge+StateManager), skipping HTTP tracking and analysis
   sessionID: crypto.randomUUID(),       // [meta] ID of stored data
   verbose: false,                       // [policy] logs extra information
   debounceTimeMs: 500,                  // [optimization] Idle time before capturing a state snapshot. Kept in sync with the crawler's 500ms stability window: a headless browser settles faster than the 1500ms chosen for headful browsing, where it absorbed user scrolling/typing
