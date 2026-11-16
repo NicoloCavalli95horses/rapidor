@@ -1,0 +1,47 @@
+# SPA Crawler
+
+Crawls web apps by **clicking** (not just following links): it builds a `state → click → state` graph per site (DFS over UI states), and also runs **IDOR/BOLA detection**. It reads React component state through the RAPIDOR extension, correlates it with the observed HTTP traffic, then forges sibling-value GET requests and probes client-side routing.
+Stack: TypeScript (ESM, `.js` import suffixes), Crawlee + Playwright (Chromium), better-sqlite3, `@huggingface/transformers`.
+
+Docs (don't read them whole, grep the section you need):
+- `README.md` (~210 lines): `## Configuration`, `## Output`, `## Browser extension (RAPIDOR)`, `## Authentication`.
+- `docs/analysis.md`: IDOR pipeline, client routing, reproduction scripts, ablation study, `react-app-target/` fixture.
+- `docs/CHANGELOG-archive.md`: old entries, only for historical context.
+
+## Commands
+```bash
+npm run typecheck                                   # tsc, run after every change
+node --import tsx --test test/<Name>.test.ts        # one test file (real Chromium, slow); prefer this
+npm test                                            # full suite (~230 tests, slow): only at the end
+START_URL=https://x.com npm start                   # crawl one site (HEADLESS=false to watch it)
+npx tsx scripts/runAnalysisFromDb.ts <START_URL>    # re-run analysis on data already in the DB, no new crawl
+npm run stats                                       # per-site stats + findings from storage/crawler.db
+cd react-app-target && node server.js               # test target app with 2 planted IDORs on :3000
+```
+To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read` the `.db` files.
+
+## Code map (src/)
+- `main.ts`: PlaywrightCrawler setup and the shared SQLite stores. `buildExplorer.ts` is the composition root, the only place that instantiates concrete classes.
+- `config.ts`: every setting, overridable via env (`.env.example`).
+- `core/`: `DfsExplorer` (algorithm and limits), `interfaces.ts` (all `I*` contracts), `types.ts`, `CompositeHooks`.
+- `browser/`: Playwright interaction: `ActionExecutor`, `StabilityWaiter`, `StateNavigator` (restore = reload + replay the click path), `NetworkObserver` (→ `http_events`), `ReactStateHooks` (RAPIDOR → `react_states` + preindex), `AnalysisHooks`/`AblationHooks` (run the analysis at the end of a site), `ExtensionCalls`, `lightweightMode`. `inPage/` holds code serialized into the page.
+- `extraction/`: clickables and texts (`browser/` = code that runs inside the page).
+- `state/`: fingerprint, capture, in-memory store and graph (claim/release per `(state, element)`).
+- `analysis/`: IDOR pipeline. `AnalysisPipeline.ts` (736 lines, the hub) runs preindex → segments → matchFinder → requestForge → responseEvaluate → authzClassifier, plus the `clientRouting` fallback and `reproductionScript`. `AblationPipeline` + `jsonMatchFinder` are the HTTP-JSON-only variant.
+- `db/`: one `*Store.ts` per SQLite table; `openDatabase.ts` holds the schema.
+- `scripts/`: CLIs (tranco, stats, compareAblation, run*FromDb, debug).
+- `test/`: `node:test`, one `<Module>.test.ts` per module; helpers in `test/helpers/` (`browser.ts`, `fakes.ts`).
+
+## Do not read / ignore
+`node_modules/`, `storage/` (SQLite, ~500MB), `reports/` (generated), `react-app-target/{.next,node_modules}`, `browser_extension/rapidor/` (minified build of RAPIDOR, rebuilt from its own repo: never edit it here). `TODO.md` holds the user's notes (in Italian).
+
+## RAPIDOR (external extension)
+Source: `/home/ncavalli/Desktop/rapidor/packages/react-devtools-{instrumentation,extensions}`. Its build must be copied into `browser_extension/rapidor`. Rebuild with: `cd ../rapidor/packages/react-devtools-extensions && NODE_ENV=development node ./chrome/build`. The crawler only uses `window.__RAPIDOR__*` (MAIN world).
+
+## Rules
+- TypeScript only. **Named parameters**: functions take a single destructured object (`function f({ a, b }: { a: string; b: number })`); callers pass `f({ a, b })`. Exceptions: interface methods already in `core/interfaces.ts` and trivial helpers (`sleep(ms)`).
+- Code comments in English. Comments explain *why* (the existing style is discursive: keep it).
+- Do NOT create git branches or switch branches without permission. Commit only when asked; message format: `[feature|fix|docs|chore|safety|config|debug] scope: summary`.
+- Update `CHANGELOG.md` (in English) after every change: new entry **at the top**, under `# Changelog`, format `## YYYY-MM-DD HH:MM — Title` + a short paragraph + bullets (why, what changed, measured effect/regressions). Read only the first ~10 lines (`head`), never the whole file.
+- Update the matching docs when you change behavior or config (`README.md` for exploration/config, `docs/analysis.md` for the IDOR analysis). When `CHANGELOG.md` grows past ~8 entries, move the oldest ones to the top of `docs/CHANGELOG-archive.md`.
+- Safety: the analysis forges **GET only** (see `.claude/rules/analysis.md`). Never add state-changing requests against target sites.

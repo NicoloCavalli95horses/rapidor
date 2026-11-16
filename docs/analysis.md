@@ -1,0 +1,67 @@
+# IDOR analysis (authz/IDOR detection)
+
+Part of the [SPA crawler](../README.md). Settings referenced below (`analysis.*`, `db.*`) are documented in the README's [Configuration](../README.md#configuration).
+
+1. **Preindex** ([src/analysis/preindex.ts](../src/analysis/preindex.ts)) — every captured React node's props are walked for "interesting" values (short strings/numbers under keys like `id`, `user`, `role`, `owner`, ...) and tokenized into `preindexed_values`.
+2. **Segment extraction** ([src/analysis/segments.ts](../src/analysis/segments.ts)) — for each captured HTTP event and each visited page URL, proposes every path segment and each query parameter as a candidate "swap this value" target. A segment whose value appears in more than `analysis.maxSegmentMatches` preindexed nodes is skipped as a generic keyword (a tag/role/category word that also happens to be a URL segment), not an identifier — real identifiers appear only a handful of times, so this drops the combinatorial fan-out of common words without losing any real candidate.
+3. **Match finding** ([src/analysis/matchFinder.ts](../src/analysis/matchFinder.ts)) — if a candidate's value matches a pre-indexed one, looks up sibling instances of the *same React component* with a different value at the same prop path.
+4. **Request forging** ([src/analysis/requestForge.ts](../src/analysis/requestForge.ts)) — **GET only**: the detector reads, never writes, so it skips any captured non-GET event and `forgeRequest` refuses a non-GET method outright (replaying a POST/PUT/DELETE with a swapped id would change state on the live target). It splices the sibling's value into the GET and replays it via Playwright's `page.request.fetch()` (reuses the browsing context's cookies, but — unlike the page's own `fetch`/XHR — never fires `page.on('request')`, so forged probes never pollute `http_events`).
+5. **Response evaluation** ([src/analysis/responseEvaluate.ts](../src/analysis/responseEvaluate.ts)) — the forged response is compared against the original (status/headers/body-shape similarity); if it still looks "authorized", the differing props are classified for authorization-relevance by a sentence-embedding model (`src/analysis/authzClassifier.ts`, `@huggingface/transformers`, cosine similarity against a few fixed "entitlement" concept sentences, cached in `authz_classifications` — see `db.clearClassifierCache` above). Each key/value is normalized before embedding — camelCase/snake/kebab split into words and framed as a yes/no condition (`isLessonUnlocked` → `"whether is lesson unlocked"`) — so compound and boolean authorization flags read in the words the model knows instead of as one opaque token.
+6. **Client-side routing fallback** ([src/analysis/clientRouting.ts](../src/analysis/clientRouting.ts)) — for a candidate whose forged request did not look like it leaked anything (e.g. the server correctly rejects it), also checks whether the page's own client-side routing honors the swapped value anyway: it navigates back to the page the original event happened on, mutates `window.location` (`pushState` + a synthetic `popstate`) and watches for a real DOM mutation, independent of any server response — this is how a purely client-routed authorization bug (the UI trusts a URL it never re-validates) gets caught even though no "wrong" request ever reaches the network. It works for both **query parameters** (`checkClientSideRouting`) and **path segments** (`checkClientSideRoutingForPath`). The **primary signal is client digestion**: the SPA rendered the candidate's own route and stayed on it (`hasMutatedDom && stayedOnRoute`) — a value honoured purely client-side, with no network traffic at all, is a real finding. The only thing that then rejects it is the **visual not-found baseline** (the app rendering its generic not-found page for every id, [src/analysis/routeScreenshot.ts](../src/analysis/routeScreenshot.ts)). The **network is a filter, not a veto**: a `2xx` the backend returns for the candidate's own value, or a provable param read (`URLSearchParams.get`, hooked for query params only), is corroboration strong enough to accept directly and skip the visual guard — but their absence does not reject, and a `4xx` on an incidental request does not veto a route that renders a real, distinct page. A network response is attributed to the candidate only when its value is a **whole path segment or whole query-param value** (`urlCarriesValue`), never a substring, so a short id never matches a longer one it happens to sit inside. Because the probe's rollback can leave a render in flight that pollutes the next probe on the shared page, a result that showed no client digestion and no 2xx is retried up to 3 times before being trusted.
+
+   A client-routing finding is kept only when the candidate route resolves to a real, distinct resource — not an error or the app's own not-found page. Two guards decide this: the probe records the status of the request the app itself fires for the candidate value, and any `4xx` (the backend denied the swap or the resource does not exist) rejects it; when no backend call carries the value, a screenshot of the candidate's render is compared ([src/analysis/routeScreenshot.ts](../src/analysis/routeScreenshot.ts)) against the app's not-found page — calibrated once per route template by rendering a garbage id in the same slot — and a render within `analysis.notFoundScreenshotMaxDiff` of that baseline is rejected.
+   Candidates are also **seeded from the crawler's own visited page URLs**, not only from `http_events`: a value an SPA only ever reads client-side never shows up in any request, yet is still tested via the client-routing probe.
+7. **History filter** — before any request or probe, a candidate URL that the crawler already reached on its own (checked against the union of `http_events`, `react_states` and `crawl_states`) is skipped: swapping in a value the user can already reach by clicking around is not evidence of unauthorized access.
+
+A flagged finding (`vulnerabilities` table) records which detection path caught it (`detectionMethod: 'http' | 'client-routing'`), the reference/candidate URLs, and a human-readable `motivation` (which props differ and how). Everything above — including every stat that used to only exist transiently (segments extracted, matches found, candidates found, HTTP events, React states, requests generated, vulnerabilities flagged) and the wall-clock time of the exploration and analysis phases (`exploration_ms`/`analysis_ms`, logged as `hh:mm:ss.mmm`) — is persisted per site in `analysis_stats`; inspect it with `npm run stats` (see [Statistics](../README.md#statistics)).
+
+## Reproduction scripts
+
+Right after a genuinely new finding is recorded (by any of the three paths: forged HTTP request, client-routing on a query param, client-routing on a path segment), [src/analysis/reproductionScript.ts](../src/analysis/reproductionScript.ts) writes a standalone `reports/<site>/<site>_<vulnType>_<timestamp>.repro.ts` (`vulnType` is `http`, `client-query`, or `client-path`; `timestamp` includes milliseconds, so concurrently-evaluated candidates never collide). It is self-contained — the original request/response and both nodes' React props are embedded in the file itself, so it never depends on `storage/crawler.db` (which a later crawl, `db.clearOnStart` being the default, wipes):
+
+```bash
+npx tsx reports/<site>/<site>_<vulnType>_<timestamp>.repro.ts
+```
+
+All three finding kinds go through the **same flow**: a real (non-headless) browser opens, navigates to the original URL/request and the mutated one, and a screenshot is taken of each — for an HTTP finding this means opening the reference and candidate URLs directly (skipped, with a message, for a non-`GET` method, which can't be replayed by opening a URL); for a client-routing finding, the mutation is `pushState`+`popstate`, no reload. The script then prints, in order:
+
+1. the **original** request/response (http) or page (client-routing);
+2. the **mutated** request/response (a live, fresh request) or page;
+3. the two **screenshots** (`<baseName>.original.png`, `<baseName>.mutated.png`), each written next to the script as soon as it's taken;
+4. the **image diff**, in its own section (`<baseName>.diff.png`, via `pixelmatch`/`pngjs`) with the changed-pixel count, percentage, and an explicit verdict line (falls back to a size-mismatch notice if the two screenshots aren't the same dimensions);
+5. the **response-similarity verdict** (http) or `isUsingNewParams`/DOM-mutation verdict (client-routing);
+6. the **React props** of the original node and of the node whose value was spliced into the mutated request/URL, plus the authorization-relevant differences and the keys the classifier flagged.
+
+A failure while generating a script never prevents the finding itself from being recorded.
+
+## Ablation study (HTTP-JSON-only)
+
+`analysis.ablationMode` (default `false`, `ABLATION_MODE=true` to turn it on) runs a second, independent analysis pass — [src/analysis/AblationPipeline.ts](../src/analysis/AblationPipeline.ts) — alongside the main one, to measure how much of what the React-informed pipeline finds actually required React state at all, versus how much was sitting in plain sight in the JSON the site's own API already returned. No new network monitoring and no new exploration: it reuses the exact same `http_events`/`crawl_states` the main pipeline already captured.
+
+* **Preindex** ([src/analysis/jsonMatchFinder.ts](../src/analysis/jsonMatchFinder.ts), `buildJsonPreindex`) — every already-captured JSON response body for the site is walked once (same depth cap and "interesting key" rules as the React preindex — `isInteresting`/`tokenize` are reused verbatim), building a `value -> {body, path}[]` index. A URL segment is then looked up against the *whole* corpus, not just "its own" response: the id a request's own URL carries is often only ever *returned*, alongside its siblings, by a completely different endpoint (a list/listing call), not by the per-item endpoint whose own URL happens to contain it.
+* **Sibling finding** (`findJsonCandidates`) — once a match lands inside some body, siblings are looked for at *every* enclosing array level along that match's path (not just the nearest one), each level varied independently while every other index stays fixed at its reference value — the JSON analog of `matchFinder.ts`'s `componentIndex` walk. Sibling-finding itself never crosses bodies: two different HTTP responses are never assumed to describe related data just because a value happens to appear in both.
+* **Oracle** — identical to the main pipeline's HTTP path: forge the candidate request (`requestForge.ts`), compare the response (`responseEvaluate.ts`), diff the two sibling objects' properties (`compareObj`), classify the diff for authorization relevance (the same shared `authzClassifier.ts`, same cache). `compareObj` recurses index-wise into arrays (not just plain objects) for both pipelines, deliberately: the fairest ablation gives the HTTP-only analysis every tool the React-informed one has, so any remaining gap in what each pipeline flags reflects a real difference in signal (React state vs. JSON alone), not an avoidable blind spot shared by both.
+* **Shared forged-request cache** ([src/db/ForgedRequestStore.ts](../src/db/ForgedRequestStore.ts)) — keyed by `(site, method, url, body)`: if the main pipeline already forged the exact same candidate (the two often propose the same id swap from two different sources), the ablation reuses that response instead of hitting the live site again, and vice versa.
+* **Structurally narrower by construction, not by omission** — there is no equivalent of the client-routing probes: those resolve their oracle from a DOM-mutation signal (did the app's own rendering react?), which has no network counterpart at all. A query param or path segment an SPA only ever reads client-side is invisible to a network-only analysis, full stop.
+
+Findings land in their own tables — `ablation_vulnerabilities`/`ablation_stats` — never mixed with `vulnerabilities`/`analysis_stats`, so the two are always comparable:
+
+```bash
+ABLATION_MODE=true START_URL=https://example.com npm start
+npm run compare-ablation                               # side-by-side stats + which findings the main pipeline caught that the ablation missed, by detectionMethod
+npm run compare-ablation -- --db storage/other-run.db
+```
+
+## Test fixture: `react-app-target/`
+
+A small Next.js app with two deliberately planted IDORs, used to prove detection end-to-end rather than just unit-testing each module in isolation:
+
+* a **server-side** one — `/api/detail/:id` and the `/detail/:id` page it backs have no authorization check at all;
+* a **client-side-routing** one — a `resourceId` query parameter is checked server-side on the normal click path (`/api/preview?resourceId=`, which correctly 403s on a premium resource), but a separate effect renders whatever ends up in that query string straight from the unguarded detail endpoint, so a crafted URL bypasses the check entirely.
+
+```bash
+cd react-app-target && node server.js   # builds (if needed) and serves everything on :3000, API included
+# in another terminal, from the repo root:
+START_URL=http://localhost:3000 npm start
+npm run stats   # both IDORs should show up, one per detectionMethod
+```
