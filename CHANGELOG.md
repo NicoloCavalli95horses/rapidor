@@ -2,6 +2,9 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-16 09:25 — Remove the `react-app-target/` test fixture
+The local Next.js app with two planted IDORs was a development-time end-to-end target and is no longer needed (detection is covered by the unit suites, which mock the app with inline HTML via `page.route`, and validated against real sites). Deleted the folder and every reference to it: the "Test fixture" section in [docs/analysis.md](docs/analysis.md), its mentions in `README.md` and `.claude/CLAUDE.md`, and a stale comment in `AnalysisPipeline.test.ts`. The default `startUrl` in [src/config.ts](src/config.ts) pointed at that app's `http://localhost:3000`; it now defaults to a neutral placeholder (`https://example.com`), with the README's Configuration table updated to match. No test depended on the folder; typecheck and suites unaffected.
+
 ## 2026-11-16 08:40 — Analysis logs now match the real finding count (WARN was gated on DB novelty)
 A re-run of `runAnalysisFromDb` printed fewer `potential access control issue` WARN lines than `vulnerabilitiesFlagged` in the stats object (e.g. pimsleur logged 2 while the DB held 4). Not a detection miss and not a log race: each finding's WARN was emitted only `if (inserted)`, and `VulnerabilityStore.record` dedups with `INSERT OR IGNORE` (returns `false` for an id already stored). Since `runAnalysisFromDb` opens the store with `clearOnStart:false` and never clears the site, a finding already recorded by an earlier run was silently not re-logged, even though this run re-confirmed it.
 

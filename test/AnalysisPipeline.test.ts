@@ -68,7 +68,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
   // "not found". That distinction is what the screenshot not-found guard needs: a real candidate's
   // render (a block) must differ visibly from the not-found baseline (blank, from a garbage id).
   // Replaces children (childList mutation) so clientRouting.ts's MutationObserver sees it — it only
-  // watches childList/attributes, same limitation noted in react-app-target.
+  // watches childList/attributes.
   const html = `<div id="out"></div><script>
     const KNOWN = { '101': 1, '102': 1 };
     function render() {

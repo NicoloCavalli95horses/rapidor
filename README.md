@@ -97,7 +97,7 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `startUrl` | `$START_URL` or `https://learn.pimsleur.com/MiniLearn` | Site to explore with `npm start`. Protocol is required. |
+| `startUrl` | `$START_URL` or `https://example.com` | Site to explore with `npm start`. Protocol is required. |
 | `startUrls` | `$START_URLS` (comma- or newline-separated) or `[]` | Several sites explored in one `npm start` run. When empty, only `startUrl` is explored. |
 | `maxDepth` / `maxStates` / `maxDurationSecs` | `3` / `500` / `2700` | Exploration limits. `maxStates` applies to each tab. `maxDurationSecs` is a per-phase budget: the exploration gets it, then the end-of-crawl analysis gets it again (the request handler is sized for both). |
 | `restoreAttempts` | `4` | Times a `(state, element)` pair is retried across later landings before being given up: a state restore can miss when an intermittent interstitial covers the target, and this stops one unlucky reload from pruning a whole branch. |
@@ -172,7 +172,7 @@ extension: {
 
 At the end of each site's exploration, `AnalysisPipeline` correlates captured React state with captured HTTP traffic: preindex → segment extraction → match finding → GET-only request forging → response evaluation (with an embedding-based authorization classifier), plus a client-side-routing fallback for values an SPA only reads client-side. Every flagged finding gets a standalone reproduction script under `reports/`.
 
-Full details — pipeline steps, client-routing oracle, reproduction scripts, the HTTP-JSON-only ablation study and the `react-app-target/` test fixture — are in **[docs/analysis.md](docs/analysis.md)**.
+Full details — pipeline steps, client-routing oracle, reproduction scripts and the HTTP-JSON-only ablation study — are in **[docs/analysis.md](docs/analysis.md)**.
 
 ## Output
 

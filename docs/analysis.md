@@ -51,17 +51,3 @@ ABLATION_MODE=true START_URL=https://example.com npm start
 npm run compare-ablation                               # side-by-side stats + which findings the main pipeline caught that the ablation missed, by detectionMethod
 npm run compare-ablation -- --db storage/other-run.db
 ```
-
-## Test fixture: `react-app-target/`
-
-A small Next.js app with two deliberately planted IDORs, used to prove detection end-to-end rather than just unit-testing each module in isolation:
-
-* a **server-side** one — `/api/detail/:id` and the `/detail/:id` page it backs have no authorization check at all;
-* a **client-side-routing** one — a `resourceId` query parameter is checked server-side on the normal click path (`/api/preview?resourceId=`, which correctly 403s on a premium resource), but a separate effect renders whatever ends up in that query string straight from the unguarded detail endpoint, so a crafted URL bypasses the check entirely.
-
-```bash
-cd react-app-target && node server.js   # builds (if needed) and serves everything on :3000, API included
-# in another terminal, from the repo root:
-START_URL=http://localhost:3000 npm start
-npm run stats   # both IDORs should show up, one per detectionMethod
-```

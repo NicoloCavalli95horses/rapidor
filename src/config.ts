@@ -115,7 +115,7 @@ export interface CrawlConfig {
 }
 
 export const config: Readonly<CrawlConfig> = Object.freeze({
-  startUrl: process.env.START_URL || 'http://localhost:3000',
+  startUrl: process.env.START_URL || 'https://example.com/',
   // START_URLS="https://a.com,https://b.com" (comma and/or newline separated, quoted in .env if on several lines), or fill the array here: replaces startUrl in `npm start`
   startUrls: (process.env.START_URLS || '').split(/[\s,]+/).filter(Boolean),
   maxDepth: process.env.MAX_DEPTH ? Number(process.env.MAX_DEPTH) : 3, // MAX_DEPTH=2 for a quick, shallow debug run

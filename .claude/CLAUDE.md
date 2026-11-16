@@ -5,7 +5,7 @@ Stack: TypeScript (ESM, `.js` import suffixes), Crawlee + Playwright (Chromium),
 
 Docs (don't read them whole, grep the section you need):
 - `README.md` (~210 lines): `## Configuration`, `## Output`, `## Browser extension (RAPIDOR)`, `## Authentication`.
-- `docs/analysis.md`: IDOR pipeline, client routing, reproduction scripts, ablation study, `react-app-target/` fixture.
+- `docs/analysis.md`: IDOR pipeline, client routing, reproduction scripts, ablation study.
 - `docs/CHANGELOG-archive.md`: old entries, only for historical context.
 
 ## Commands
@@ -16,7 +16,6 @@ npm test                                            # full suite (~230 tests, sl
 START_URL=https://x.com npm start                   # crawl one site (HEADLESS=false to watch it)
 npx tsx scripts/runAnalysisFromDb.ts <START_URL>    # re-run analysis on data already in the DB, no new crawl
 npm run stats                                       # per-site stats + findings from storage/crawler.db
-cd react-app-target && node server.js               # test target app with 2 planted IDORs on :3000
 ```
 To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read` the `.db` files.
 
@@ -33,7 +32,7 @@ To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read
 - `test/`: `node:test`, one `<Module>.test.ts` per module; helpers in `test/helpers/` (`browser.ts`, `fakes.ts`).
 
 ## Do not read / ignore
-`node_modules/`, `storage/` (SQLite, ~500MB), `reports/` (generated), `react-app-target/{.next,node_modules}`, `browser_extension/rapidor/` (minified build of RAPIDOR, rebuilt from its own repo: never edit it here). `TODO.md` holds the user's notes (in Italian).
+`node_modules/`, `storage/` (SQLite, ~500MB), `reports/` (generated), `browser_extension/rapidor/` (minified build of RAPIDOR, rebuilt from its own repo: never edit it here). `TODO.md` holds the user's notes (in Italian).
 
 ## RAPIDOR (external extension)
 Source: `/home/ncavalli/Desktop/rapidor/packages/react-devtools-{instrumentation,extensions}`. Its build must be copied into `browser_extension/rapidor`. Rebuild with: `cd ../rapidor/packages/react-devtools-extensions && NODE_ENV=development node ./chrome/build`. The crawler only uses `window.__RAPIDOR__*` (MAIN world).
