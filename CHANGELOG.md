@@ -2,6 +2,20 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-16 08:40 — Analysis logs now match the real finding count (WARN was gated on DB novelty)
+A re-run of `runAnalysisFromDb` printed fewer `potential access control issue` WARN lines than `vulnerabilitiesFlagged` in the stats object (e.g. pimsleur logged 2 while the DB held 4). Not a detection miss and not a log race: each finding's WARN was emitted only `if (inserted)`, and `VulnerabilityStore.record` dedups with `INSERT OR IGNORE` (returns `false` for an id already stored). Since `runAnalysisFromDb` opens the store with `clearOnStart:false` and never clears the site, a finding already recorded by an earlier run was silently not re-logged, even though this run re-confirmed it.
+
+- **Log on confirmation, not on DB insertion** ([src/analysis/AnalysisPipeline.ts](src/analysis/AnalysisPipeline.ts)). A new `logConfirmedFinding` emits the WARN for every finding this run confirms, deduped per run by a `loggedFindingIds` set (so the same finding reached from two reference events is not logged twice) and independent of whether the DB row was new. A finding already stored by a previous run is logged with an explicit ` [already recorded in a previous run]` suffix. `writeReproduction` stays gated on `inserted` (no point regenerating a repro script for a known finding). Applied to all three finding paths (HTTP, client-routing query, client-routing path).
+- **Authoritative count in the logs.** The end-of-site INFO line now reads `N vulnerabilit(y/ies) flagged (M confirmed this run)`, so the real `vulnerabilitiesFlagged` figure is in the log stream without inspecting the stats object.
+- No change to detection, dedup, or the stored rows: the DB count was always correct; only the logs under-reported it.
+
+## 2026-11-16 08:27 — Client-routing probe: self-cleaning rollback removes the order-dependent flakiness
+The client-routing probe flagged an inconsistent number of IDORs across runs (pimsleur oscillated between 2/4 and 4/4). Root cause: the probe restored the original URL (`pushState` + `popstate`) in a `finally` block **without awaiting** the resulting re-render. The Node promise resolved while the browser was still rendering, so the next candidate's probe — running on the same pooled page — could start mid-render and have its `popstate` coalesced/dropped by a router still busy with the rollback, reported as a false "no reaction". The miss was position-dependent: the last candidate in a page's sequence was the most exposed (pimsleur's `294`).
+
+- **Self-cleaning rollback** ([src/analysis/clientRouting.ts](src/analysis/clientRouting.ts)). A new inlined `waitDomSettle(idleTime, maxWait)` is awaited after the rollback `popstate`, in both the query-param and path-segment probes, before the probe resolves. Unlike `waitDomIdle` it does not require a mutation (a no-op rollback resolves after one `idleTime` of quiet instead of riding to the ceiling) and it respects the same `__probeInflight` counter, so a network-gated rollback render is awaited too; the in-flight tracker is now uninstalled only after the settle. Each probe therefore leaves the page quiet, and the result no longer depends on candidate order.
+- **Retry demoted to a backstop.** `MAX_CLIENT_ROUTING_ATTEMPTS` (3) is kept, but its comment in [AnalysisPipeline.ts](src/analysis/AnalysisPipeline.ts) now reflects that it only covers a genuinely slow *first* render, not the cross-candidate pollution the rollback settle removed.
+- **Verified.** `scripts/debugClientRoutingFlakiness.ts` (5 rounds × the 4 pimsleur candidates, no fresh nav between probes): every candidate now 5/5, including the previously-flaky `294` (was intermittent). End-to-end from a cleared DB, `runAnalysisFromDb.ts` flags all 4 pimsleur IDORs deterministically. `clientRouting` and `AnalysisPipeline` suites green (7/7 each). Cost: a bounded settle (~`idleMs`, default 300 ms, up to the ceiling) added per probe.
+
 ## 2026-11-16 08:18 — Docs split: IDOR analysis to `docs/`, CHANGELOG archive, stale freemium references removed
 Documentation only, no code change.
 

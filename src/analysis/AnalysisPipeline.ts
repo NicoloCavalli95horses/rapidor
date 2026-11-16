@@ -127,12 +127,34 @@ export class AnalysisPipeline {
   // the pool runs them in parallel) share one calibration instead of each rendering the garbage value.
   private notFoundBaselines = new Map<string, Promise<Buffer | undefined>>();
 
+  // Finding ids this analysis run has already logged. The WARN for a confirmed finding must reflect
+  // what THIS run determined, not whether the row happens to be new to the DB: vulnerabilityStore
+  // dedups with INSERT OR IGNORE, so a re-run on a DB that already holds the finding (runAnalysisFromDb
+  // never clears) would otherwise log nothing while `vulnerabilitiesFlagged` still reports it. We log
+  // on confirmation regardless of DB novelty, deduped per run by this set so the same finding reached
+  // from two reference events is not logged twice. Cleared at the start of each runForSite.
+  private loggedFindingIds = new Set<string>();
+
   constructor(private deps: AnalysisPipelineDeps) {}
+
+  /**
+   * Logs a confirmed finding once per analysis run (deduped by id), independent of whether the DB row
+   * was newly inserted. `inserted === false` means the finding was already recorded by an earlier run,
+   * surfaced in the message so the count in the logs still matches `vulnerabilitiesFlagged`. Returns
+   * whether this was the first time the finding was logged this run (callers need no more than that).
+   */
+  private logConfirmedFinding({ id, message, inserted }: { id: string; message: string; inserted: boolean }): boolean {
+    if (this.loggedFindingIds.has(id)) return false;
+    this.loggedFindingIds.add(id);
+    log.warning(`${message}${inserted ? '' : ' [already recorded in a previous run]'}`);
+    return true;
+  }
 
   async runForSite({ page, site, explorationMs }: { page: Page; site: string; explorationMs: number }): Promise<void> {
     const analysisStartedAt = Date.now();
     this.graphCache.clear();
     this.notFoundBaselines.clear();
+    this.loggedFindingIds.clear();
     const { httpEventStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore, options } = this.deps;
     const events = httpEventStore.listBySite(site);
     const pageUrls = reactStateStore.listUrlsBySite(site);
@@ -231,7 +253,8 @@ export class AnalysisPipeline {
     }
 
     const analysisMs = Date.now() - analysisStartedAt;
-    log.info(`AnalysisPipeline: ${site} — exploration ${formatDuration(explorationMs)}, analysis ${formatDuration(analysisMs)}`);
+    const flagged = vulnerabilityStore.count(site);
+    log.info(`AnalysisPipeline: ${site} — ${flagged} vulnerabilit${flagged === 1 ? 'y' : 'ies'} flagged (${this.loggedFindingIds.size} confirmed this run), exploration ${formatDuration(explorationMs)}, analysis ${formatDuration(analysisMs)}`);
 
     statsStore.record({
       site,
@@ -382,8 +405,11 @@ export class AnalysisPipeline {
       detectionMethod,
       responseSimilarity: similarity, authzDiff: authz,
     });
+    this.logConfirmedFinding({
+      id, inserted,
+      message: `AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
+    });
     if (inserted) {
-      log.warning(`AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`);
       this.writeReproduction({
         id, site, motivation: describeDiffs(differences), differences: authz.differences, sensitiveKeys: authz.sensitiveKeys,
         candidate,
@@ -435,8 +461,11 @@ export class AnalysisPipeline {
       detectionMethod: 'client-routing',
       responseSimilarity: null, authzDiff: authz,
     });
+    this.logConfirmedFinding({
+      id, inserted,
+      message: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
+    });
     if (inserted) {
-      log.warning(`AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`);
       this.writeReproduction({
         id, site, referenceUrl: pageUrl, candidateUrl, motivation: describeDiffs(differences),
         differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
@@ -487,8 +516,11 @@ export class AnalysisPipeline {
       detectionMethod: 'client-routing',
       responseSimilarity: null, authzDiff: authz,
     });
+    this.logConfirmedFinding({
+      id, inserted,
+      message: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
+    });
     if (inserted) {
-      log.warning(`AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`);
       this.writeReproduction({
         id, site, referenceUrl: pageUrl, candidateUrl, motivation: describeDiffs(differences),
         differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
@@ -572,16 +604,15 @@ export class AnalysisPipeline {
    * Runs checkClientSideRouting* on a pool page (parallel across candidates, exclusive per page), and
    * retries a negative result up to MAX_CLIENT_ROUTING_ATTEMPTS times.
    *
-   * The probe itself (clientRouting.ts) fires its rollback pushState+popstate in a `finally` block
-   * without waiting for the resulting re-render to settle, so the Node-side promise can resolve
-   * before the browser has actually finished processing it; a second probe starting on the SAME page
-   * while that leftover render is still in flight can land in the polluted window and miss — confirmed
-   * empirically (scripts/debugClientRoutingFlakiness.ts): *some* probe consistently misses in the
-   * first round or two, then settles to 100% reliable afterwards. A short, bounded retry costs nothing
-   * when the first attempt already succeeds and recovers almost every one of these transient misses
-   * otherwise — same "redundant capture beats a silent loss" tradeoff already made for react-state
-   * capture (see ReactStateStore.record()'s own comment). The retry loop stays on one page, so the
-   * rollback it is guarding against is always this candidate's own, never another candidate's.
+   * The probe itself (clientRouting.ts) now AWAITS its own rollback re-render to settle before
+   * resolving, so it leaves the shared pool page quiet for the next candidate — this is what removed
+   * the order-dependent cross-candidate pollution that used to make *some* probe miss in the first
+   * round or two (confirmed empirically via scripts/debugClientRoutingFlakiness.ts). This retry is
+   * now only a secondary backstop for a genuinely slow FIRST render (a route whose render is gated on
+   * a network fetch slower than the probe's own ceiling): it costs nothing when the first attempt
+   * already succeeds, and a bounded re-run recovers that rare case — the same "redundant capture beats
+   * a silent loss" tradeoff already made for react-state capture (see ReactStateStore.record()). The
+   * retry loop stays on one page, and each attempt is itself self-cleaning.
    */
   private enqueueClientRoutingCheck({ pageUrl, run }: {
     pageUrl: string; run: (page: Page) => Promise<ClientRoutingResult>;

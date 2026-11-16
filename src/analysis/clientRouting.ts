@@ -134,6 +134,46 @@ const INFLIGHT_TRACKER_SRC = `
 `;
 
 /**
+ * Settle helper for the probe's OWN rollback, not for detection. After the probe restores the
+ * original URL (pushState + popstate), the app re-renders the original route; that render used to be
+ * fire-and-forget, so the Node promise resolved while the browser was still mutating the DOM. The
+ * next probe on the SAME pool page then started mid-render, and its popstate could be coalesced /
+ * dropped by a router still busy with the rollback — a false "no reaction" miss, the documented root
+ * of the client-routing flakiness. Awaiting this before resolving guarantees the page is quiet (and
+ * no rollback fetch is in flight) when the next candidate begins, so each probe starts from the same
+ * clean state and the result stops depending on candidate order.
+ *
+ * Unlike waitDomIdle, it does NOT require a mutation to have happened: a rollback that re-renders
+ * nothing resolves after a single `idleTime` of quiet instead of riding to the ceiling. `maxWait`
+ * only bounds a rollback whose render never goes quiet. `busy()` reads the same in-flight counter,
+ * so a network-gated rollback render is awaited too (the tracker is uninstalled only afterwards).
+ */
+const WAIT_DOM_SETTLE_SRC = `
+  function waitDomSettle(idleTime, maxWait) {
+    return new Promise((resolve) => {
+      let lastChange = Date.now();
+      const start = Date.now();
+      const observer = new MutationObserver(() => { lastChange = Date.now(); });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      function busy() { return (window.__probeInflight | 0) > 0; }
+      function check() {
+        const now = Date.now();
+        if (now - start >= maxWait) {
+          observer.disconnect();
+          resolve();
+        } else if (now - lastChange >= idleTime && !busy()) {
+          observer.disconnect();
+          resolve();
+        } else {
+          requestAnimationFrame(check);
+        }
+      }
+      check();
+    });
+  }
+`;
+
+/**
  * Port of RAPIDOR's requestGenerator.js isUsingQueryParams/waitDOMIdle fallback: when a forged real
  * HTTP request for a query-param candidate does not look like it succeeded (or never could, because
  * the candidate value is never sent over the network at all — a purely client-routed SPA), check
@@ -173,6 +213,7 @@ export async function checkClientSideRouting({ page, paramName, paramValue, minW
 
     ${WAIT_DOM_IDLE_SRC}
     ${INFLIGHT_TRACKER_SRC}
+    ${WAIT_DOM_SETTLE_SRC}
 
     let hasMutatedDom = false;
     let finalUrl = originalUrl;
@@ -185,9 +226,14 @@ export async function checkClientSideRouting({ page, paramName, paramValue, minW
       hasMutatedDom = await idle;
       finalUrl = window.location.href; // read before the rollback below moves it back
     } finally {
-      uninstallInflight();
+      // Roll the URL back, then WAIT for the rollback's own re-render to settle before resolving, so
+      // the next probe on this shared pool page starts from a quiet DOM instead of landing mid-render
+      // (the documented flakiness root — see WAIT_DOM_SETTLE_SRC). The in-flight tracker stays
+      // installed across the settle so a network-gated rollback render is awaited too, then uninstalls.
       window.history.pushState({ ignore: true }, '', originalUrl);
       window.dispatchEvent(new Event('popstate'));
+      await waitDomSettle(${idleMs}, ${maxWaitMs});
+      uninstallInflight();
     }
 
     const stayedOnTestPath = new URL(finalUrl).pathname === testUrl.pathname;
@@ -236,6 +282,7 @@ export async function checkClientSideRoutingForPath({ page, targetUrl, candidate
 
     ${WAIT_DOM_IDLE_SRC}
     ${INFLIGHT_TRACKER_SRC}
+    ${WAIT_DOM_SETTLE_SRC}
 
     let hasMutatedDom = false;
     let finalUrl = originalUrl;
@@ -248,9 +295,14 @@ export async function checkClientSideRoutingForPath({ page, targetUrl, candidate
       hasMutatedDom = await idle;
       finalUrl = window.location.href; // read before the rollback below moves it back
     } finally {
-      uninstallInflight();
+      // Roll the URL back, then WAIT for the rollback's own re-render to settle before resolving, so
+      // the next probe on this shared pool page starts from a quiet DOM instead of landing mid-render
+      // (the documented flakiness root — see WAIT_DOM_SETTLE_SRC). The in-flight tracker stays
+      // installed across the settle so a network-gated rollback render is awaited too, then uninstalls.
       window.history.pushState({ ignore: true }, '', originalUrl);
       window.dispatchEvent(new Event('popstate'));
+      await waitDomSettle(${idleMs}, ${maxWaitMs});
+      uninstallInflight();
     }
 
     const stayedOnTargetPath = new URL(finalUrl).pathname === new URL(targetUrl).pathname;
