@@ -1,8 +1,11 @@
-# SPA crawler
+# RAPIDOR
 
-Web interface crawler that explores a site by **clicking**, not just by following links. For each site, it builds a `state → click → state` graph, where a *state* is a distinct UI configuration (page, open menu, modal, selected tab...).
 
-Alongside exploration, it also detects **IDOR/BOLA vulnerabilities**: it loads RAPIDOR, a React DevTools extension, to capture React component state as it clicks around, correlates that state with the HTTP traffic it observes, and — entirely server-side, in this Node process — forges alternative requests (and, for SPA routes that never hit the network, replays the page's own client-side routing) to see whether a different user's data leaks out.
+RAPIDOR is a fully automated solution for detecting **IDOR/BOLA vulnerabilities** in React applications, in cases where unauthorized users gain access to paid resources (subscription bypass).
+
+The tool takes advantage of a SPA crawler that explores a site by **clicking**, not just by following links. For each site, it builds a `state → click → state` graph, where a *state* is a distinct UI configuration (page, open menu, modal, selected tab...).
+
+Alongside exploration, it loads an instrumeted React DevTools browser extension, to capture React component state as it clicks around, correlates that state with the HTTP traffic it observes, and — entirely server-side, in this Node process — forges alternative requests (and, for SPA routes that never hit the network, replays the page's own client-side routing) to see whether a different user's data leaks out.
 
 Based on [Crawlee](https://crawlee.dev) and [Playwright](https://playwright.dev) (Chromium), written in TypeScript.
 
@@ -195,6 +198,17 @@ npm run stats -- --db storage/other-run.db # or any other SQLite file in that sh
 ```
 
 `npm run compare-ablation` (same `--db` flag) compares these against the [ablation study](docs/analysis.md#ablation-study-http-json-only)'s own tables, when `analysis.ablationMode` was on for that run.
+
+## Reproducible demo (offline, deterministic)
+
+The analysis is **live** — the HTTP path forges requests against the real server and the client-routing probe drives the real app — so its results can change over time. For reproducibility, a frozen snapshot of one site's data lets anyone re-derive the **HTTP** findings deterministically and offline, with no crawl and no authenticated session:
+
+```bash
+npm run build-demo -- https://www.busuu.com/dashboard   # storage/crawler.db -> demo/crawler.db (one site's HTTP inputs + recorded responses)
+npm run run-demo   -- https://www.busuu.com/dashboard   # replay the real detection offline from demo/crawler.db (no browser, no network)
+```
+
+Every forged request is served from the snapshot's recorded cache (a miss throws rather than hitting the network), and the live-only client-routing phase is skipped — so the demo is HTTP-only by construction. See **[demo/README.md](demo/README.md)** for the snapshot date, the expected findings, and why client-routing is not part of the offline replay. The demo DB is gitignored; the full datasets are published on Zenodo (DOI TBD).
 
 ## Tranco List
 

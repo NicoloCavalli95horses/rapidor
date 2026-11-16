@@ -9,7 +9,9 @@
     "test": "node --import tsx --test test/*.test.ts",
     "tranco": "tsx scripts/tranco.ts",
     "stats": "tsx scripts/stats.ts",
-    "compare-ablation": "tsx scripts/compareAblation.ts"
+    "compare-ablation": "tsx scripts/compareAblation.ts",
+    "build-demo": "tsx scripts/buildDemo.ts",
+    "run-demo": "tsx scripts/runDemo.ts"
   },
   "keywords": [],
   "author": "",

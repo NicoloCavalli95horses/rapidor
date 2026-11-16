@@ -2,6 +2,15 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-16 09:55 — Reproducible offline demo (HTTP-only)
+For reproducibility: anyone can now re-derive our HTTP IDOR findings deterministically and offline, without crawling the live site or our authenticated session. The full datasets will go on Zenodo; the demo is the subset that can be *re-run* for byte-identical results.
+
+- **Offline mode in the pipeline** ([AnalysisPipeline.ts](src/analysis/AnalysisPipeline.ts), [requestForge.ts](src/analysis/requestForge.ts)). `AnalysisPipelineOptions.offline`: every forged request must come from the `forged_requests` cache (a miss *throws* via `forgeRequestCached`'s new `requireCache`, so an offline run can never silently hit the network), the live-only client-routing phase is skipped, and no browser/page is needed (`runForSite` and `evaluateHttpCandidate` take an optional `page`).
+- **Demo snapshot export** ([src/db/demoExport.ts](src/db/demoExport.ts), [scripts/buildDemo.ts](scripts/buildDemo.ts)). `exportSiteToDemoDb` copies one site's HTTP-detection inputs (`http_events`, `react_states`, `preindexed_values`, `crawl_states`), the recorded `forged_requests` responses, and the global `authz_classifications` cache into a small self-contained `demo/crawler.db`, overwriting only that site's rows. `npm run build-demo -- <START_URL>`, or `EXPORT_DEMO=true` (config `db.exportDemoAfterRun`) to refresh it automatically at the end of a crawl.
+- **Demo runner** ([scripts/runDemo.ts](scripts/runDemo.ts)). `npm run run-demo -- <START_URL>` runs the real detection offline against `demo/crawler.db`. Verified on busuu: **22/22 HTTP findings re-derived deterministically** across repeated runs, identical to the live source, with zero cache misses.
+- **demo/README.md** documents the snapshot date, how to run/regenerate, and *why the demo is HTTP-only* — client-routing's live `pushState` probe + pixel screenshot are not deterministically replayable offline (would need full page record-replay, seeded not-found calibration, and cross-machine pixel stability).
+- `demo/crawler.db` (~45 MB) is gitignored (→ Zenodo, DOI TBD). Removed the react-app-target-era note; typecheck green, demo runner green.
+
 ## 2026-11-16 09:25 — Remove the `react-app-target/` test fixture
 The local Next.js app with two planted IDORs was a development-time end-to-end target and is no longer needed (detection is covered by the unit suites, which mock the app with inline HTML via `page.route`, and validated against real sites). Deleted the folder and every reference to it: the "Test fixture" section in [docs/analysis.md](docs/analysis.md), its mentions in `README.md` and `.claude/CLAUDE.md`, and a stale comment in `AnalysisPipeline.test.ts`. The default `startUrl` in [src/config.ts](src/config.ts) pointed at that app's `http://localhost:3000`; it now defaults to a neutral placeholder (`https://example.com`), with the README's Configuration table updated to match. No test depended on the folder; typecheck and suites unaffected.
 

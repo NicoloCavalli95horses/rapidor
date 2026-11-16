@@ -29,6 +29,12 @@ export interface AnalysisPipelineOptions {
   clientRoutingConcurrency: number; // pages the client-routing phase probes on in parallel (see config.analysis.clientRoutingConcurrency)
   maxSegmentMatches: number; // skip a URL segment whose value appears in more preindexed nodes than this: a generic keyword, not an identifier (see config.analysis.maxSegmentMatches)
   notFoundScreenshotMaxDiff: number; // a client-routing candidate whose rendered screenshot differs from the calibrated not-found page by no more than this fraction of pixels is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundScreenshotMaxDiff)
+  // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
+  // pure HTTP and never touches the network: every forged request must already be in the
+  // forged_requests cache (a miss throws instead of forging live), the client-routing phase is
+  // skipped entirely (its pushState probe + not-found screenshot are live-only and not deterministically
+  // replayable — see demo/README.md), and no browser/page is needed. Default false (normal live run).
+  offline?: boolean;
 }
 
 export interface AnalysisPipelineDeps {
@@ -150,7 +156,7 @@ export class AnalysisPipeline {
     return true;
   }
 
-  async runForSite({ page, site, explorationMs }: { page: Page; site: string; explorationMs: number }): Promise<void> {
+  async runForSite({ page, site, explorationMs }: { page?: Page; site: string; explorationMs: number }): Promise<void> {
     const analysisStartedAt = Date.now();
     this.graphCache.clear();
     this.notFoundBaselines.clear();
@@ -198,7 +204,11 @@ export class AnalysisPipeline {
       }
     }
 
-    for (const pageUrl of pageUrls) {
+    // Client-routing candidates (seeded from the crawler's own page URLs) are probed live — a
+    // pushState+popstate against the real app, plus a not-found screenshot. Neither is deterministically
+    // replayable offline, so the offline demo skips this whole phase and stays HTTP-only (see
+    // AnalysisPipelineOptions.offline and demo/README.md).
+    for (const pageUrl of options.offline ? [] : pageUrls) {
       const found = this.findUrlCandidates({ url: pageUrl });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
@@ -229,9 +239,13 @@ export class AnalysisPipeline {
 
     if (tasks.length > 0) {
       const poolSize = Math.max(1, options.clientRoutingConcurrency);
-      log.info(`AnalysisPipeline: dispatching ${tasks.length} candidate request(s) for ${site} (${poolSize} client-routing page(s), ${options.maxConcurrentRequests} forge slot(s))`);
+      log.info(options.offline
+        ? `AnalysisPipeline: dispatching ${tasks.length} candidate request(s) for ${site} (offline/replay — HTTP only, ${options.maxConcurrentRequests} forge slot(s), no browser)`
+        : `AnalysisPipeline: dispatching ${tasks.length} candidate request(s) for ${site} (${poolSize} client-routing page(s), ${options.maxConcurrentRequests} forge slot(s))`);
       this.forgeSemaphore = new Semaphore(options.maxConcurrentRequests);
-      await this.setupPagePool({ page, size: poolSize });
+      // Offline is HTTP-only: every task is a cache-served forge gated by forgeSemaphore, none needs a
+      // pool page, so the browser-backed pool is never created (page may be undefined here).
+      if (!options.offline && page) await this.setupPagePool({ page, size: poolSize });
       try {
         // Isolate each candidate: one task throwing (a forged request erroring, a client-routing probe
         // whose navigation destroys the page context, ...) must not reject the whole pool and abort the
@@ -248,7 +262,7 @@ export class AnalysisPipeline {
         // tasks by forgeSemaphore, so letting this many run keeps the pool fed without over-forging.
         await runWithConcurrency({ tasks: guarded, limit: Math.max(poolSize, options.maxConcurrentRequests) });
       } finally {
-        await this.teardownPagePool();
+        if (!options.offline) await this.teardownPagePool();
       }
     }
 
@@ -339,7 +353,7 @@ export class AnalysisPipeline {
   }
 
   private async evaluateHttpCandidate({ page, site, event, url, candidate, segment }: {
-    page: Page; site: string;
+    page?: Page; site: string;   // page is absent in offline/replay mode (forge is cache-only, see below)
     event: ReturnType<HttpEventStore['listBySite']>[number];
     url: string;
     candidate: ReturnType<typeof findCandidates>[number];
@@ -350,6 +364,7 @@ export class AnalysisPipeline {
     const forged = await this.forgeSemaphore.run(async () => {
       const res = await forgeRequestCached({
         cache: forgedRequestStore, site, page, url, method: event.method, headers: event.requestHeaders, postData: event.postData,
+        requireCache: options.offline,
       });
       await sleep(options.timeBetweenRequestsMs);
       return res;
@@ -362,6 +377,10 @@ export class AnalysisPipeline {
 
     let detectionMethod: 'http' | 'client-routing' = 'http';
     if (!similarity.areSimilar) {
+      // Offline/replay: the client-routing fallback is a live probe and is not available, so a
+      // candidate the forge did not confirm is simply dropped. The demo therefore reports only the
+      // forge-confirmed (pure HTTP) findings — exactly the deterministic subset (see demo/README.md).
+      if (options.offline) return;
       // The forged request itself didn't look like it leaked anything (or outright failed) — for a
       // query-param candidate, check whether the SPA's own client-side routing honors it anyway,
       // independently of the server response (RAPIDOR's testClientSideQueryParamsUsage fallback).

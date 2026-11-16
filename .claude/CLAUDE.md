@@ -16,6 +16,8 @@ npm test                                            # full suite (~230 tests, sl
 START_URL=https://x.com npm start                   # crawl one site (HEADLESS=false to watch it)
 npx tsx scripts/runAnalysisFromDb.ts <START_URL>    # re-run analysis on data already in the DB, no new crawl
 npm run stats                                       # per-site stats + findings from storage/crawler.db
+npm run build-demo -- <START_URL>                   # snapshot one site's HTTP inputs into demo/crawler.db
+npm run run-demo   -- <START_URL>                   # offline, deterministic, HTTP-only replay from demo/crawler.db (no browser/network)
 ```
 To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read` the `.db` files.
 
@@ -28,7 +30,8 @@ To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read
 - `state/`: fingerprint, capture, in-memory store and graph (claim/release per `(state, element)`).
 - `analysis/`: IDOR pipeline. `AnalysisPipeline.ts` (736 lines, the hub) runs preindex → segments → matchFinder → requestForge → responseEvaluate → authzClassifier, plus the `clientRouting` fallback and `reproductionScript`. `AblationPipeline` + `jsonMatchFinder` are the HTTP-JSON-only variant.
 - `db/`: one `*Store.ts` per SQLite table; `openDatabase.ts` holds the schema.
-- `scripts/`: CLIs (tranco, stats, compareAblation, run*FromDb, debug).
+- `scripts/`: CLIs (tranco, stats, compareAblation, run*FromDb, buildDemo/runDemo, debug).
+- `db/demoExport.ts`: copies one site's HTTP-detection inputs + `forged_requests` into `demo/crawler.db` for the offline demo (`AnalysisPipelineOptions.offline`). `demo/crawler.db` is gitignored (→ Zenodo).
 - `test/`: `node:test`, one `<Module>.test.ts` per module; helpers in `test/helpers/` (`browser.ts`, `fakes.ts`).
 
 ## Do not read / ignore

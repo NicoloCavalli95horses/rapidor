@@ -125,7 +125,8 @@ export function buildExplorer(
     cfg.extension && new ExtensionCalls(cfg.extension, cfg.actionTimeoutMs),
     network && new NetworkObserverHooks(network),
     new ReactStateHooks(reactState, preindex),
-    new AnalysisHooks(analysisPipeline, site),
+    new AnalysisHooks(analysisPipeline, site,
+      cfg.db.exportDemoAfterRun ? { sourceDbPath: cfg.db.path, destDbPath: cfg.db.demoPath } : undefined),
     ablationPipeline && new AblationHooks(ablationPipeline, site),
   ];
   const hooks = maybeHooks.filter((h): h is IExplorationHooks => Boolean(h));

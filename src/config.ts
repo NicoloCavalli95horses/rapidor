@@ -64,6 +64,8 @@ export interface CrawlConfig {
     clearOnStart: boolean;           // wipe http_events/react_states/preindexed_values/vulnerabilities/analysis_stats (every site's rows) once at the start of each crawler run; false by default — use overwriteExistingDomain to only overwrite the domain(s) being explored
     overwriteExistingDomain: boolean; // before exploring a domain, delete only THAT domain's rows from every per-site table, so a re-run overwrites its own previous results while other saved runs are kept; true by default
     clearClassifierCache: boolean;   // wipe authz_classifications too; false by default: classifications are a pure function of the key string, independent of site/run, so they're worth keeping forever
+    demoPath: string;                // self-contained, HTTP-only demo DB (scripts/buildDemo.ts / runDemo.ts): one site's inputs + forged_requests cache, for a deterministic offline replay
+    exportDemoAfterRun: boolean;     // env EXPORT_DEMO; after each site's analysis, refresh demoPath with that site's HTTP-detection snapshot (same as running scripts/buildDemo.ts). false by default
   };
   analysis: {
     maxConcurrentRequests: number; // bounds forged-request concurrency; mirrors RAPIDOR's config.js maxConcurrentRequests
@@ -154,6 +156,8 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     clearOnStart: process.env.DB_CLEAR_ON_START === 'true',
     overwriteExistingDomain: process.env.OVERWRITE_EXISTING_DOMAIN !== 'false',
     clearClassifierCache: false,
+    demoPath: 'demo/crawler.db',
+    exportDemoAfterRun: process.env.EXPORT_DEMO === 'true',
   },
   // server-side IDOR analysis (preindex/match/forge/evaluate), ported from RAPIDOR's full-mode pipeline
   analysis: {

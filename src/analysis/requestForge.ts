@@ -48,12 +48,20 @@ export async function forgeRequest({ page, url, method, headers, postData }: {
  * for why the body is part of the cache key too (two POSTs to the same URL with different bodies are
  * different requests).
  */
-export async function forgeRequestCached({ cache, site, page, url, method, headers, postData }: {
-  cache: ForgedRequestStore; site: string; page: Page; url: string; method: string;
+export async function forgeRequestCached({ cache, site, page, url, method, headers, postData, requireCache }: {
+  cache: ForgedRequestStore; site: string; page?: Page; url: string; method: string;
   headers?: Record<string, string>; postData?: string;
+  // Offline/replay (the deterministic demo): the response MUST come from the cache. A miss throws
+  // instead of forging live, so an offline run can never silently hit the network — see
+  // AnalysisPipelineOptions.offline and demo/README.md.
+  requireCache?: boolean;
 }): Promise<ResponseLike> {
   const cached = cache.get({ site, method, url, postData });
   if (cached) return cached;
+  if (requireCache) {
+    throw new Error(`forgeRequestCached: no cached response for ${method} ${url} (offline mode refuses to hit the network)`);
+  }
+  if (!page) throw new Error('forgeRequestCached: a live forge needs a page (none given, and no cached response)');
   const response = await forgeRequest({ page, url, method, headers, postData });
   cache.record({ site, method, url, postData, response });
   return response;

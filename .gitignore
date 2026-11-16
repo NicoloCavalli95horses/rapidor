@@ -2,3 +2,7 @@ node_modules/*
 storage/*
 reports/*
 .env
+demo/crawler.db
+demo/crawler.db-shm
+demo/crawler.db-wal
+demo/reports/
