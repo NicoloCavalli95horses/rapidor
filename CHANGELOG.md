@@ -2,6 +2,14 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-17 12:10 — Preindex `href`: find navigation-target siblings (arabicroad)
+arabicroad flagged nothing where 3 IDOR candidates were expected. The sibling games exist in the captured React state as `href="/games/<slug>/"` link nodes of one component, but `href` was not in `PREINDEXED_KEYS`, so that whole navigation component was never indexed and `matchFinder` never reached its siblings. Many SPAs express sibling resources only as navigation targets, not as a bare id under an `id`-like key.
+
+- **`href` added to `PREINDEXED_KEYS`** ([preindex.ts](src/analysis/preindex.ts)). The full-path value is tokenized (split on `/.?`), so the bare URL segment still matches; `maxSegmentMatches` drops the generic links that index everywhere. On arabicroad this generates exactly the 3 expected candidates (`/games/{echo-match,number-sort,listen-tap}/`; `vocab-rush` is history-filtered).
+- **`src` measured and NOT added.** It indexes every image's CDN URL — on busuu it added +44 forged GET requests (all image swaps) with zero useful siblings on any reference site. `href` alone carries the signal.
+- **Measured impact (offline, no DB writes)**: pimsleur and busuu candidate/forge counts **unchanged**; lingualeo client-routing candidates net **down** (258→226, the cap absorbs the extra values), +2 forge; babbel +8 client candidates. Takes effect only on a re-preindex (the pipeline reads the stored `preindexed_values`), so existing captured sites need a re-crawl or a re-preindex to benefit.
+- Not a full fix for arabicroad: the 3 candidates are generated and pass the content guard but are rejected by the authz classifier (the only differing prop is `href`/the game name — no entitlement signal like `isPremium`/`isLocked` in the link nodes). Candidate generation was the bug; flagging a public-resource swap is correctly declined. preindex/matchFinder suites green.
+
 ## 2026-11-17 11:30 — Client-routing & HTTP IDOR: DOM-diff guards kill the inert false positives
 Lingualeo flagged `buy/...?refclmark=2 -> 1` as an IDOR: the forged request got a 2xx (Next.js re-fetches `_next/data/...json?refclmark=1`), but the two pages are pixel- and content-identical — a tracking param the app reads and ignores. The screenshot not-found guard never fired (a 2xx skipped it) and nothing compared the actual *content*. Same class over HTTP: busuu `checkout.json?price_id=A -> B` returned a byte-identical 65 KB payload yet was flagged because the sibling React props differ. The fix compares rendered content, not just the network verdict.
 
@@ -53,6 +61,3 @@ Documentation only, no code change.
 - **Stale freemium references removed.** `scripts/freemiumPrefilter.ts`/`freemiumList.ts`, the `freemium_candidates` table and the "Freemium study" section were documented but no longer exist in the code.
 - **CHANGELOG archive.** Entries older than 2026-11-13 14:09 moved to [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md); new entries keep going at the top of this file.
 - `.claude/CLAUDE.md` and `.claude/rules/analysis.md` updated to point at the new locations.
-
-## 2026-11-16 08:10 — Compact agent context in `.claude/`
-Tooling only, no code change. `.claude/CLAUDE.md` now carries a code map, the commands (single-file test runs, from-DB analysis), the paths to ignore and the CHANGELOG/commit conventions, so an agent no longer needs to read the whole README. Module invariants moved to path-scoped rules (`.claude/rules/analysis.md`, `.claude/rules/exploration.md`), loaded only when the matching files are touched.

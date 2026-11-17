@@ -2,6 +2,9 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-16 08:10 — Compact agent context in `.claude/`
+Tooling only, no code change. `.claude/CLAUDE.md` now carries a code map, the commands (single-file test runs, from-DB analysis), the paths to ignore and the CHANGELOG/commit conventions, so an agent no longer needs to read the whole README. Module invariants moved to path-scoped rules (`.claude/rules/analysis.md`, `.claude/rules/exploration.md`), loaded only when the matching files are touched.
+
 ## 2026-11-13 16:10 — Version the authz classifier's persisted cache
 The classifier's word-split + "whether" framing lifted `available` to 0.405 in-memory, but a re-run still flagged nothing on lingualeo: `authz_classifications` already held `available` at its pre-split 0.234 from an earlier run, and a single-word key normalizes to itself, so the stale row was read straight back. The persisted store key now carries a `CLASSIFIER_VERSION` prefix — changing the normalization/embedding bumps it, bypassing every row a previous version wrote; the in-memory (per-process) cache stays keyed by the normalized form. With stale rows bypassed, lingualeo goes from 0 to 12 findings: the `available`-gated training-type swaps (`savannah → repetition / word_cards / word_puzzle / brainstorm / phrase_puzzle`, `wordTranslate → wordsCards`, …) now flag end-to-end (GET client-routing + network-aware probe + `available` classified authz). pimsleur 4/4 and busuu 19/19 unchanged.
 
