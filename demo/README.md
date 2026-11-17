@@ -12,7 +12,7 @@ always the same, independent of time, network, or machine.
 ## Run it
 
 The snapshot DB (`demo/crawler.db`) is **not committed** (it is ~45 MB; see *Data availability* below).
-Obtain it first — from Zenodo (DOI _TBD_) or by regenerating it from a full crawler DB — then:
+Obtain it first — from Zenodo (DOI _TBD_). Then:
 
 ```bash
 npm install
@@ -22,7 +22,7 @@ npm run run-demo -- https://www.busuu.com/dashboard
 
 It prints the 22 reference → candidate URL pairs and re-derives them every time. No browser, no login, no
 network: every forged request is served from the snapshot's `forged_requests` cache, and a cache miss
-*throws* rather than hitting the network — the offline guarantee is enforced, not assumed.
+*throws* rather than hitting the network.
 
 ## (Re)generating the snapshot
 
