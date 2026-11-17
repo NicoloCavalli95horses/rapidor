@@ -69,7 +69,7 @@ const pipeline = new AnalysisPipeline({
     clientRoutingProbe: config.analysis.clientRoutingProbe,
     maxSegmentMatches: config.analysis.maxSegmentMatches,
     clientRoutingConcurrency: config.analysis.clientRoutingConcurrency,
-    notFoundScreenshotMaxDiff: config.analysis.notFoundScreenshotMaxDiff,
+    notFoundDomMaxDiff: config.analysis.notFoundDomMaxDiff,
     offline: true,   // HTTP-only, cache-served forges, no client-routing, no browser
   },
 });

@@ -55,7 +55,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         clientRoutingProbe: { minWaitMs: 300, idleMs: 50, maxWaitMs: 500 },
         maxSegmentMatches: 300,
         clientRoutingConcurrency: 1,
-        notFoundScreenshotMaxDiff: 0.02,
+        notFoundDomMaxDiff: 0.05,
       },
     });
     return { pipeline, httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -64,13 +64,14 @@ describe('AnalysisPipeline: client-side-only query params', () => {
   const { newPage } = useBrowser();
 
   // A client-routed SPA that resolves ?id from already-loaded state (no network request for it):
-  // a known id renders a large content block, an unknown id renders nothing — the app's own
-  // "not found". That distinction is what the screenshot not-found guard needs: a real candidate's
-  // render (a block) must differ visibly from the not-found baseline (blank, from a garbage id).
+  // a known id renders its owner's profile (data that differs per id, not just the echoed id — an
+  // echo alone is masked out by the DOM guards and is not a leak), an unknown id renders nothing —
+  // the app's own "not found". That distinction is what the not-found guard needs: a real
+  // candidate's DOM (a block of text) must differ from the not-found baseline (empty, garbage id).
   // Replaces children (childList mutation) so clientRouting.ts's MutationObserver sees it — it only
   // watches childList/attributes.
   const html = `<div id="out"></div><script>
-    const KNOWN = { '101': 1, '102': 1 };
+    const KNOWN = { '101': 'Alice', '102': 'Bob' };
     function render() {
       const out = document.getElementById('out');
       out.innerHTML = '';
@@ -78,7 +79,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
       if (KNOWN[id]) {
         const block = document.createElement('div');
         block.style.cssText = 'width:1000px;height:600px;background:#3366cc';
-        block.textContent = id;
+        block.textContent = 'Profile ' + id + ' owned by ' + KNOWN[id];
         out.appendChild(block);
       }
     }
@@ -109,24 +110,29 @@ describe('AnalysisPipeline: client-side-only query params', () => {
     assert.equal(findings, 1);
   });
 
-  // Every id — the real candidate and the garbage calibration value alike — renders the same
-  // "not found" page: the route reacts (DOM mutates) but shows no real resource. The screenshot guard
-  // must recognize the candidate's render as the not-found baseline and reject it, even though the
-  // differing prop ('premium') is authz-relevant and would otherwise be flagged.
+  // The reference id renders a real profile; every other id — the candidate and the garbage
+  // calibration value alike — renders the app's not-found page, which ECHOES the id it was given
+  // ("Profile 102 not found"). The route reacts (DOM mutates) and differs from the reference (so the
+  // inert guard keeps it), but it shows no real resource: the not-found guard must match it to the
+  // garbage baseline once each side's own value is masked out, and reject it. The id is parsed with
+  // a regex, not URLSearchParams.get, so the probe sees no param read: nothing corroborates the
+  // candidate and the not-found guard does run.
   const notFoundHtml = `<div id="out"></div><script>
     function render() {
       const out = document.getElementById('out');
       out.innerHTML = '';
+      const m = /[?&]id=([^&]*)/.exec(location.search);
+      const id = m ? m[1] : '';
       const block = document.createElement('div');
       block.style.cssText = 'width:1000px;height:600px;background:#cccccc';
-      block.textContent = 'Not found';
+      block.textContent = id === '101' ? 'Profile 101 owned by Alice' : 'Profile ' + id + ' not found';
       out.appendChild(block);
     }
     window.addEventListener('popstate', render);
     render();
   </script>`;
 
-  it('rejects a candidate whose render matches the app\'s not-found page (screenshot guard)', async () => {
+  it('rejects a candidate whose render matches the app\'s not-found page (DOM guard)', async () => {
     const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();
     (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
     (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
@@ -143,7 +149,45 @@ describe('AnalysisPipeline: client-side-only query params', () => {
 
     await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
 
-    // DOM mutated and 'premium' is authz-relevant, but the render is the not-found page -> not flagged
+    // DOM mutated, differs from the reference and 'premium' is authz-relevant, but the render is the not-found page -> not flagged
+    assert.equal(vulnerabilityStore.count('app.test'), 0);
+  });
+
+  // The lingualeo refclmark false positive, reduced: the app READS ?id (URLSearchParams.get, so the
+  // probe sees appReadParam — corroboration that used to skip every visual guard) and re-renders on
+  // popstate (a real DOM mutation), but shows the same content for every value. The inert-value
+  // guard must see the candidate's render is the reference page's own render and reject it.
+  const inertHtml = `<div id="out"></div><script>
+    function render() {
+      new URLSearchParams(location.search).get('id'); // read, then ignored
+      const out = document.getElementById('out');
+      out.innerHTML = '';
+      const block = document.createElement('div');
+      block.style.cssText = 'width:1000px;height:600px;background:#33aa66';
+      block.textContent = 'Buy premium';
+      out.appendChild(block);
+    }
+    window.addEventListener('popstate', render);
+    render();
+  </script>`;
+
+  it('rejects a candidate whose render is identical to the reference page (inert value), even when the app read the param', async () => {
+    const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+
+    const page = await newPage();
+    await installParamUsageTracking(page);
+    await page.route(`${APP_ORIGIN}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: inertHtml }));
+    const pageUrl = `${APP_ORIGIN}/?id=101`;
+    await page.goto(pageUrl);
+
+    const graph = siblingGraph();
+    const stateId = reactStateStore.record({ site: 'app.test', url: pageUrl, graph })!;
+    preindexStore.reindex({ stateId, graph });
+
+    await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+
     assert.equal(vulnerabilityStore.count('app.test'), 0);
   });
 
@@ -188,7 +232,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         clientRoutingProbe: { minWaitMs: 300, idleMs: 50, maxWaitMs: 500 },
         maxSegmentMatches: 300,
         clientRoutingConcurrency: 1,
-        notFoundScreenshotMaxDiff: 0.02,
+        notFoundDomMaxDiff: 0.05,
       },
     });
     return { pipeline, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -203,9 +247,10 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
   // __accessedParams (see checkClientSideRoutingForPath's doc comment), so the probe can only tell
   // "the router reacted to the URL change", not "it read this exact segment".
   // Known ids render a large content block, an unknown id renders nothing (the app's own "not found")
-  // — so the screenshot guard can tell a real candidate's render from the not-found baseline.
+  // — so the not-found guard can tell a real candidate's render from the not-found baseline. Each
+  // known id shows its own owner, not only the echoed id (an echo is masked out, see domSnapshot.ts).
   const html = `<div id="out"></div><script>
-    const KNOWN = { '101': 1, '102': 1 };
+    const KNOWN = { '101': 'Alice', '102': 'Bob' };
     function render() {
       const out = document.getElementById('out');
       out.innerHTML = '';
@@ -213,7 +258,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
       if (KNOWN[id]) {
         const block = document.createElement('div');
         block.style.cssText = 'width:1000px;height:600px;background:#3366cc';
-        block.textContent = id;
+        block.textContent = 'Profile ' + id + ' owned by ' + KNOWN[id];
         out.appendChild(block);
       }
     }
@@ -240,6 +285,49 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
 
     const findings = vulnerabilityStore.count('app.test');
     assert.equal(findings, 1);
+  });
+
+  // Regression for lingualeo's /en/training/<type>: an SSR route whose CONTENT is produced only on a
+  // real load. popstate causes a spurious mutation (a spinner tick) that makes the probe see a DOM
+  // reaction and stay on the route, but the content ('out') is written once, on load, from the URL —
+  // a pushState to the sibling URL never re-renders it. The content guard must reach the candidate by
+  // a REAL navigation (captureRouteByNavigation): on a fresh load, render() reads the new segment and
+  // shows the sibling's owner, which differs from the reference. (With the old pushState-based guard
+  // the candidate looked identical to the reference and this real finding was dropped.)
+  const ssrOnLoadHtml = `<div id="out"></div><div id="spin">0</div><script>
+    const KNOWN = { '101': 'Alice', '102': 'Bob' };
+    function render() {
+      const out = document.getElementById('out');
+      out.innerHTML = '';
+      const id = location.pathname.split('/').filter(Boolean)[1];
+      const block = document.createElement('div');
+      block.style.cssText = 'width:1000px;height:600px;background:#3366cc';
+      block.textContent = KNOWN[id] ? ('Profile ' + id + ' owned by ' + KNOWN[id]) : ('Profile ' + id + ' not found');
+      out.appendChild(block);
+    }
+    // popstate mutates something trivial (so the probe sees a reaction) but does NOT re-render content
+    window.addEventListener('popstate', () => { document.getElementById('spin').textContent = String(Date.now()); });
+    render(); // content is set only on a real load, from the URL
+  </script>`;
+
+  it('flags a sibling whose route renders its content only on a real navigation (pushState shows nothing new)', async () => {
+    const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+
+    const page = await newPage();
+    await installParamUsageTracking(page);
+    await page.route(`${APP_ORIGIN}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: ssrOnLoadHtml }));
+    const pageUrl = `${APP_ORIGIN}/users/101/profile`;
+    await page.goto(pageUrl);
+
+    const graph = siblingGraph();
+    const stateId = reactStateStore.record({ site: 'app.test', url: pageUrl, graph })!;
+    preindexStore.reindex({ stateId, graph });
+
+    await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+
+    assert.equal(vulnerabilityStore.count('app.test'), 1);
   });
 
   // Regression: busuu's own dashboard/review -> dashboard/dashboard/weak (client-routing-path). The

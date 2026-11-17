@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse } from '../src/analysis/responseEvaluate';
 
 describe('checkIntSimilarity', () => {
   it('true when both are zero, false when only one is', () => {
@@ -82,5 +82,29 @@ describe('compareObj', () => {
   it('treats a type change (e.g. object -> primitive) as a single leaf diff', () => {
     const diffs = compareObj({ a: { b: 1 } }, { a: 'now-a-string' });
     assert.deepEqual(diffs, [{ path: ['a'], reference: { b: 1 }, current: 'now-a-string', key: 'a', pathStr: 'a' }]);
+  });
+});
+
+describe('isIdenticalResponse (server ignored the swapped value)', () => {
+  const res = (body: string, status = 200) => ({ status, headers: {}, body, contentType: 'application/json' });
+
+  it('is true for byte-identical bodies', () => {
+    assert.equal(isIdenticalResponse({ reference: res('{"a":1}'), candidate: res('{"a":1}') }), true);
+  });
+
+  it('is true for deep-equal JSON regardless of key order and whitespace', () => {
+    assert.equal(isIdenticalResponse({ reference: res('{"a":1,"b":[1,2]}'), candidate: res('{ "b": [1, 2], "a": 1 }') }), true);
+  });
+
+  it('is false when a single value differs', () => {
+    assert.equal(isIdenticalResponse({ reference: res('{"owner":"alice"}'), candidate: res('{"owner":"bob"}') }), false);
+  });
+
+  it('is false when the status differs', () => {
+    assert.equal(isIdenticalResponse({ reference: res('{}'), candidate: res('{}', 404) }), false);
+  });
+
+  it('is false when either body is missing (cannot prove identity)', () => {
+    assert.equal(isIdenticalResponse({ reference: res(''), candidate: res('') }), false);
   });
 });

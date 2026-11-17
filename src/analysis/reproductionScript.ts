@@ -10,10 +10,13 @@ import type { PropDiff } from './responseEvaluate';
  *
  * Running it with `npx tsx` prints, side by side:
  *  - http findings: ORIGINAL request + response (recorded), MUTATED request + response (live);
- *  - client-routing findings: opens a real browser on the original URL, takes a screenshot, applies
- *    the mutation (pushState + popstate), takes a second screenshot and writes both PNGs plus a
- *    pixel diff next to the script;
- *  - in both cases the React props of the original node and of the node whose value was spliced in.
+ *  - client-routing findings: opens a real browser on the original URL, snapshots it, applies the
+ *    mutation (pushState + popstate) and snapshots it again;
+ *  - in both cases a normalized DOM diff of the two pages (domSnapshot.ts: the same comparison the
+ *    pipeline's guards use — text nodes, <img> src, element count), which is the verdict, plus the
+ *    two screenshots and their pixel diff written next to the script as visual evidence only (a
+ *    screenshot is viewport-bound and depends on assets loading, so it is never a criterion);
+ *  - the React props of the original node and of the node whose value was spliced in.
  */
 
 export type ReproductionKind =
@@ -104,10 +107,12 @@ function reproductionBody(input: ReproductionInput): string {
   if (original.request.method.toUpperCase() === 'GET') {
     await page.goto(REFERENCE_URL, { waitUntil: 'load' });
     originalShot = await page.screenshot();
+    originalDom = await readDomSnapshot({ page });
     await page.goto(CANDIDATE_URL, { waitUntil: 'load' });
     mutatedShot = await page.screenshot();
+    mutatedDom = await readDomSnapshot({ page });
   } else {
-    console.log('(screenshots skipped: ' + original.request.method + ' requests cannot be replayed by opening a URL)');
+    console.log('(page snapshots skipped: ' + original.request.method + ' requests cannot be replayed by opening a URL)');
   }
 `;
   }
@@ -131,21 +136,25 @@ function reproductionBody(input: ReproductionInput): string {
   section('1. ORIGINAL page');
   console.log('URL:', REFERENCE_URL);
   originalShot = await page.screenshot();
+  originalDom = await readDomSnapshot({ page });
 
-  section('2. MUTATED page (' + REFERENCE_VALUE + ' -> ' + CANDIDATE_VALUE + ', pushState + popstate, no reload)');
+  // The probe (pushState + popstate, no reload) only reports whether the app's own client-side router
+  // REACTED to the swapped value; it is printed for information. The DOM diff / screenshots below,
+  // which are the verdict, use a REAL navigation to the candidate URL — exactly how the pipeline's
+  // content guard renders it and how a user reaches it, because an SSR route (Next.js, ...) only
+  // produces its content on a server fetch that a pushState does not trigger.
+  section('2. MUTATED page (' + REFERENCE_VALUE + ' -> ' + CANDIDATE_VALUE + ')');
   console.log('URL:', CANDIDATE_URL);
   const result = await ${probe};
-  console.log('probe result:', JSON.stringify(result));
-  await page.evaluate((url) => {
-    window.history.pushState({}, '', url);
-    window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
-  }, CANDIDATE_URL);
+  console.log('probe result (pushState, no reload):', JSON.stringify(result));
+  await page.goto(CANDIDATE_URL, { waitUntil: 'load' });
   await page.waitForTimeout(2000);
   mutatedShot = await page.screenshot();
+  mutatedDom = await readDomSnapshot({ page });
 
   verdict = result.isUsingNewParams
-    ? "the page's own routing reacted to the swapped value (" + JSON.stringify(result) + ") — consistent with an IDOR."
-    : 'did not reproduce this time (' + JSON.stringify(result) + ') — SPA state may have changed, re-check manually.';
+    ? "the page's own routing reacted to the swapped value (" + JSON.stringify(result) + ") — see the DOM diff below for whether the content actually differs."
+    : "the client-side probe did not confirm a reaction (" + JSON.stringify(result) + ") — the DOM diff below (from a real navigation) is the verdict.";
 `;
 }
 
@@ -168,8 +177,30 @@ function printResponse(res: { status: number; headers: Record<string, string>; b
   console.log('body:', body);
 }
 
+/**
+ * The verdict signal: the same normalized DOM comparison the pipeline's guards use (text nodes, <img>
+ * src, element count; each side masked with its own value so an echoed id does not count). No
+ * self-noise calibration here (one capture per side), so a ticking clock shows up as a change: read
+ * the listed lines before trusting a "changed" verdict.
+ */
+function printDomDiff(originalDom: DomSnapshot | undefined, mutatedDom: DomSnapshot | undefined): DomDiff | undefined {
+  section('DOM diff (original vs mutated) — verdict signal');
+  if (!originalDom || !mutatedDom) { console.log('(not available)'); return undefined; }
+  const diff = diffDomSnapshots({
+    a: maskValue({ snapshot: originalDom, value: REFERENCE_VALUE }),
+    b: maskValue({ snapshot: mutatedDom, value: CANDIDATE_VALUE }),
+  });
+  console.log('elements: ' + originalDom.nodeCount + ' -> ' + mutatedDom.nodeCount);
+  console.log('changed text nodes: ' + diff.changed.length + ' (' + (diff.textFraction * 100).toFixed(1) + '% of all text nodes)');
+  for (const c of diff.changed.slice(0, DOM_DIFF_PREVIEW)) {
+    console.log('  ' + c.key + '\\n    - ' + JSON.stringify(c.a ?? null) + '\\n    + ' + JSON.stringify(c.b ?? null));
+  }
+  if (diff.changed.length > DOM_DIFF_PREVIEW) console.log('  … ' + (diff.changed.length - DOM_DIFF_PREVIEW) + ' more');
+  return diff;
+}
+
 async function saveScreenshotsAndDiff(originalShot: Buffer | undefined, mutatedShot: Buffer | undefined): Promise<void> {
-  section('Screenshots');
+  section('Screenshots (visual evidence only, not a criterion)');
   if (!originalShot || !mutatedShot) { console.log('(not available)'); return; }
   const originalPath = join(OUT_DIR, BASE_NAME + '.original.png');
   const mutatedPath = join(OUT_DIR, BASE_NAME + '.mutated.png');
@@ -195,9 +226,7 @@ async function saveScreenshotsAndDiff(originalShot: Buffer | undefined, mutatedS
   const changedPct = (changed / totalPixels) * 100;
   console.log('diff image:     ', diffPath);
   console.log('changed pixels: ' + changed + ' / ' + totalPixels + ' (' + changedPct.toFixed(2) + '%)');
-  console.log(changed > 0
-    ? '=> the rendered page visibly changed after swapping in the candidate value.'
-    : '=> no visible pixel change — the page may not have re-rendered (open the PNGs to confirm).');
+  console.log('(viewport only, and placeholder-ized assets can hide a change: see the DOM diff for the verdict)');
 }
 
 function printProps(): void {
@@ -258,6 +287,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type { PropDiff } from '../../src/analysis/responseEvaluate';
+import { readDomSnapshot, diffDomSnapshots, maskValue, type DomSnapshot, type DomDiff } from '../../src/analysis/domSnapshot';
 
 const REFERENCE_URL = ${literal(input.referenceUrl)};
 const CANDIDATE_URL = ${literal(input.candidateUrl)};
@@ -267,6 +297,7 @@ const USER_DATA_DIR = ${literal(input.userDataDir ?? '')}; // '' = ephemeral pro
 const OUT_DIR = ${literal(dir)}; // screenshots and diff land here
 const BASE_NAME = ${literal(baseName)}; // screenshots/diff share this name, next to the script
 const BODY_PREVIEW_CHARS = 1500;
+const DOM_DIFF_PREVIEW = 20; // changed text nodes printed in full
 const REFERENCE_PROPS = ${literal(input.referenceProps)};
 const CANDIDATE_PROPS = ${literal(input.candidateProps)};
 const DIFFERENCES: PropDiff[] = ${literalDiffs(input.differences)};
@@ -277,6 +308,8 @@ async function main() {
   const page = context.pages()[0] ?? await context.newPage();
   let originalShot: Buffer | undefined;
   let mutatedShot: Buffer | undefined;
+  let originalDom: DomSnapshot | undefined;
+  let mutatedDom: DomSnapshot | undefined;
   let verdict = '';
 
   try {
@@ -285,9 +318,15 @@ ${reproductionBody(input)}
     await context.close();
   }
 
+  const domDiff = printDomDiff(originalDom, mutatedDom);
   await saveScreenshotsAndDiff(originalShot, mutatedShot);
   section('Verdict');
   console.log(verdict);
+  if (domDiff) {
+    console.log(domDiff.changed.length > 0 || domDiff.nodeDelta > 0
+      ? '=> the DOM content changed after swapping in the candidate value (' + domDiff.changed.length + ' text node(s), ' + domDiff.nodeDelta + ' element(s)).'
+      : '=> the DOM content is IDENTICAL: the swapped value has no effect on the page — most likely a false positive.');
+  }
   printProps();
 }
 

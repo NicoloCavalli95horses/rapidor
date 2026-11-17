@@ -104,10 +104,12 @@ export interface CrawlConfig {
     // made candidate generation take tens of minutes (and produced thousands of junk candidates).
     maxSegmentMatches: number;
     // client-routing false-positive guard: when a candidate route has no decisive network signal,
-    // its rendered screenshot is compared against the app's own "not found" page (calibrated by
-    // rendering a garbage id in the same slot). If no more than this fraction of pixels differ, the
-    // route only rendered the not-found page — a false positive — and the candidate is rejected.
-    notFoundScreenshotMaxDiff: number;
+    // its normalized DOM (text nodes + <img> src + element count, see analysis/domSnapshot.ts) is
+    // compared against the app's own "not found" page (calibrated by rendering a garbage id in the
+    // same slot). If no more than this fraction of text nodes differ AND the element count differs
+    // by no more than this fraction, the route only rendered the not-found page — a false positive —
+    // and the candidate is rejected.
+    notFoundDomMaxDiff: number;
   };
   lightweight: LightweightConfig;
   extension?: ExtensionConfig;  // Chrome extension to load (optional)
@@ -170,8 +172,9 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     ablationMode: process.env.ABLATION_MODE === 'true',
     // a value in more than this many preindexed nodes is a generic keyword, not an identifier: skipped
     maxSegmentMatches: 300,
-    // <= 2% of pixels differing from the calibrated not-found page => the candidate IS the not-found page
-    notFoundScreenshotMaxDiff: 0.02,
+    // <= 5% of text nodes (and of elements) differing from the calibrated not-found page => the
+    // candidate IS the not-found page. A real resource's page differs in most of its content.
+    notFoundDomMaxDiff: 0.05,
   },
   // USER_DATA_DIR enables a persistent profile (~ and $HOME are expanded); when unset, a temporary profile is used
   userDataDir: process.env.USER_DATA_DIR ? expandHome({ value: process.env.USER_DATA_DIR }) : undefined,
@@ -194,7 +197,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   },
   // browser extension details: this is launched with the Chromium browser
   extension: {
-    path: 'browser_extension/rapidor', // path to th extension (unpacked)
+    path: 'browser_extension/react-instrumented', // path to th extension (unpacked)
     calls: [
       // [called on start] clears the extension's shared IndexedDB once, so a run on a persistent profile starts clean
       { fn: '__RAPIDOR__reset', when: 'start' },

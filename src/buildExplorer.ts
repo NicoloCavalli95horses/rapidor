@@ -105,7 +105,7 @@ export function buildExplorer(
       clientRoutingProbe: cfg.analysis.clientRoutingProbe,
       maxSegmentMatches: cfg.analysis.maxSegmentMatches,
       clientRoutingConcurrency: cfg.analysis.clientRoutingConcurrency,
-      notFoundScreenshotMaxDiff: cfg.analysis.notFoundScreenshotMaxDiff,
+      notFoundDomMaxDiff: cfg.analysis.notFoundDomMaxDiff,
     },
   });
 

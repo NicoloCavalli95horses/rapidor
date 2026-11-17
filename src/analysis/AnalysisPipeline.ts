@@ -5,16 +5,16 @@ import type { HttpEventStore } from '../db/HttpEventStore';
 import type { PreindexedValueStore } from '../db/PreindexedValueStore';
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import type { CrawlStateStore } from '../db/CrawlStateStore';
-import type { VulnerabilityStore } from '../db/VulnerabilityStore';
+import type { VulnerabilityStore, StoredFinding } from '../db/VulnerabilityStore';
 import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, spliceSegment, type SegmentCandidate } from './segments';
 import { findCandidates } from './matchFinder';
 import { forgeRequestCached, runWithConcurrency, sleep } from './requestForge';
-import { getServerResponseSimilarity, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
-import { captureRouteScreenshot, screenshotDiffFraction, makeGarbageValue } from './routeScreenshot';
+import { captureRouteByNavigation, captureDomSnapshot, diffDomSnapshots, domNoise, maskValue, makeGarbageValue, type DomSnapshot, type DomNoise } from './domSnapshot';
 import { installParamUsageTracking } from '../browser/paramUsageTracker';
 import { formatDuration } from '../core/duration';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
@@ -28,7 +28,7 @@ export interface AnalysisPipelineOptions {
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };  // see config.analysis.clientRoutingProbe's own comment
   clientRoutingConcurrency: number; // pages the client-routing phase probes on in parallel (see config.analysis.clientRoutingConcurrency)
   maxSegmentMatches: number; // skip a URL segment whose value appears in more preindexed nodes than this: a generic keyword, not an identifier (see config.analysis.maxSegmentMatches)
-  notFoundScreenshotMaxDiff: number; // a client-routing candidate whose rendered screenshot differs from the calibrated not-found page by no more than this fraction of pixels is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundScreenshotMaxDiff)
+  notFoundDomMaxDiff: number; // a client-routing candidate whose normalized DOM differs from the calibrated not-found page by no more than this fraction (of text nodes AND of element count) is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundDomMaxDiff)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
   // forged_requests cache (a miss throws instead of forging live), the client-routing phase is
@@ -131,7 +131,9 @@ export class AnalysisPipeline {
   // means calibration was attempted but produced no usable shot, so don't keep retrying it. Holds the
   // in-flight PROMISE, not the resolved buffer, so concurrent probes on the same template (now that
   // the pool runs them in parallel) share one calibration instead of each rendering the garbage value.
-  private notFoundBaselines = new Map<string, Promise<Buffer | undefined>>();
+  // per route template: the garbage-id render (the app's not-found page) and the garbage value itself,
+  // so that value can be masked out of the baseline exactly as the candidate's own value is
+  private notFoundBaselines = new Map<string, Promise<{ snapshot: DomSnapshot; value: string } | undefined>>();
 
   // Finding ids this analysis run has already logged. The WARN for a confirmed finding must reflect
   // what THIS run determined, not whether the row happens to be new to the DB: vulnerabilityStore
@@ -370,13 +372,19 @@ export class AnalysisPipeline {
       return res;
     });
 
-    const similarity = getServerResponseSimilarity(
-      { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType },
-      forged,
-    );
+    const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType };
+    const similarity = getServerResponseSimilarity(original, forged);
+    // A forged response identical to the original one means the server ignored the swapped value:
+    // nothing leaked over HTTP, however similar the two look. Treated like a non-similar response, so
+    // the candidate still gets the client-routing fallback below (the SPA might honour the value
+    // client-side even though the server does not) — with its own inert-value guard.
+    const serverIgnoredValue = similarity.areSimilar && isIdenticalResponse({ reference: original, candidate: forged });
+    if (serverIgnoredValue) {
+      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response identical to the original: the server ignores the value) — ${event.url} -> ${url}`);
+    }
 
     let detectionMethod: 'http' | 'client-routing' = 'http';
-    if (!similarity.areSimilar) {
+    if (!similarity.areSimilar || serverIgnoredValue) {
       // Offline/replay: the client-routing fallback is a live probe and is not available, so a
       // candidate the forge did not confirm is simply dropped. The demo therefore reports only the
       // forge-confirmed (pure HTTP) findings — exactly the deterministic subset (see demo/README.md).
@@ -400,7 +408,7 @@ export class AnalysisPipeline {
         run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidate.candidateValue, ...clientRoutingProbe }),
       });
       const clientCandidateUrl = withParam({ url: event.pageUrl, name: paramName, value: candidate.candidateValue });
-      const reason = await this.clientSideConfirmed({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, candidateValue: candidate.candidateValue, clientRouting });
+      const reason = await this.clientSideConfirmed({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
       if (reason) {
         log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${event.pageUrl} ?${paramName}=${candidate.candidateValue}`);
         return;
@@ -455,7 +463,7 @@ export class AnalysisPipeline {
       pageUrl,
       run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidate.candidateValue, ...clientRoutingProbe }),
     });
-    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, clientRouting });
+    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
       return;
@@ -510,7 +518,7 @@ export class AnalysisPipeline {
       pageUrl,
       run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue: candidate.candidateValue, ...clientRoutingProbe }),
     });
-    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, clientRouting });
+    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${candidateUrl}`);
       return;
@@ -563,6 +571,110 @@ export class AnalysisPipeline {
       clientRoutingProbe: this.deps.options.clientRoutingProbe,
       kind,
     });
+  }
+
+  /**
+   * Re-runs today's accept/reject decision on findings ALREADY in the `vulnerabilities` table, without
+   * regenerating candidates and without writing anything (no vulnerabilities, stats, reports). A
+   * targeted regression check for a change to the guards: instead of re-analysing a whole site (tens
+   * of minutes, hundreds of candidates), only the stored findings are re-examined and the caller sees,
+   * per finding, whether it would still be flagged and why not.
+   *
+   * What it re-runs is exactly the tail of the normal path, from the stored URLs/values:
+   * - `http`: the forged response (from the forged_requests cache, so normally no new request) is
+   *   compared to the captured original; a non-similar or identical response falls through to the
+   *   client-routing fallback, as evaluateHttpCandidate does;
+   * - `client-routing`: the probe + the DOM content guards (clientSideConfirmed). The page URL and the
+   *   swapped param/segment are recovered from the stored reference/candidate URLs (for a finding that
+   *   came from the http fallback, the page URL is the captured event's own page_url).
+   * The authz-relevance step is not re-run: it depends only on the React props, which this change does
+   * not touch, so the stored finding already passed it.
+   */
+  async recheckFindings({ page, site, findings }: {
+    page: Page; site: string; findings: StoredFinding[];
+  }): Promise<{ finding: StoredFinding; kept: boolean; reason: string }[]> {
+    this.notFoundBaselines.clear();
+    const events = this.deps.httpEventStore.listBySite(site);
+    await this.setupPagePool({ page, size: Math.max(1, this.deps.options.clientRoutingConcurrency) });
+    try {
+      return await Promise.all(findings.map(async (finding) => {
+        try {
+          const reason = await this.recheckOne({ site, finding, events, page });
+          return { finding, kept: reason === null, reason: reason ?? 'still flagged' };
+        } catch (err) {
+          return { finding, kept: false, reason: `recheck failed: ${(err as Error).message}` };
+        }
+      }));
+    } finally {
+      await this.teardownPagePool();
+    }
+  }
+
+  /** One finding of recheckFindings: a rejection reason, or null if it would still be flagged. */
+  private async recheckOne({ site, finding, events, page }: {
+    site: string; finding: StoredFinding; events: ReturnType<HttpEventStore['listBySite']>; page: Page;
+  }): Promise<string | null> {
+    const { referenceUrl, candidateUrl, referenceValue, candidateValue } = finding;
+    const probe = this.deps.options.clientRoutingProbe;
+
+    // A finding the http path produced (detected over HTTP, or via its client-routing fallback): the
+    // stored reference URL is the captured request, its page is that event's page_url.
+    const event = finding.method !== CLIENT_ROUTING_METHOD
+      ? events.find((e) => e.url === referenceUrl && e.method.toUpperCase() === finding.method.toUpperCase())
+      : undefined;
+    if (finding.method !== CLIENT_ROUTING_METHOD && !event) return 'original http event not found in http_events';
+
+    if (event) {
+      if (finding.detectionMethod === 'http') {
+        const forged = await forgeRequestCached({
+          cache: this.deps.forgedRequestStore, site, page, url: candidateUrl, method: event.method, headers: event.requestHeaders, postData: event.postData,
+        });
+        const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType };
+        const similar = getServerResponseSimilarity(original, forged).areSimilar;
+        if (similar && !isIdenticalResponse({ reference: original, candidate: forged })) return null;
+        const why = similar ? 'forged response identical to the original (server ignores the value)' : 'forged response not similar';
+        // the same client-routing fallback evaluateHttpCandidate would run
+        const fallback = await this.recheckQueryFallback({ pageUrl: event.pageUrl, referenceUrl, referenceValue, candidateValue, probe });
+        return fallback === null ? null : `${why}; client-routing fallback: ${fallback}`;
+      }
+      return this.recheckQueryFallback({ pageUrl: event.pageUrl, referenceUrl, referenceValue, candidateValue, probe });
+    }
+
+    // A pure client-routing finding: reference_url is the page, candidate_url its mutated route.
+    const ref = new URL(referenceUrl);
+    const cand = new URL(candidateUrl);
+    if (ref.pathname === cand.pathname) {
+      const paramName = [...cand.searchParams.keys()].find((k) => cand.searchParams.get(k) === candidateValue && ref.searchParams.get(k) !== candidateValue);
+      if (!paramName) return 'cannot tell which query param was swapped';
+      const clientRouting = await this.enqueueClientRoutingCheck({
+        pageUrl: referenceUrl, run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidateValue, ...probe }),
+      });
+      return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: ref.searchParams.get(paramName) ?? referenceValue, clientRouting });
+    }
+    // path segment: the stored reference value is not always the bare segment, so take the segment
+    // that actually differs between the two paths (used only for masking the reference render)
+    const refSegs = ref.pathname.split('/');
+    const candSegs = cand.pathname.split('/');
+    const i = candSegs.findIndex((seg, k) => seg !== refSegs[k]);
+    const clientRouting = await this.enqueueClientRoutingCheck({
+      pageUrl: referenceUrl, run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue, ...probe }),
+    });
+    return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: i >= 0 ? decodeURIComponent(refSegs[i] ?? '') : referenceValue, clientRouting });
+  }
+
+  /** The http path's client-routing fallback, rebuilt from a stored finding: same param, swapped on the event's own page. */
+  private async recheckQueryFallback({ pageUrl, referenceUrl, referenceValue, candidateValue, probe }: {
+    pageUrl: string; referenceUrl: string; referenceValue: string; candidateValue: string;
+    probe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
+  }): Promise<string | null> {
+    const paramName = [...new URL(referenceUrl).searchParams.entries()].find(([, v]) => v === referenceValue)?.[0];
+    // a path-segment candidate gets no client-routing fallback on the http path (see evaluateHttpCandidate)
+    if (!paramName) return 'no client-routing fallback for a path-segment http candidate';
+    const clientRouting = await this.enqueueClientRoutingCheck({
+      pageUrl, run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidateValue, ...probe }),
+    });
+    const candidateUrl = withParam({ url: pageUrl, name: paramName, value: candidateValue });
+    return this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting });
   }
 
   /**
@@ -655,62 +767,177 @@ export class AnalysisPipeline {
    * is CLIENT DIGESTION — the SPA rendered the candidate's own route and stayed on it (`hasMutatedDom
    * && stayedOnRoute`); a query param (or path segment) honoured entirely client-side, with no network
    * traffic at all, is a real finding, so the network is a filter here, never a veto (RAPIDOR's whole
-   * point for this fallback: confirm the app consumed the mutated value). When the app provably read
-   * the param (`appReadParam`) or the backend answered the candidate's own fetch with a `2xx`, that is
-   * corroboration strong enough to accept directly. Otherwise the only thing that can still reject it
-   * is the visual not-found baseline — the app rendering its generic not-found page for every id. A
-   * `4xx` on an incidental request no longer rejects on its own: a route that renders a real, distinct
-   * page (not the not-found one) is a client-side finding regardless of what some request returned.
-   * Returns a rejection reason (for the debug log) or null to accept.
+   * point for this fallback: confirm the app consumed the mutated value). A content guard then
+   * compares normalized DOM snapshots (domSnapshot.ts: text nodes + <img> src + element count, keyed by
+   * structural path, with the route's remount noise calibrated out, see renderGuardDecision) to decide
+   * whether the swapped value actually changed what the page shows:
+   *
+   * - **Inert value** (always, even when corroborated): the candidate's render equals the reference's.
+   *   The app read the value (or even sent it to a backend that answered 2xx) and ignored it. The
+   *   lingualeo false positive that motivated this: `buy/...?refclmark=2 -> refclmark=1`, a tracking
+   *   param Next.js re-fetches through `_next/data/...json?refclmark=1` (a 2xx carrying the value, so
+   *   the network "confirmed" it) while the page renders exactly the same. A DOM mutation alone is not
+   *   new content: a framework re-render or a re-mounted widget mutates the DOM without showing anything
+   *   new, which is why the probe's `hasMutatedDom` is not enough on its own.
+   * - **Not found** (only when nothing corroborates): the candidate's render matches the app's own
+   *   not-found page, see looksLikeNotFound.
+   *
+   * The guard runs in two passes (see the body): pushState first (cheap, the mechanism for a genuinely
+   * client-routed app), and a real navigation only as a fallback when pushState left the candidate
+   * identical to the reference (the SSR case). Each side is masked with its own value first (maskValue),
+   * so a page that only echoes the id it was given compares equal. A `4xx` on an incidental request does
+   * not reject on its own. Returns a rejection reason (for the debug log) or null to accept.
    */
-  private async clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, clientRouting }: {
-    pageUrl: string; candidateUrl: string; candidateValue: string; clientRouting: ClientRoutingResult;
+  private async clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting }: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; clientRouting: ClientRoutingResult;
   }): Promise<string | null> {
     if (!(clientRouting.hasMutatedDom && clientRouting.stayedOnRoute)) {
       return describeClientRoutingRejection(clientRouting);
     }
+    // Use the probe's ceiling, not its floor: a snapshot wants the fully-settled render of the route,
+    // so give it the most generous window (the floor only bounds how early the DOM probe may report a
+    // reaction, which is not what a content comparison needs).
+    const settleMs = this.deps.options.clientRoutingProbe.maxWaitMs;
     const corroborated = clientRouting.appReadParam || networkConfirmsCandidate(clientRouting.probeRequests);
-    if (!corroborated && await this.looksLikeNotFound({ pageUrl, candidateUrl, candidateValue })) {
+    const common = { pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs };
+
+    // PRIMARY — pushState, no reload (the probe's own mechanism, cheap and reliable for a genuinely
+    // client-routed app: the candidate's content renders here without touching the network, so busuu /
+    // pimsleur never pay for the fallback below). A decision here (accept or a concrete reject) stands.
+    const viaPush = await this.renderGuardDecision({ ...common, navigate: false });
+    if (viaPush !== INERT) return viaPush;
+
+    // FALLBACK — a REAL navigation, only reached when pushState left the candidate identical to the
+    // reference. That is the SSR case: a Next.js (or any server-rendered) route produces its content
+    // from a server data fetch that a pushState never triggers (lingualeo's /en/training/<type>:
+    // savannah vs repetition differ by ~96 text nodes on a real load, by zero under pushState). It
+    // cannot replace pushState: a purely client-trusting route (the server would reject a direct load
+    // but the SPA renders another resource from loaded state) is visible ONLY via pushState, and goto
+    // would miss it. It is costly, so it runs last and only when the cheap path was inconclusive.
+    const viaNav = await this.renderGuardDecision({ ...common, navigate: true });
+    return viaNav === INERT
+      ? 'renders the same page as the reference (the swapped value has no effect on the DOM content)'
+      : viaNav;
+  }
+
+  /**
+   * One pass of the content guard with a given capture mechanism (pushState when `navigate` is false,
+   * a real navigation when true). Captures reference -> candidate -> reference on one held page,
+   * calibrates the route's remount noise from the two reference renders, and returns:
+   *  - `INERT` when the candidate's DOM equals the reference's (nothing to see) — the caller decides
+   *    whether to stop (nav pass) or try the costlier mechanism (push pass);
+   *  - a rejection string when it renders the app's not-found page;
+   *  - `null` to ACCEPT (a real, distinct render), also when the capture failed and it cannot decide
+   *    (keep — the pre-guard policy).
+   */
+  private async renderGuardDecision({ pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate, settleMs }: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string;
+    corroborated: boolean; navigate: boolean; settleMs: number;
+  }): Promise<string | null | typeof INERT> {
+    const renders = await this.withPooledPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate, settleMs }) });
+    // No snapshot: cannot decide with this mechanism. On the push pass, fall through to the fallback
+    // (INERT); on the nav pass the caller turns INERT into "keep", the pre-guard policy.
+    if (!renders) return navigate ? null : INERT;
+    // Mask BOTH values out of every side. Masking each side with only its own value breaks on a stale
+    // render: a pushState to an SSR route leaves the candidate showing the REFERENCE's value in its
+    // content (it never re-rendered), and masking that candidate with only the candidate value leaves
+    // the reference value in place, so it reads as "different" from the (masked) reference and even
+    // matches the equally-stale not-found baseline — a route that is actually inert under pushState and
+    // should fall through to the navigation fallback. Masking both values makes a stale render read
+    // identical to the reference (-> INERT -> fallback), while a genuine leak still differs by its own
+    // data (another user's name), which neither value masks.
+    const mask = (snapshot: DomSnapshot): DomSnapshot =>
+      maskValue({ snapshot: maskValue({ snapshot, value: referenceValue }), value: candidateValue });
+    const candidateSnap = mask(renders.candidate);
+    const before = mask(renders.before);
+    const after = mask(renders.after);
+    // Remount noise: what the reference route shows differently between its two renders with the value
+    // unchanged (randomized quiz words, a carousel, a clock). Paths where the second reference render
+    // shows the CANDIDATE's content are not noise but a stale render (the SPA did not re-render back):
+    // counting them as noise could absorb exactly the leaking nodes.
+    const noise = domNoise({ a: before, b: after, candidate: candidateSnap });
+
+    const diff = diffDomSnapshots({ a: before, b: candidateSnap, noise });
+    if (diff.changed.length === 0 && diff.nodeDelta === 0) return INERT;
+    // what made it differ: the first thing to look at when a kept candidate looks wrong
+    log.debug(`AnalysisPipeline: ${candidateUrl} differs from the reference (${navigate ? 'navigation' : 'pushState'}) by ${diff.changed.length} text node(s), ${diff.nodeDelta} element(s) (remount noise: ${noise.keys.size} path(s)): ${diff.changed.slice(0, 3).map((c) => `${c.key.split('/').slice(-3).join('/')} ${JSON.stringify(c.a)?.slice(0, 60)} -> ${JSON.stringify(c.b)?.slice(0, 60)}`).join(' | ')}`);
+
+    if (!corroborated && await this.looksLikeNotFound({ pageUrl, candidateUrl, candidateValue, candidateSnap, referenceSnap: before, noise, navigate, settleMs })) {
       return "renders the app's not-found page";
     }
     return null;
   }
 
   /**
-   * Visual not-found guard for a client-routing candidate that has no decisive network signal (no
-   * backend response carried its value, or none was 2xx): screenshots the candidate's rendered route
-   * and compares it against the app's own not-found page — calibrated once per route template by
-   * rendering a garbage id in the same slot. A near-identical render (within
-   * `notFoundScreenshotMaxDiff`) means the route only produced the not-found page, a false positive,
-   * so it is rejected. Returns false (keep the candidate) whenever it cannot decide: calibration or
-   * capture produced no shot, or the two could not be diffed.
+   * Reference -> candidate -> reference, on one exclusively-held page. `navigate` picks the mechanism:
+   * a real page load (captureRouteByNavigation) or a pushState+popstate (captureDomSnapshot). Per
+   * candidate, not cached per page: the two reference renders must bracket THIS candidate's render, so
+   * whatever the route shows differently on every render is measured under the same conditions the
+   * candidate was rendered in — lingualeo's training pages draw random quiz words every time, so
+   * without the bracketing a genuinely different candidate route could not be told from that churn.
+   * Undefined when any capture failed.
    */
-  private async looksLikeNotFound({ pageUrl, candidateUrl, candidateValue }: {
-    pageUrl: string; candidateUrl: string; candidateValue: string;
+  private async captureAroundCandidate({ page, pageUrl, candidateUrl, navigate, settleMs }: {
+    page: Page; pageUrl: string; candidateUrl: string; navigate: boolean; settleMs: number;
+  }): Promise<{ before: DomSnapshot; candidate: DomSnapshot; after: DomSnapshot } | undefined> {
+    const capture = navigate ? captureRouteByNavigation : captureDomSnapshot;
+    const before = await capture({ page, testUrl: pageUrl, settleMs });
+    const candidate = await capture({ page, testUrl: candidateUrl, settleMs });
+    const after = await capture({ page, testUrl: pageUrl, settleMs });
+    return before && candidate && after ? { before, candidate, after } : undefined;
+  }
+
+  /**
+   * Not-found guard for a client-routing candidate that has no decisive network signal (no backend
+   * response carried its value, or none was 2xx): compares the candidate's normalized DOM against the
+   * app's own not-found page — calibrated once per route template by rendering a garbage id in the
+   * same slot, with the SAME mechanism the candidate was captured with (pushState vs a real load give
+   * different baselines, so they are cached separately). Unlike the inert guard this one is a
+   * THRESHOLD, not equality: a not-found page often varies a little with the id beyond a plain echo (a
+   * "did you mean" list, a tracking pixel). Both the text-node fraction and the element-count fraction
+   * must be within `notFoundDomMaxDiff`.
+   *
+   * The baseline is used only when it is itself a USABLE not-found signal — meaningfully different from
+   * the known-good reference page (`referenceSnap`). If rendering a garbage id looks like the real
+   * reference, "looks like garbage" proves nothing: that happens for a soft-404 app (every id renders
+   * the same shell) and, critically, when a capture failed to render the route at all (pimsleur behind
+   * a cookie wall rendered the same consent shell for the reference AND the garbage id). Rejecting a
+   * candidate for matching such a baseline would drop real findings on a flaky load, so the guard backs
+   * off (returns false) instead. Returns false (keep the candidate) whenever it cannot decide.
+   */
+  private async looksLikeNotFound({ pageUrl, candidateUrl, candidateValue, candidateSnap, referenceSnap, noise, navigate, settleMs }: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; candidateSnap: DomSnapshot; referenceSnap: DomSnapshot; noise?: DomNoise; navigate: boolean; settleMs: number;
   }): Promise<boolean> {
-    // Use the probe's ceiling, not its floor: a screenshot wants the fully-settled render of the
-    // route, so give it the most generous window (the floor only bounds how early the DOM probe may
-    // report a reaction, which is not what a visual baseline needs).
-    const settleMs = this.deps.options.clientRoutingProbe.maxWaitMs;
-    const template = candidateUrl.split(candidateValue).join('\u0000');   // id slot blanked out
+    const template = `${navigate ? 'nav' : 'push'}\u0000${candidateUrl.split(candidateValue).join('\u0000')}`;   // id slot blanked out, keyed by mechanism
     // Calibrate once per template, deduping concurrent probes: store the in-flight promise so parallel
     // candidates on the same template await the same garbage-value render instead of each doing one.
     let calibration = this.notFoundBaselines.get(template);
     if (!calibration) {
-      const garbageUrl = candidateUrl.split(candidateValue).join(makeGarbageValue(candidateValue));
-      calibration = this.withPooledPage({ pageUrl, run: (page) => captureRouteScreenshot({ page, testUrl: garbageUrl, settleMs }) });
+      const garbageValue = makeGarbageValue(candidateValue);
+      const garbageUrl = candidateUrl.split(candidateValue).join(garbageValue);
+      const capture = navigate ? captureRouteByNavigation : captureDomSnapshot;
+      calibration = this.withPooledPage({ pageUrl, run: async (page) => {
+        const snapshot = await capture({ page, testUrl: garbageUrl, settleMs });
+        return snapshot ? { snapshot, value: garbageValue } : undefined;
+      } });
       this.notFoundBaselines.set(template, calibration);
     }
     const baseline = await calibration;
     if (!baseline) return false;
+    const maxDiff = this.deps.options.notFoundDomMaxDiff;
 
-    const candidateShot = await this.withPooledPage({ pageUrl, run: (page) => captureRouteScreenshot({ page, testUrl: candidateUrl, settleMs }) });
-    if (!candidateShot) return false;
+    // Is the garbage render actually a distinct "not found" page, or does it look like the real
+    // reference (soft-404 / a failed render)? If the latter, it cannot tell a leak from a miss — back off.
+    const vsReference = diffDomSnapshots({ a: maskValue({ snapshot: baseline.snapshot, value: baseline.value }), b: referenceSnap, noise });
+    if (vsReference.textFraction <= maxDiff && vsReference.nodeFraction <= maxDiff) return false;
 
-    const frac = await screenshotDiffFraction({ a: candidateShot, b: baseline });
-    return frac !== undefined && frac <= this.deps.options.notFoundScreenshotMaxDiff;
+    const diff = diffDomSnapshots({ a: maskValue({ snapshot: baseline.snapshot, value: baseline.value }), b: candidateSnap, noise });
+    return diff.textFraction <= maxDiff && diff.nodeFraction <= maxDiff;
   }
 }
+
+/** Sentinel: the content guard found the candidate's render identical to the reference's. */
+const INERT = Symbol('inert');
 
 /** True if the app answered the candidate's own fetch with a success status: trust it, skip the visual guard. */
 function networkConfirmsCandidate(probeRequests: { status: number }[]): boolean {

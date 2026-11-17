@@ -24,10 +24,6 @@ HEADLESS=false npm start
 # log in by hand once, saving cookies/tokens into a persistent browser profile (see Authentication below)
 USER_DATA_DIR=$HOME/.crawler-profile DEBUG_NO_CRAWLING=true HEADLESS=false npm start
 
-# explores the first N sites from the Tranco list (or N sites from rank P with --start P)
-npm run tranco -- --top 10 --depth 2
-npm run tranco -- --start 50 --top 5
-
 # crawl states/edges + IDOR findings + per-site stats from the last run(s), straight from SQLite
 npm run stats
 
@@ -77,10 +73,10 @@ While this happens, three more things run unconditionally for every site (see [I
 | [src/browser/NetworkObserver.ts](src/browser/NetworkObserver.ts) | Shadow capture of same-site HTTP traffic (see above), persisted via [src/db/HttpEventStore.ts](src/db/HttpEventStore.ts). |
 | [src/browser/ReactStateHooks.ts](src/browser/ReactStateHooks.ts) | Reads and persists RAPIDOR's React state ([src/db/ReactStateStore.ts](src/db/ReactStateStore.ts)) and pre-indexes it ([src/db/PreindexedValueStore.ts](src/db/PreindexedValueStore.ts)). |
 | [src/analysis/AnalysisPipeline.ts](src/analysis/AnalysisPipeline.ts) | The preindex → match → forge → evaluate chain; see [IDOR analysis](docs/analysis.md). |
-| [scripts/tranco.ts](scripts/tranco.ts) | Runs the crawler on N domains from the [Tranco list](https://tranco-list.eu), starting from rank P (`--start`, default 1). |
 | [scripts/stats.ts](scripts/stats.ts) | Prints per-site crawl/IDOR stats, cross-site averages, and flagged findings from `storage/crawler.db`. |
 | [src/analysis/reproductionScript.ts](src/analysis/reproductionScript.ts) | Generates a runnable `.repro.ts` for every flagged finding; see [Reproduction scripts](docs/analysis.md#reproduction-scripts). |
 | [scripts/runAnalysisFromDb.ts](scripts/runAnalysisFromDb.ts), [scripts/runAblationFromDb.ts](scripts/runAblationFromDb.ts) | Re-run the main / ablation analysis on a site's already-captured data in `storage/crawler.db` (no new exploration, nothing cleared); `SITE` is derived from the `START_URL` argument. |
+| [scripts/recheckFindings.ts](scripts/recheckFindings.ts) | Re-examines only the findings already in `vulnerabilities` for one site with the current engine (forge from cache / probe + DOM guards) and prints which would still be flagged and why the others are dropped. Writes nothing: the stored findings stay the baseline. Fast regression check after a change to the decision logic (it cannot find new findings: use `runAnalysisFromDb` for that). |
 | [scripts/compareAblation.ts](scripts/compareAblation.ts) | Compares the main pipeline against the ablation pipeline over `analysis_stats`/`ablation_stats`; see [IDOR analysis](docs/analysis.md). |
 | [scripts/debugClientRoutingFlakiness.ts](scripts/debugClientRoutingFlakiness.ts) | Diagnostic: reliability of the client-routing pushState+popstate DOM-mutation probe, run repeatedly against the same candidate. |
 
@@ -92,7 +88,7 @@ While this happens, three more things run unconditionally for every site (see [I
 * **Several tabs per site.** With `tabsPerSite > 1` each tab runs its own depth-first search over the shared state store and graph. `claim()` is synchronous, so the first tab to reach a (state, element) pair claims it exclusively; a tab that runs out of work picks up still-claimable elements from other tabs' states. Exploration is therefore not deterministic. Tabs need the persistent browser context (as with the extension or a saved profile).
 * **HTTP cache stays on.** Playwright's `page.route` disables Chromium's HTTP cache, so every restore would re-download all scripts and styles. External navigations are blocked through a CDP `Fetch` interception limited to documents instead, and the browser cache works as for a normal user.
 * **Always in English.** The browser declares the `en-US` locale (both `navigator.language` and the `Accept-Language` header). Multilingual sites therefore respond in English, and saved texts remain comparable with the `blocklist`. Exceptions remain possible for sites that choose the language based on IP.
-* **SQLite, not JSON, for everything the crawler produces.** Crawl states and edges (screenshots included, as BLOBs), captured HTTP events, React state, pre-indexed values, flagged vulnerabilities, per-site stats, and the authorization classifier's cache all live in one file, `storage/crawler.db`. It is the single source of truth: no artifact dump duplicates it, and later runs can query/average across sites trivially.
+* **SQLite for everything the crawler produces.** Crawl states and edges (screenshots included, as BLOBs), captured HTTP events, React state, pre-indexed values, flagged vulnerabilities, per-site stats, and the authorization classifier's cache all live in one file, `storage/crawler.db`. It is the single source of truth: no artifact dump duplicates it, and later runs can query/average across sites trivially.
 
 ## Configuration
 
@@ -123,9 +119,9 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 | `analysis.maxConcurrentRequests` / `analysis.timeBetweenRequestsMs` | `3` / `250` | Bound and pace forged requests. |
 | `analysis.reportsDir` | `reports` | Where the reproduction script of each flagged finding is written (`<reportsDir>/<site>/<findingId>.repro.ts`, gitignored). |
 | `analysis.clientRoutingProbe` | `1000 / 300 / 3000 ms` | The client-side-routing probe's (`checkClientSideRouting`/`checkClientSideRoutingForPath`) DOM-settle window after a synthetic `pushState`+`popstate`: floor (earliest a reaction is reported settled) / DOM-quiet settle / ceiling. The window is network-aware — it will not settle while a fetch/XHR the route fired is still in flight (so a render gated on a data request is caught) — and the ceiling bounds everything. |
-| `analysis.clientRoutingConcurrency` | `5` | How many pages the client-routing phase probes on in parallel. Each candidate's probe + not-found screenshot mutates a page's live DOM, so they run one-per-page across a pool of this many pages (same authenticated context); near-linear speedup on that phase. |
+| `analysis.clientRoutingConcurrency` | `5` | How many pages the client-routing phase probes on in parallel. Each candidate's probe + DOM snapshots mutate a page's live DOM, so they run one-per-page across a pool of this many pages (same authenticated context); near-linear speedup on that phase. |
 | `analysis.maxSegmentMatches` | `300` | A URL segment whose value appears in more than this many preindexed nodes is a generic keyword, not an identifier, and is skipped in candidate generation. |
-| `analysis.notFoundScreenshotMaxDiff` | `0.02` | A client-routing candidate whose rendered screenshot differs from the calibrated not-found page by no more than this fraction of pixels is the not-found page itself, and is rejected. |
+| `analysis.notFoundDomMaxDiff` | `0.05` | A client-routing candidate whose normalized DOM (text nodes, `<img>` src, element count) differs from the calibrated not-found page by no more than this fraction of text nodes **and** of elements is the not-found page itself, and is rejected. See [docs/analysis.md](docs/analysis.md) (DOM content guards). |
 | `analysis.ablationMode` | `false` (`$ABLATION_MODE`) | Runs the [ablation study](docs/analysis.md#ablation-study-http-json-only) alongside the main analysis. Off by default: it roughly doubles the forged-request traffic against the site under test. |
 
 ## Authentication (protected areas)
@@ -209,19 +205,3 @@ npm run run-demo   -- https://www.busuu.com/dashboard   # replay the real detect
 ```
 
 Every forged request is served from the snapshot's recorded cache (a miss throws rather than hitting the network), and the live-only client-routing phase is skipped — so the demo is HTTP-only by construction. See **[demo/README.md](demo/README.md)** for the snapshot date, the expected findings, and why client-routing is not part of the offline replay. The demo DB is gitignored; the full datasets are published on Zenodo (DOI TBD).
-
-## Tranco List
-
-```bash
-npm run tranco -- --top 10 --depth 2 --max-states 30 --max-duration 300 --concurrency 2
-
-# 5 sites starting from rank 50 (ranks 50..54)
-npm run tranco -- --start 50 --top 5
-
-# fixed list, for reproducible runs
-npm run tranco -- --list-id PYK6J
-```
-
-`--top` is the number of sites, `--start` the Tranco rank of the first one (default `1`). Each site's logs are prefixed with its position in the run and its rank, e.g. `[2/5] #51 Exploring example.com (https://example.com/)`.
-
-Options override the limits in `config.ts`; the rest of the configuration remains valid.

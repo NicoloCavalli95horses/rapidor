@@ -168,7 +168,7 @@ export function createCrawler(cfg: CrawlConfig = defaultConfig): PlaywrightCrawl
       const rootUrl = request.loadedUrl ?? request.url;
       // results stay labeled with the requested domain, even if it redirects elsewhere
       const site = new URL(request.url).hostname;
-      // optional prefix set by the caller (e.g. "[3/10] #42" from the Tranco script)
+      // optional prefix set by the caller (e.g. "[3/10]" when several START_URLs are crawled in one run)
       const progress = typeof request.userData.progress === 'string' ? `${request.userData.progress} ` : '';
       log.info(`${progress}Exploring ${site} (${rootUrl})`);
       const network = networkObservers.get(page);

@@ -147,3 +147,24 @@ export function describeDiffs(differences: PropDiff[]): string {
     .map((d) => `${d.pathStr || '(root)'}: ${JSON.stringify(d.reference)} -> ${JSON.stringify(d.current)}`)
     .join('; ');
 }
+
+/**
+ * Did the forged request get back exactly the response the original one did? Then the server
+ * ignored the swapped value (a tracking/cohort param, a value only the client reads), so the forge
+ * leaked nothing, however "similar" getServerResponseSimilarity calls the two. Observed on busuu:
+ * `checkout.json?price_id=A -> price_id=B` returned a byte-identical 65 KB Next.js data payload (the
+ * plan is resolved client-side, not from that param), yet was flagged as an HTTP finding because the
+ * React props of the two sibling plans differ. Compared as exact text, or as deep-equal JSON (key
+ * order and whitespace do not matter). False (not provably identical) when either body is missing —
+ * e.g. a cancelled stream Chrome never buffered — so this can only ever drop a finding on evidence.
+ */
+export function isIdenticalResponse({ reference, candidate }: { reference: ResponseLike; candidate: ResponseLike }): boolean {
+  if (!reference.body || !candidate.body) return false;
+  if (reference.status !== candidate.status) return false;
+  if (reference.body === candidate.body) return true;
+  try {
+    return compareObj(JSON.parse(reference.body), JSON.parse(candidate.body)).length === 0;
+  } catch {
+    return false;
+  }
+}
