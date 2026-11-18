@@ -2,6 +2,11 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-18 10:45 — Refactor: split AnalysisPipeline into collaborators (in progress)
+`AnalysisPipeline.ts` (1132 lines) was the only src file over the 500-line maintainability threshold. Splitting it into single-responsibility collaborators, one behavior-preserving + tested + committed step at a time (plan: PagePool → findings/utils → candidateGenerator → clientRoutingVerifier → candidateEvaluator/recheckRunner; generic helpers to `src/utils/utils.ts`). No behavior change in any step — the AnalysisPipeline suite (9/9) and typecheck gate each one.
+
+- **PagePool** ([src/analysis/PagePool.ts](src/analysis/PagePool.ts)): the browser page pool (setup/teardown/acquire/release/withPage) moved out of the pipeline into its own class; the pipeline holds one `PagePool` and calls `withPage`. 1132 → 1069 lines.
+
 ## 2026-11-18 10:35 — Client-routing: authz-first ordering + strict full-navigation stage + segment blacklist (ejoy)
 ejoy flagged only false positives on course 37, and missed a real client-side lesson IDOR (`/app/courses/37/314/1030 -> 1032`, lock false→true) because its Next.js router ignores a synthetic `popstate` for a sibling route, so the cheap pushState probe reports `hasMutatedDom:false`. Three changes, structured as an explicit cheap→expensive ladder; the probe gate is now stage 1 of that ladder rather than a hard veto.
 

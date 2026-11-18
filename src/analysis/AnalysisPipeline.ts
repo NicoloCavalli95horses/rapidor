@@ -15,7 +15,7 @@ import { getServerResponseSimilarity, isIdenticalResponse, compareObj, describeD
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
 import { captureRouteByNavigation, captureDomSnapshot, diffDomSnapshots, domNoise, maskValue, makeGarbageValue, type DomSnapshot, type DomNoise } from './domSnapshot';
-import { installParamUsageTracking } from '../browser/paramUsageTracker';
+import { PagePool } from './PagePool';
 import { formatDuration } from '../core/duration';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 
@@ -103,17 +103,8 @@ class Semaphore {
 }
 
 export class AnalysisPipeline {
-  // checkClientSideRouting mutates the shared page's live location/DOM; serialized so concurrent
-  // candidate evaluations (bounded by maxConcurrentRequests) never race on it, mirroring RAPIDOR's
-  // own enqueueNavigation() around the same operation.
-  // Pool of pages the client-routing phase runs its probes/screenshots on, in parallel. Each probe
-  // mutates a page's live DOM (pushState) and screenshots it, so a probe owns a page exclusively while
-  // it runs; `freePages` are the idle ones and `pageWaiters` are tasks blocked waiting for one.
-  // `extraPages` are the pages this pipeline created from the caller's context (to close at the end);
-  // the caller's own page stays in the pool but is never closed here. Sized by clientRoutingConcurrency.
-  private freePages: Page[] = [];
-  private pageWaiters: ((page: Page) => void)[] = [];
-  private extraPages: Page[] = [];
+  // Pool of pages the client-routing phase runs its probes/screenshots on, in parallel (see PagePool).
+  private pagePool = new PagePool();
   // Bounds concurrent forged HTTP requests independently of the page pool (the forge uses
   // page.request.fetch, which needs no page DOM, so it is not gated by the pool). Mirrors
   // maxConcurrentRequests. Re-created per run.
@@ -249,7 +240,7 @@ export class AnalysisPipeline {
       this.forgeSemaphore = new Semaphore(options.maxConcurrentRequests);
       // Offline is HTTP-only: every task is a cache-served forge gated by forgeSemaphore, none needs a
       // pool page, so the browser-backed pool is never created (page may be undefined here).
-      if (!options.offline && page) await this.setupPagePool({ page, size: poolSize });
+      if (!options.offline && page) await this.pagePool.setup({ page, size: poolSize });
       try {
         // Isolate each candidate: one task throwing (a forged request erroring, a client-routing probe
         // whose navigation destroys the page context, ...) must not reject the whole pool and abort the
@@ -266,7 +257,7 @@ export class AnalysisPipeline {
         // tasks by forgeSemaphore, so letting this many run keeps the pool fed without over-forging.
         await runWithConcurrency({ tasks: guarded, limit: Math.max(poolSize, options.maxConcurrentRequests) });
       } finally {
-        if (!options.offline) await this.teardownPagePool();
+        if (!options.offline) await this.pagePool.teardown();
       }
     }
 
@@ -644,7 +635,7 @@ export class AnalysisPipeline {
   }): Promise<{ finding: StoredFinding; kept: boolean; reason: string }[]> {
     this.notFoundBaselines.clear();
     const events = this.deps.httpEventStore.listBySite(site);
-    await this.setupPagePool({ page, size: Math.max(1, this.deps.options.clientRoutingConcurrency) });
+    await this.pagePool.setup({ page, size: Math.max(1, this.deps.options.clientRoutingConcurrency) });
     try {
       return await Promise.all(findings.map(async (finding) => {
         try {
@@ -655,7 +646,7 @@ export class AnalysisPipeline {
         }
       }));
     } finally {
-      await this.teardownPagePool();
+      await this.pagePool.teardown();
     }
   }
 
@@ -727,60 +718,6 @@ export class AnalysisPipeline {
   }
 
   /**
-   * Builds the page pool for one analysis run: the caller's own page plus `size - 1` fresh pages from
-   * the SAME browser context (so they share the authenticated cookies), each with the param-usage init
-   * script installed (the query probe reads window.__accessedParams). All start free.
-   */
-  private async setupPagePool({ page, size }: { page: Page; size: number }): Promise<void> {
-    this.extraPages = [];
-    const pages: Page[] = [page];
-    for (let i = 1; i < size; i++) {
-      const extra = await page.context().newPage();
-      await installParamUsageTracking(extra);
-      this.extraPages.push(extra);
-      pages.push(extra);
-    }
-    this.freePages = pages;
-    this.pageWaiters = [];
-  }
-
-  /** Closes the pages this run created (never the caller's own page) and resets the pool. */
-  private async teardownPagePool(): Promise<void> {
-    const toClose = this.extraPages;
-    this.extraPages = [];
-    this.freePages = [];
-    this.pageWaiters = [];
-    for (const extra of toClose) await extra.close().catch(() => undefined);
-  }
-
-  /** Takes a free page, or waits until one is released. */
-  private acquirePage(): Promise<Page> {
-    const free = this.freePages.pop();
-    if (free) return Promise.resolve(free);
-    return new Promise<Page>((resolve) => this.pageWaiters.push(resolve));
-  }
-
-  /** Returns a page to the pool, handing it straight to the next waiter if there is one. */
-  private releasePage(page: Page): void {
-    const waiter = this.pageWaiters.shift();
-    if (waiter) waiter(page);
-    else this.freePages.push(page);
-  }
-
-  /** Runs `run` on an exclusively-held pool page, navigated to `pageUrl` first; always releases it. */
-  private async withPooledPage<T>({ pageUrl, run }: { pageUrl: string; run: (page: Page) => Promise<T> }): Promise<T> {
-    const page = await this.acquirePage();
-    try {
-      if (page.url() !== pageUrl) {
-        await page.goto(pageUrl, { waitUntil: 'load', timeout: 10_000 }).catch(() => undefined);
-      }
-      return await run(page);
-    } finally {
-      this.releasePage(page);
-    }
-  }
-
-  /**
    * Runs checkClientSideRouting* on a pool page (parallel across candidates, exclusive per page), and
    * retries a negative result up to MAX_CLIENT_ROUTING_ATTEMPTS times.
    *
@@ -797,7 +734,7 @@ export class AnalysisPipeline {
   private enqueueClientRoutingCheck({ pageUrl, run }: {
     pageUrl: string; run: (page: Page) => Promise<ClientRoutingResult>;
   }): Promise<ClientRoutingResult> {
-    return this.withPooledPage({ pageUrl, run: async (page) => {
+    return this.pagePool.withPage({ pageUrl, run: async (page) => {
       let attempt: ClientRoutingResult = { hasMutatedDom: false, isUsingNewParams: false, appReadParam: false, stayedOnRoute: false, finalUrl: pageUrl, probeRequests: [] };
       for (let i = 0; i < MAX_CLIENT_ROUTING_ATTEMPTS; i++) {
         attempt = await run(page);
@@ -895,7 +832,7 @@ export class AnalysisPipeline {
   private async confirmByFullNavigation({ pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs }: {
     pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; corroborated: boolean; settleMs: number;
   }): Promise<string | null> {
-    const renders = await this.withPooledPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate: true, settleMs }) });
+    const renders = await this.pagePool.withPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate: true, settleMs }) });
     if (!renders) return 'full-navigation capture failed (strict escalation needs a decisive render)';
     if (renders.candidateFinalUrl && !sameRoutePath(renders.candidateFinalUrl, candidateUrl)) {
       return `full navigation redirected away from the candidate route (${safePath(renders.candidateFinalUrl)} != ${safePath(candidateUrl)})`;
@@ -918,7 +855,7 @@ export class AnalysisPipeline {
     pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string;
     corroborated: boolean; navigate: boolean; settleMs: number;
   }): Promise<string | null | typeof INERT> {
-    const renders = await this.withPooledPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate, settleMs }) });
+    const renders = await this.pagePool.withPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate, settleMs }) });
     // No snapshot: cannot decide with this mechanism. On the push pass, fall through to the fallback
     // (INERT); on the nav pass the caller turns INERT into "keep", the pre-guard policy.
     if (!renders) return navigate ? null : INERT;
@@ -1021,7 +958,7 @@ export class AnalysisPipeline {
       const garbageValue = makeGarbageValue(candidateValue);
       const garbageUrl = candidateUrl.split(candidateValue).join(garbageValue);
       const capture = navigate ? captureRouteByNavigation : captureDomSnapshot;
-      calibration = this.withPooledPage({ pageUrl, run: async (page) => {
+      calibration = this.pagePool.withPage({ pageUrl, run: async (page) => {
         const snapshot = await capture({ page, testUrl: garbageUrl, settleMs });
         return snapshot ? { snapshot, value: garbageValue } : undefined;
       } });
