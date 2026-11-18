@@ -3,12 +3,12 @@ import type { Page } from 'playwright';
 import { log } from 'crawlee';
 import type { HttpEventStore } from '../db/HttpEventStore';
 import type { PreindexedValueStore } from '../db/PreindexedValueStore';
-import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
+import type { ReactStateStore } from '../db/ReactStateStore';
 import type { CrawlStateStore } from '../db/CrawlStateStore';
 import type { VulnerabilityStore, StoredFinding } from '../db/VulnerabilityStore';
 import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
-import { extractSegments, spliceSegment, type SegmentCandidate } from './segments';
+import { spliceSegment, type SegmentCandidate } from './segments';
 import { findCandidates } from './matchFinder';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep, Semaphore, safePath, sameRoutePath, withParam } from '../utils/utils';
@@ -17,6 +17,7 @@ import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authz
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
 import { captureRouteByNavigation, captureDomSnapshot, diffDomSnapshots, domNoise, maskValue, makeGarbageValue, type DomSnapshot, type DomNoise } from './domSnapshot';
 import { PagePool } from './PagePool';
+import { CandidateGenerator } from './candidateGenerator';
 import { formatDuration } from '../core/duration';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 
@@ -96,11 +97,6 @@ export class AnalysisPipeline {
   // Per-run cache of React graphs parsed from the DB. findUrlCandidates looks a state's graph up
   // once per preindex match (tens of thousands of times for a rich site), but there are only as
   // many DISTINCT graphs as captured react_states (a couple hundred at most): without this, the
-  // candidate-generation phase spent most of its time re-running JSON.parse on the SAME ~150KB graph
-  // strings over and over. Cleared at the start of each runForSite so it never grows across sites or
-  // goes stale against a later re-run.
-  private graphCache = new Map<number, RapidorGraph | undefined>();
-
   // Per-run cache of the app's "not found" screenshot for each route template (the candidate URL with
   // its id slot blanked out): calibrated once per template by rendering a garbage value, then reused
   // to recognize any candidate on that template whose render is just the not-found page. `undefined`
@@ -119,7 +115,17 @@ export class AnalysisPipeline {
   // from two reference events is not logged twice. Cleared at the start of each runForSite.
   private loggedFindingIds = new Set<string>();
 
-  constructor(private deps: AnalysisPipelineDeps) {}
+  // The preindex -> matchFinder half (pure, no browser); reset() per run clears its graph cache.
+  private candidateGenerator: CandidateGenerator;
+
+  constructor(private deps: AnalysisPipelineDeps) {
+    this.candidateGenerator = new CandidateGenerator({
+      preindexStore: deps.preindexStore,
+      reactStateStore: deps.reactStateStore,
+      maxSegmentMatches: deps.options.maxSegmentMatches,
+      segmentBlacklist: deps.options.segmentBlacklist,
+    });
+  }
 
   /**
    * Logs a confirmed finding once per analysis run (deduped by id), independent of whether the DB row
@@ -136,7 +142,7 @@ export class AnalysisPipeline {
 
   async runForSite({ page, site, explorationMs }: { page?: Page; site: string; explorationMs: number }): Promise<void> {
     const analysisStartedAt = Date.now();
-    this.graphCache.clear();
+    this.candidateGenerator.reset();
     this.notFoundBaselines.clear();
     this.loggedFindingIds.clear();
     const { httpEventStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore, options } = this.deps;
@@ -154,7 +160,7 @@ export class AnalysisPipeline {
       ...pageUrls.map((u) => normalizeUrl(u)),
       ...crawledStates.map((s) => normalizeUrl(s.url)),
     ]);
-    this.warnOnMissingReactStateCoverage({ site, crawledStates, pageUrls });
+    this.candidateGenerator.warnOnMissingReactStateCoverage({ site, crawledStates, pageUrls });
     const seen = new Set<string>(); // dedup candidate requests within this run
     const tasks: (() => Promise<void>)[] = [];
 
@@ -168,7 +174,7 @@ export class AnalysisPipeline {
       // resource) — unsafe and unethical for an authz probe, which must only READ. Non-GET events are
       // skipped here; forgeRequest also refuses them as a hard backstop.
       if (event.method.toUpperCase() !== 'GET') continue;
-      const found = this.findUrlCandidates({ url: event.url });
+      const found = this.candidateGenerator.findUrlCandidates({ url: event.url });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
       for (const { segment, candidate } of found.items) {
@@ -187,7 +193,7 @@ export class AnalysisPipeline {
     // replayable offline, so the offline demo skips this whole phase and stays HTTP-only (see
     // AnalysisPipelineOptions.offline and demo/README.md).
     for (const pageUrl of options.offline ? [] : pageUrls) {
-      const found = this.findUrlCandidates({ url: pageUrl });
+      const found = this.candidateGenerator.findUrlCandidates({ url: pageUrl });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
       for (const { segment, candidate } of found.items) {
@@ -262,85 +268,6 @@ export class AnalysisPipeline {
     });
   }
 
-  /** Runs the preindex -> matchFinder steps for one URL (an http_event's or a crawled page's). */
-  private findUrlCandidates({ url }: { url: string }): {
-    segments: number;
-    matches: number;
-    items: { segment: SegmentCandidate; candidate: ReturnType<typeof findCandidates>[number] }[];
-  } {
-    const { preindexStore } = this.deps;
-    let segments = 0;
-    let matches = 0;
-    const items: { segment: SegmentCandidate; candidate: ReturnType<typeof findCandidates>[number] }[] = [];
-
-    for (const segment of extractSegments({ url })) {
-      segments++;
-      // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
-      // mutating one only switches the app's section, which renders a different DOM and so masquerades
-      // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query
-      // params carry no blacklisted value here (paramName is set only for them), so this only ever
-      // gates path segments.
-      if (!segment.paramName && this.deps.options.segmentBlacklist.includes(segment.value.toLowerCase())) continue;
-      // A value carried by thousands of React nodes is a generic keyword (a DOM tag/role/category
-      // word that also happens to be a URL segment), not a user-scoped identifier: swapping it is
-      // pure noise, and the fan-out (every match x its component siblings, across every URL that
-      // shares the word) is what made candidate generation explode. Identifiers appear a bounded
-      // handful of times, well under this cap, so this skips only the noise. countByValue never
-      // materializes the rows, so an over-cap segment costs a single COUNT, not a huge fetch.
-      if (preindexStore.countByValue(segment.value) > this.deps.options.maxSegmentMatches) continue;
-      for (const match of preindexStore.findByValue(segment.value)) {
-        matches++;
-        const graph = this.getGraph(match.stateId);
-        if (!graph) continue;
-        for (const candidate of findCandidates({ stateId: match.stateId, graph, nodeId: match.nodeId, path: match.path })) {
-          // Blacklist applies to the swap in BOTH directions: skip not only a blacklisted segment as
-          // the value being mutated (above), but also any candidate whose REPLACEMENT value is
-          // blacklisted — otherwise a non-shell segment gets mutated INTO an app-shell prefix
-          // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
-          // from the other side.
-          if (this.deps.options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
-          items.push({ segment, candidate });
-        }
-      }
-    }
-    return { segments, matches, items };
-  }
-
-  /** reactStateStore.getById, memoized for this run: each distinct graph is read + JSON.parsed once. */
-  private getGraph(stateId: number): RapidorGraph | undefined {
-    let graph = this.graphCache.get(stateId);
-    if (graph === undefined && !this.graphCache.has(stateId)) {
-      graph = this.deps.reactStateStore.getById(stateId);
-      this.graphCache.set(stateId, graph);
-    }
-    return graph;
-  }
-
-  /**
-   * Minimum coverage requirement: every URL the DFS actually visited (crawl_states — the ground
-   * truth of "the crawler was on this page") should have at least one captured React state
-   * (react_states) at that exact URL — query params included, since a different query string is
-   * legitimately a different state (and may well add more than one). A URL with none went through
-   * beforeAction/afterAction without ReactStateHooks ever getting usable data back (not settled in
-   * time, extension not injected on that tab, or an exception — see its own onEnd stats log for
-   * which), which means every candidate hiding on that page's own state was silently never indexed,
-   * so this pipeline run had no chance of ever proposing it. Logged as a warning, never thrown: this
-   * is a coverage gap to go investigate (start from ReactStateHooks' onEnd log for this run), not a
-   * reason to abort an otherwise-successful analysis pass.
-   */
-  private warnOnMissingReactStateCoverage({ site, crawledStates, pageUrls }: {
-    site: string;
-    crawledStates: { url: string }[];
-    pageUrls: string[];
-  }): void {
-    const covered = new Set(pageUrls);
-    const missing = new Set(crawledStates.map((s) => s.url).filter((url) => !covered.has(url)));
-    if (missing.size === 0) return;
-    log.warning(
-      `AnalysisPipeline: ${missing.size}/${new Set(crawledStates.map((s) => s.url)).size} crawled URL(s) for ${site} have ` +
-      `NO captured React state (coverage gap — these pages' own candidates were never indexed): ${[...missing].join(', ')}`,
-    );
-  }
 
   /**
    * The cheapest gate, and deliberately the FIRST one every candidate passes. It is pure: a diff of the
