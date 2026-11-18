@@ -6,14 +6,8 @@
  * extension.
  */
 
-// same list as RAPIDOR's config.js `preindexedKeys`, plus `href`: an SPA's sibling resources are
-// very often expressed only as navigation targets (`<a href>`, `<Link href>`) rather than as a bare
-// id under an `id`-like key — arabicroad's game catalogue, for one, lives entirely in
-// `href="/games/<slug>/"` link siblings. The full-path value is tokenized (split on `/.?`), so the
-// bare URL segment still matches; `maxSegmentMatches` drops the generic ones that index everywhere.
-// `src` was measured and deliberately NOT added: it indexes every image's CDN URL (on busuu it added
-// +44 forged GET requests, all image swaps) and produced zero useful siblings on any reference site,
-// whereas `href` carries all the signal with ~0 impact on busuu/pimsleur.
+// The full-path value is tokenized (split on `/.?`), so the bare URL segment still matches;
+// `maxSegmentMatches` drops the generic ones that index everywhere.
 const PREINDEXED_KEYS = [
   'id', 'user', 'account', 'profile', 'order',
   'resource', 'item', 'object', 'doc', 'name', 'key', 'title', 'type', 'url', 'link',

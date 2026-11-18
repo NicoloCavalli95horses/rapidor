@@ -106,6 +106,8 @@ export function buildExplorer(
       maxSegmentMatches: cfg.analysis.maxSegmentMatches,
       clientRoutingConcurrency: cfg.analysis.clientRoutingConcurrency,
       notFoundDomMaxDiff: cfg.analysis.notFoundDomMaxDiff,
+      segmentBlacklist: cfg.analysis.segmentBlacklist,
+      clientRoutingFullNavigationEscalation: cfg.analysis.clientRoutingFullNavigationEscalation,
     },
   });
 

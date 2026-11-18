@@ -70,6 +70,8 @@ const pipeline = new AnalysisPipeline({
     maxSegmentMatches: config.analysis.maxSegmentMatches,
     clientRoutingConcurrency: config.analysis.clientRoutingConcurrency,
     notFoundDomMaxDiff: config.analysis.notFoundDomMaxDiff,
+    segmentBlacklist: config.analysis.segmentBlacklist,
+    clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
     offline: true,   // HTTP-only, cache-served forges, no client-routing, no browser
   },
 });

@@ -56,6 +56,8 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         maxSegmentMatches: 300,
         clientRoutingConcurrency: 1,
         notFoundDomMaxDiff: 0.05,
+        segmentBlacklist: [],
+        clientRoutingFullNavigationEscalation: true,
       },
     });
     return { pipeline, httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -233,6 +235,8 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         maxSegmentMatches: 300,
         clientRoutingConcurrency: 1,
         notFoundDomMaxDiff: 0.05,
+        segmentBlacklist: [],
+        clientRoutingFullNavigationEscalation: true,
       },
     });
     return { pipeline, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };

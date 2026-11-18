@@ -110,6 +110,20 @@ export interface CrawlConfig {
     // by no more than this fraction, the route only rendered the not-found page — a false positive —
     // and the candidate is rejected.
     notFoundDomMaxDiff: number;
+    // candidate-generation blacklist: a URL path segment whose VALUE (case-insensitive) is in this
+    // list is never mutated. These are app-shell / section prefixes (an SPA's "/app", "/speak", ...
+    // route roots), not user-scoped identifiers, so swapping one only navigates to another SECTION of
+    // the app — which naturally renders a different DOM and so looks like a client-routing finding
+    // (ejoy's /app -> /speak,/go,/website-directory false positives).
+    segmentBlacklist: string[];
+    // client-routing stage-3 escalation: when the cheap pushState probe is inconclusive (the SPA did
+    // not digest the swapped value — no DOM reaction, or it redirected away), allow a STRICT real page
+    // load (page.goto) to decide, but ONLY for a high-suspicion candidate (its props diff already
+    // crossed an authorization boundary, e.g. lock:false->true). This catches an app whose router
+    // ignores a synthetic popstate for a sibling route (ejoy/Next.js) while re-imposing the pushState
+    // gate's safety on the real load (a redirect-away or a failed capture is a REJECT). Kill switch for
+    // regression bisection; leave on. See AnalysisPipeline.clientSideConfirmed / confirmByFullNavigation.
+    clientRoutingFullNavigationEscalation: boolean;
   };
   lightweight: LightweightConfig;
   extension?: ExtensionConfig;  // Chrome extension to load (optional)
@@ -175,6 +189,10 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     // <= 5% of text nodes (and of elements) differing from the calibrated not-found page => the
     // candidate IS the not-found page. A real resource's page differs in most of its content.
     notFoundDomMaxDiff: 0.05,
+    // app-shell/section prefixes, not identifiers: mutating them only switches app section (FPs).
+    segmentBlacklist: ['app'],
+    // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
+    clientRoutingFullNavigationEscalation: true,
   },
   // USER_DATA_DIR enables a persistent profile (~ and $HOME are expanded); when unset, a temporary profile is used
   userDataDir: process.env.USER_DATA_DIR ? expandHome({ value: process.env.USER_DATA_DIR }) : undefined,

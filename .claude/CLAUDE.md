@@ -48,3 +48,4 @@ Source: `/home/ncavalli/Desktop/rapidor-browser-extension/packages/react-devtool
 - Update `CHANGELOG.md` (in English) after every change: new entry **at the top**, under `# Changelog`, format `## YYYY-MM-DD HH:MM — Title` + a short paragraph + bullets (why, what changed, measured effect/regressions). Read only the first ~10 lines (`head`), never the whole file.
 - Update the matching docs when you change behavior or config (`README.md` for exploration/config, `docs/analysis.md` for the IDOR analysis). When `CHANGELOG.md` grows past ~8 entries, move the oldest ones to the top of `docs/CHANGELOG-archive.md`.
 - Safety: the analysis forges **GET only** (see `.claude/rules/analysis.md`). Never add state-changing requests against target sites.
+- Maintainability: If a file has more than 500 lines of code, it's a "code smell" and may need refactoring. Suggest refactoring for these cases.

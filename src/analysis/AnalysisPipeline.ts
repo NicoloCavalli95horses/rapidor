@@ -12,7 +12,7 @@ import { extractSegments, spliceSegment, type SegmentCandidate } from './segment
 import { findCandidates } from './matchFinder';
 import { forgeRequestCached, runWithConcurrency, sleep } from './requestForge';
 import { getServerResponseSimilarity, isIdenticalResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
-import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
+import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
 import { captureRouteByNavigation, captureDomSnapshot, diffDomSnapshots, domNoise, maskValue, makeGarbageValue, type DomSnapshot, type DomNoise } from './domSnapshot';
 import { installParamUsageTracking } from '../browser/paramUsageTracker';
@@ -29,6 +29,8 @@ export interface AnalysisPipelineOptions {
   clientRoutingConcurrency: number; // pages the client-routing phase probes on in parallel (see config.analysis.clientRoutingConcurrency)
   maxSegmentMatches: number; // skip a URL segment whose value appears in more preindexed nodes than this: a generic keyword, not an identifier (see config.analysis.maxSegmentMatches)
   notFoundDomMaxDiff: number; // a client-routing candidate whose normalized DOM differs from the calibrated not-found page by no more than this fraction (of text nodes AND of element count) is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundDomMaxDiff)
+  segmentBlacklist: string[]; // path-segment values never mutated: app-shell/section prefixes, not identifiers (see config.analysis.segmentBlacklist)
+  clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
   // forged_requests cache (a miss throws instead of forging live), the client-routing phase is
@@ -299,6 +301,12 @@ export class AnalysisPipeline {
 
     for (const segment of extractSegments({ url })) {
       segments++;
+      // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
+      // mutating one only switches the app's section, which renders a different DOM and so masquerades
+      // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query
+      // params carry no blacklisted value here (paramName is set only for them), so this only ever
+      // gates path segments.
+      if (!segment.paramName && this.deps.options.segmentBlacklist.includes(segment.value.toLowerCase())) continue;
       // A value carried by thousands of React nodes is a generic keyword (a DOM tag/role/category
       // word that also happens to be a URL segment), not a user-scoped identifier: swapping it is
       // pure noise, and the fan-out (every match x its component siblings, across every URL that
@@ -311,6 +319,12 @@ export class AnalysisPipeline {
         const graph = this.getGraph(match.stateId);
         if (!graph) continue;
         for (const candidate of findCandidates({ stateId: match.stateId, graph, nodeId: match.nodeId, path: match.path })) {
+          // Blacklist applies to the swap in BOTH directions: skip not only a blacklisted segment as
+          // the value being mutated (above), but also any candidate whose REPLACEMENT value is
+          // blacklisted — otherwise a non-shell segment gets mutated INTO an app-shell prefix
+          // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
+          // from the other side.
+          if (this.deps.options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
           items.push({ segment, candidate });
         }
       }
@@ -354,6 +368,29 @@ export class AnalysisPipeline {
     );
   }
 
+  /**
+   * The cheapest gate, and deliberately the FIRST one every candidate passes. It is pure: a diff of the
+   * two React nodes' props (compareObj) classified for authorization-relevance (assessAuthZ, cached in
+   * authz_classifications) — no network, no live browser. A candidate whose props carry no entitlement
+   * signal (two public resources differing only by id/name/href) can never become a finding, since every
+   * evaluator already required `isAuthzRelevant` before recording. Rejecting it HERE, before any forged
+   * request or client-routing probe, skips the whole expensive half of the pipeline for it — and the
+   * relevance verdict (an entitlement-shaped props diff) is exactly the "high suspicion" signal the
+   * costlier stages key off (it gates the full-navigation escalation in clientSideConfirmed). Returns the
+   * assessment (its `.differences` is reused downstream) or null when not authz-relevant (already logged).
+   */
+  private async authzGate({ candidate, context }: {
+    candidate: ReturnType<typeof findCandidates>[number]; context: string;
+  }): Promise<AuthzAssessment | null> {
+    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
+    const authz = await assessAuthZ({ differences, classifier: this.deps.classifier });
+    if (!authz.isAuthzRelevant) {
+      log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${context} | ${describeDiffs(differences)}`);
+      return null;
+    }
+    return authz;
+  }
+
   private async evaluateHttpCandidate({ page, site, event, url, candidate, segment }: {
     page?: Page; site: string;   // page is absent in offline/replay mode (forge is cache-only, see below)
     event: ReturnType<HttpEventStore['listBySite']>[number];
@@ -361,7 +398,13 @@ export class AnalysisPipeline {
     candidate: ReturnType<typeof findCandidates>[number];
     segment: SegmentCandidate;
   }): Promise<void> {
-    const { vulnerabilityStore, classifier, forgedRequestStore, options } = this.deps;
+    const { vulnerabilityStore, forgedRequestStore, options } = this.deps;
+
+    // CHEAP FIRST — the pure authz gate before any live forged request (see authzGate). Not authz-
+    // relevant → no forge, no client-routing probe, nothing. `differences` below is the diff it computed.
+    const authz = await this.authzGate({ candidate, context: `${event.method} ${event.url} -> ${url}` });
+    if (!authz) return;
+    const differences = authz.differences;
 
     const forged = await this.forgeSemaphore.run(async () => {
       const res = await forgeRequestCached({
@@ -408,19 +451,14 @@ export class AnalysisPipeline {
         run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidate.candidateValue, ...clientRoutingProbe }),
       });
       const clientCandidateUrl = withParam({ url: event.pageUrl, name: paramName, value: candidate.candidateValue });
-      const reason = await this.clientSideConfirmed({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
+      // highSuspicion: the authz gate at the top of this method already passed, so a full-navigation
+      // escalation (clientSideConfirmed stage 3) is licensed if the cheap pushState stage is inconclusive.
+      const reason = await this.clientSideConfirmed({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting, highSuspicion: true });
       if (reason) {
         log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${event.pageUrl} ?${paramName}=${candidate.candidateValue}`);
         return;
       }
       detectionMethod = 'client-routing';
-    }
-
-    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
-    const authz = await assessAuthZ({ differences, classifier });
-    if (!authz.isAuthzRelevant) {
-      log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${event.method} ${event.url} -> ${url} | ${describeDiffs(differences)}`);
-      return;
     }
 
     const id = vulnerabilityId({ candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId, method: event.method, url });
@@ -456,23 +494,21 @@ export class AnalysisPipeline {
     site: string; pageUrl: string; paramName: string; candidateUrl: string;
     candidate: ReturnType<typeof findCandidates>[number];
   }): Promise<void> {
-    const { vulnerabilityStore, classifier, options } = this.deps;
+    const { vulnerabilityStore, options } = this.deps;
     const { clientRoutingProbe } = options;
+
+    // CHEAP FIRST — pure authz gate before the live pushState probe (see authzGate).
+    const authz = await this.authzGate({ candidate, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` });
+    if (!authz) return;
+    const differences = authz.differences;
 
     const clientRouting = await this.enqueueClientRoutingCheck({
       pageUrl,
       run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidate.candidateValue, ...clientRoutingProbe }),
     });
-    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
+    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting, highSuspicion: true });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
-      return;
-    }
-
-    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
-    const authz = await assessAuthZ({ differences, classifier });
-    if (!authz.isAuthzRelevant) {
-      log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${pageUrl} -> ${candidateUrl} | ${describeDiffs(differences)}`);
       return;
     }
 
@@ -511,23 +547,20 @@ export class AnalysisPipeline {
     site: string; pageUrl: string; candidateUrl: string;
     candidate: ReturnType<typeof findCandidates>[number];
   }): Promise<void> {
-    const { vulnerabilityStore, classifier, options } = this.deps;
-    const { clientRoutingProbe } = options;
+    const { vulnerabilityStore } = this.deps;
 
-    const clientRouting = await this.enqueueClientRoutingCheck({
-      pageUrl,
-      run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue: candidate.candidateValue, ...clientRoutingProbe }),
-    });
-    const reason = await this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting });
+    // CHEAP FIRST — the pure authz gate before the live client-routing probe (see authzGate).
+    const authz = await this.authzGate({ candidate, context: `${pageUrl} -> ${candidateUrl}` });
+    if (!authz) return;
+    const differences = authz.differences;
+
+    // highSuspicion: the authz gate just passed, so this candidate's props already point at an
+    // authorization boundary — which is what licenses clientSideConfirmed to escalate to a real
+    // navigation (stage 3) when the cheap pushState stage is inconclusive (e.g. ejoy's Next.js router
+    // ignoring a synthetic popstate for a sibling lesson).
+    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion: true });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${candidateUrl}`);
-      return;
-    }
-
-    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
-    const authz = await assessAuthZ({ differences, classifier });
-    if (!authz.isAuthzRelevant) {
-      log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${pageUrl} -> ${candidateUrl} | ${describeDiffs(differences)}`);
       return;
     }
 
@@ -554,6 +587,22 @@ export class AnalysisPipeline {
         kind: { type: 'client-routing-path', candidateUrl },
       });
     }
+  }
+
+  /**
+   * One client-routing path probe + content-guard decision: the cheap pushState/popstate probe against
+   * `candidateUrl`, then clientSideConfirmed. Returns null to ACCEPT, or a rejection reason string.
+   * `highSuspicion` is forwarded to clientSideConfirmed to license its stage-3 full-navigation escalation.
+   */
+  private async probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion }: {
+    pageUrl: string; candidateUrl: string; candidate: ReturnType<typeof findCandidates>[number]; highSuspicion: boolean;
+  }): Promise<string | null> {
+    const { clientRoutingProbe } = this.deps.options;
+    const clientRouting = await this.enqueueClientRoutingCheck({
+      pageUrl,
+      run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue: candidate.candidateValue, ...clientRoutingProbe }),
+    });
+    return this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), clientRouting, highSuspicion });
   }
 
   /** Assembles the common fields every call site above already has in scope and delegates to writeReproductionScript. */
@@ -649,7 +698,7 @@ export class AnalysisPipeline {
       const clientRouting = await this.enqueueClientRoutingCheck({
         pageUrl: referenceUrl, run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidateValue, ...probe }),
       });
-      return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: ref.searchParams.get(paramName) ?? referenceValue, clientRouting });
+      return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: ref.searchParams.get(paramName) ?? referenceValue, clientRouting, highSuspicion: true });
     }
     // path segment: the stored reference value is not always the bare segment, so take the segment
     // that actually differs between the two paths (used only for masking the reference render)
@@ -659,7 +708,7 @@ export class AnalysisPipeline {
     const clientRouting = await this.enqueueClientRoutingCheck({
       pageUrl: referenceUrl, run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue, ...probe }),
     });
-    return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: i >= 0 ? decodeURIComponent(refSegs[i] ?? '') : referenceValue, clientRouting });
+    return this.clientSideConfirmed({ pageUrl: referenceUrl, candidateUrl, candidateValue, referenceValue: i >= 0 ? decodeURIComponent(refSegs[i] ?? '') : referenceValue, clientRouting, highSuspicion: true });
   }
 
   /** The http path's client-routing fallback, rebuilt from a stored finding: same param, swapped on the event's own page. */
@@ -674,7 +723,7 @@ export class AnalysisPipeline {
       pageUrl, run: (p) => checkClientSideRouting({ page: p, paramName, paramValue: candidateValue, ...probe }),
     });
     const candidateUrl = withParam({ url: pageUrl, name: paramName, value: candidateValue });
-    return this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting });
+    return this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting, highSuspicion: true });
   }
 
   /**
@@ -788,12 +837,10 @@ export class AnalysisPipeline {
    * so a page that only echoes the id it was given compares equal. A `4xx` on an incidental request does
    * not reject on its own. Returns a rejection reason (for the debug log) or null to accept.
    */
-  private async clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting }: {
-    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; clientRouting: ClientRoutingResult;
+  private async clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting, highSuspicion }: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string;
+    clientRouting: ClientRoutingResult; highSuspicion: boolean;
   }): Promise<string | null> {
-    if (!(clientRouting.hasMutatedDom && clientRouting.stayedOnRoute)) {
-      return describeClientRoutingRejection(clientRouting);
-    }
     // Use the probe's ceiling, not its floor: a snapshot wants the fully-settled render of the route,
     // so give it the most generous window (the floor only bounds how early the DOM probe may report a
     // reaction, which is not what a content comparison needs).
@@ -801,23 +848,60 @@ export class AnalysisPipeline {
     const corroborated = clientRouting.appReadParam || networkConfirmsCandidate(clientRouting.probeRequests);
     const common = { pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs };
 
-    // PRIMARY — pushState, no reload (the probe's own mechanism, cheap and reliable for a genuinely
-    // client-routed app: the candidate's content renders here without touching the network, so busuu /
-    // pimsleur never pay for the fallback below). A decision here (accept or a concrete reject) stands.
-    const viaPush = await this.renderGuardDecision({ ...common, navigate: false });
-    if (viaPush !== INERT) return viaPush;
+    // The stages run CHEAPEST-FIRST; the first to reach a verdict wins, an inconclusive stage falls
+    // through to the next, and the costliest (a real page load) is always last and runs only when every
+    // cheaper stage could not decide.
 
-    // FALLBACK — a REAL navigation, only reached when pushState left the candidate identical to the
-    // reference. That is the SSR case: a Next.js (or any server-rendered) route produces its content
-    // from a server data fetch that a pushState never triggers (lingualeo's /en/training/<type>:
-    // savannah vs repetition differ by ~96 text nodes on a real load, by zero under pushState). It
-    // cannot replace pushState: a purely client-trusting route (the server would reject a direct load
-    // but the SPA renders another resource from loaded state) is visible ONLY via pushState, and goto
-    // would miss it. It is costly, so it runs last and only when the cheap path was inconclusive.
-    const viaNav = await this.renderGuardDecision({ ...common, navigate: true });
-    return viaNav === INERT
-      ? 'renders the same page as the reference (the swapped value has no effect on the DOM content)'
-      : viaNav;
+    // STAGE 1 — pushState digestion (no reload, the cheapest mechanism and the one a genuinely
+    // client-routed SPA honours). Meaningful only when the app rendered the candidate's OWN route and
+    // stayed on it; busuu/pimsleur decide entirely here, paying for nothing below.
+    if (clientRouting.hasMutatedDom && clientRouting.stayedOnRoute) {
+      const viaPush = await this.renderGuardDecision({ ...common, navigate: false });
+      if (viaPush !== INERT) return viaPush; // accept, or a concrete reject (not-found)
+
+      // STAGE 2 — SSR navigation fallback (LENIENT). pushState rendered nothing new, but a server-rendered
+      // route (lingualeo's /en/training/<type>) produces its content only on a real load (0 vs ~96
+      // differing nodes). The app ALREADY proved it digests this route in stage 1, so a failed capture
+      // KEEPS (the pre-guard policy — never lose a find on a flaky load).
+      const viaNav = await this.renderGuardDecision({ ...common, navigate: true });
+      return viaNav === INERT ? INERT_CONTENT_REASON : viaNav;
+    }
+
+    // The app did NOT digest the value under pushState (no DOM reaction, or it redirected away). The cheap
+    // probe is inconclusive. STAGE 3 — STRICT full navigation — is the only way left to tell a real
+    // client-trusting IDOR (ejoy: Next.js ignores a synthetic popstate for a sibling lesson, so stage 1
+    // sees nothing, yet a real load renders the sibling) from noise. It runs ONLY for a HIGH-SUSPICION
+    // candidate (its props diff already crossed an authorization boundary — the caller's authz gate),
+    // since it has no prior client-routing signal to lean on, and it re-imposes the pushState gate's
+    // safety on the real load (a redirect-away or a failed capture is a REJECT, unlike stage 2). Kill
+    // switch: config.analysis.clientRoutingFullNavigationEscalation.
+    if (!highSuspicion || !this.deps.options.clientRoutingFullNavigationEscalation) {
+      return describeClientRoutingRejection(clientRouting);
+    }
+    return this.confirmByFullNavigation({ ...common });
+  }
+
+  /**
+   * STAGE 3 of clientSideConfirmed: a real page load (page.goto), run only for a high-suspicion candidate
+   * whose cheaper pushState stage was inconclusive (no reaction / redirect-away). STRICT, because there is
+   * no prior client-routing signal to lean on — unlike the lenient SSR fallback in stage 2:
+   *  - a failed capture is a REJECT (not a "keep");
+   *  - a goto the app redirected AWAY from the candidate's own path is a REJECT (the pushState gate's
+   *    `stayedOnRoute`, re-imposed on the real load — this is what keeps busuu's dashboard/review ->
+   *    dashboard/timeline redirect from flagging here);
+   *  - otherwise the SHARED content guard decides (inert -> reject; distinct and not the not-found page ->
+   *    accept), identical to every other stage.
+   */
+  private async confirmByFullNavigation({ pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs }: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; corroborated: boolean; settleMs: number;
+  }): Promise<string | null> {
+    const renders = await this.withPooledPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate: true, settleMs }) });
+    if (!renders) return 'full-navigation capture failed (strict escalation needs a decisive render)';
+    if (renders.candidateFinalUrl && !sameRoutePath(renders.candidateFinalUrl, candidateUrl)) {
+      return `full navigation redirected away from the candidate route (${safePath(renders.candidateFinalUrl)} != ${safePath(candidateUrl)})`;
+    }
+    const verdict = await this.judgeRenderedContent({ renders, pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate: true, settleMs });
+    return verdict === INERT ? INERT_CONTENT_REASON : verdict;
   }
 
   /**
@@ -838,6 +922,23 @@ export class AnalysisPipeline {
     // No snapshot: cannot decide with this mechanism. On the push pass, fall through to the fallback
     // (INERT); on the nav pass the caller turns INERT into "keep", the pre-guard policy.
     if (!renders) return navigate ? null : INERT;
+    return this.judgeRenderedContent({ renders, pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate, settleMs });
+  }
+
+  /**
+   * The SHARED content guard, independent of HOW the three renders were captured: masks both the
+   * reference and candidate value out of every side (so a page that only echoes the id it was given
+   * compares equal), calibrates the route's remount noise from the two bracketing reference renders,
+   * then classifies the candidate's render — INERT (equals the reference, the swap changed nothing), the
+   * app's own not-found page (a rejection string), or a genuinely distinct render (null → accept). Every
+   * stage runs this verbatim, so the accept bar is identical whether the capture was a pushState or a
+   * real navigation.
+   */
+  private async judgeRenderedContent({ renders, pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate, settleMs }: {
+    renders: { before: DomSnapshot; candidate: DomSnapshot; after: DomSnapshot };
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string;
+    corroborated: boolean; navigate: boolean; settleMs: number;
+  }): Promise<string | null | typeof INERT> {
     // Mask BOTH values out of every side. Masking each side with only its own value breaks on a stale
     // render: a pushState to an SSR route leaves the candidate showing the REFERENCE's value in its
     // content (it never re-rendered), and masking that candidate with only the candidate value leaves
@@ -879,12 +980,16 @@ export class AnalysisPipeline {
    */
   private async captureAroundCandidate({ page, pageUrl, candidateUrl, navigate, settleMs }: {
     page: Page; pageUrl: string; candidateUrl: string; navigate: boolean; settleMs: number;
-  }): Promise<{ before: DomSnapshot; candidate: DomSnapshot; after: DomSnapshot } | undefined> {
+  }): Promise<{ before: DomSnapshot; candidate: DomSnapshot; after: DomSnapshot; candidateFinalUrl?: string } | undefined> {
     const capture = navigate ? captureRouteByNavigation : captureDomSnapshot;
     const before = await capture({ page, testUrl: pageUrl, settleMs });
     const candidate = await capture({ page, testUrl: candidateUrl, settleMs });
+    // The real load leaves the page on the candidate's FINAL url (after any app-side redirect); read it
+    // now, before the `after` capture below navigates away. Only meaningful for the navigate mechanism
+    // (pushState captures roll the url back) — the strict stage-3 redirect-away guard consumes it.
+    const candidateFinalUrl = navigate ? page.url() : undefined;
     const after = await capture({ page, testUrl: pageUrl, settleMs });
-    return before && candidate && after ? { before, candidate, after } : undefined;
+    return before && candidate && after ? { before, candidate, after, candidateFinalUrl } : undefined;
   }
 
   /**
@@ -938,6 +1043,20 @@ export class AnalysisPipeline {
 
 /** Sentinel: the content guard found the candidate's render identical to the reference's. */
 const INERT = Symbol('inert');
+
+/** The rejection reason a content guard returns for an inert render (the swapped value changed nothing). */
+const INERT_CONTENT_REASON = 'renders the same page as the reference (the swapped value has no effect on the DOM content)';
+
+/** The decoded pathname of a URL (trailing slash stripped); '' if it cannot be parsed. */
+function safePath(raw: string): string {
+  try { return decodeURIComponent(new URL(raw).pathname).replace(/\/+$/, '') || '/'; } catch { return ''; }
+}
+
+/** Whether two URLs resolve to the same route PATH (query/hash ignored): a redirect-away changes it. */
+function sameRoutePath(a: string, b: string): boolean {
+  const pathA = safePath(a);
+  return pathA !== '' && pathA === safePath(b);
+}
 
 /** True if the app answered the candidate's own fetch with a success status: trust it, skip the visual guard. */
 function networkConfirmsCandidate(probeRequests: { status: number }[]): boolean {
