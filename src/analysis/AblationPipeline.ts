@@ -13,7 +13,7 @@ import { runWithConcurrency, sleep } from '../utils/utils';
 import { getServerResponseSimilarity, compareObj, describeDiffs } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
 import { formatDuration } from '../core/duration';
-import { normalizeUrl } from './AnalysisPipeline';
+import { normalizeUrl } from './findings';
 
 export interface AblationPipelineOptions {
   maxConcurrentRequests: number;
