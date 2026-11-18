@@ -57,6 +57,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         clientRoutingConcurrency: 1,
         notFoundDomMaxDiff: 0.05,
         segmentBlacklist: [],
+        paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
       },
     });
@@ -236,6 +237,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         clientRoutingConcurrency: 1,
         notFoundDomMaxDiff: 0.05,
         segmentBlacklist: [],
+        paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
       },
     });

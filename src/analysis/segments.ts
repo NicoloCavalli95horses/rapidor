@@ -70,3 +70,31 @@ export function spliceSegment({ parts, index, value, query }: { parts: string[];
   copy.splice(index, 0, value);
   return (copy.join('').trim()) + (query ?? '');
 }
+
+/**
+ * The candidate URL for `segment` with `value` swapped in, keeping EVERYTHING ELSE in `url` intact.
+ *
+ * Use this, not `spliceSegment`, whenever the original URL is at hand. A query-param candidate's
+ * `parts` is only `"<path>?<key>="`, so splicing it rebuilds the URL from scratch and silently DROPS
+ * every other query param: busuu's `notifications?include_voice=1&limit=5` became `notifications?
+ * limit=12538`, i.e. not "the same request with one value swapped" but a different request. Any
+ * response difference caused by the missing param was then attributed to the swapped value — a
+ * false-positive factory that also robbed `isIdenticalResponse` of its meaning. Setting the one param
+ * on the real URL (what the client-routing path always did) keeps the comparison honest.
+ *
+ * A path-segment candidate still goes through `spliceSegment`, which re-attaches the original query
+ * and is already correct for it.
+ */
+export function candidateUrlFor({ url, segment, value }: { url: string; segment: SegmentCandidate; value: string }): string {
+  if (segment.paramName) {
+    try {
+      const withSwap = new URL(url);
+      withSwap.searchParams.set(segment.paramName, value);
+      return withSwap.href;
+    } catch {
+      // unparseable URL (never expected: callers got it from the DB after a round-trip through `new
+      // URL`) — fall through to the positional splice rather than dropping the candidate
+    }
+  }
+  return spliceSegment({ parts: segment.parts, index: segment.index, value, query: segment.query });
+}

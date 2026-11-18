@@ -116,6 +116,16 @@ export interface CrawlConfig {
     // the app — which naturally renders a different DOM and so looks like a client-routing finding
     // (ejoy's /app -> /speak,/go,/website-directory false positives).
     segmentBlacklist: string[];
+    // candidate-generation blacklist for QUERY PARAMS (by param NAME, case-insensitive): a pagination
+    // or sorting control is not an object reference, so swapping it can never cross an authorization
+    // boundary — it changes how MUCH of your own data you get, never WHOSE. Without this, busuu's
+    // `notifications?limit=5` looked up the bare value "5" in the preindex, matched 77 unrelated nodes
+    // (`$paddingCorrection`, `itemsCount`, `elements[4].id`, ...) and forged dozens of nonsense ids;
+    // every forged response legitimately differed (a different page size), so no response or DOM guard
+    // could ever reject them — 22 of busuu's 27 false positives came from this one param.
+    // `maxSegmentMatches` is the wrong tool here (77 is far under the cap, and lowering it would drop
+    // real identifiers that legitimately appear on many nodes). Path segments are never gated by this.
+    paramBlacklist: string[];
     // client-routing stage-3 escalation: when the cheap pushState probe is inconclusive (the SPA did
     // not digest the swapped value — no DOM reaction, or it redirected away), allow a STRICT real page
     // load (page.goto) to decide, but ONLY for a high-suspicion candidate (its props diff already
@@ -191,6 +201,12 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     notFoundDomMaxDiff: 0.05,
     // app-shell/section prefixes, not identifiers: mutating them only switches app section (FPs).
     segmentBlacklist: ['app'],
+    // pagination/sorting controls, not object references: swapping one changes how much of your own
+    // data you get, never whose, so a differing response is expected and proves nothing.
+    paramBlacklist: [
+      'limit', 'offset', 'page', 'per_page', 'perpage', 'page_size', 'pagesize',
+      'size', 'count', 'skip', 'take', 'sort', 'order', 'order_by', 'orderby',
+    ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,
   },

@@ -6,7 +6,7 @@ import type { CrawlStateStore } from '../db/CrawlStateStore';
 import type { AblationVulnerabilityStore } from '../db/AblationVulnerabilityStore';
 import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
-import { extractSegments, spliceSegment } from './segments';
+import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
@@ -107,7 +107,8 @@ export class AblationPipeline {
           if (matchBody === undefined) continue;
           for (const candidate of findJsonCandidates({ root: matchBody, path: hit.path })) {
             candidatesFound++;
-            const url = spliceSegment({ parts: segment.parts, index: segment.index, value: candidate.candidateValue, query: segment.query });
+            // keeps the event's other query params (see candidateUrlFor's doc comment)
+            const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });
             if (historyUrls.has(normalizeUrl(url))) continue;
             const key = `${event.method}|${url}`;
             if (seen.has(key)) continue;

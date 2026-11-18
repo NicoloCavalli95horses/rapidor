@@ -65,6 +65,7 @@ const pipeline = new AnalysisPipeline({
     clientRoutingConcurrency: config.analysis.clientRoutingConcurrency,
     notFoundDomMaxDiff: config.analysis.notFoundDomMaxDiff,
     segmentBlacklist: config.analysis.segmentBlacklist,
+    paramBlacklist: config.analysis.paramBlacklist,
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
   },
 });

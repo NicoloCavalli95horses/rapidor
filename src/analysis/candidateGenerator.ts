@@ -29,6 +29,7 @@ export class CandidateGenerator {
     reactStateStore: ReactStateStore;
     maxSegmentMatches: number;
     segmentBlacklist: string[];
+    paramBlacklist: string[];
   }) {}
 
   /** Drops the per-run graph cache. Call once at the start of each site's analysis. */
@@ -38,13 +39,19 @@ export class CandidateGenerator {
 
   /** Runs the preindex -> matchFinder steps for one URL (an http_event's or a crawled page's). */
   findUrlCandidates({ url }: { url: string }): { segments: number; matches: number; items: UrlCandidate[] } {
-    const { preindexStore, maxSegmentMatches, segmentBlacklist } = this.deps;
+    const { preindexStore, maxSegmentMatches, segmentBlacklist, paramBlacklist } = this.deps;
     let segments = 0;
     let matches = 0;
     const items: UrlCandidate[] = [];
 
     for (const segment of extractSegments({ url })) {
       segments++;
+      // A pagination/sorting control is not an object reference: swapping it changes how MUCH of your
+      // own data comes back, never WHOSE, so the response legitimately differs and no downstream guard
+      // can ever reject it (config.analysis.paramBlacklist). busuu's `?limit=5` is the motivating case:
+      // the bare value "5" matched 77 unrelated preindexed nodes (paddings, counts, array indices) and
+      // forged dozens of nonsense ids. Query params only — a path segment named `limit` is not gated.
+      if (segment.paramName && paramBlacklist.includes(segment.paramName.toLowerCase())) continue;
       // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
       // mutating one only switches the app's section, which renders a different DOM and so masquerades
       // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query

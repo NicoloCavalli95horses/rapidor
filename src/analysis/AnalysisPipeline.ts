@@ -7,7 +7,7 @@ import type { CrawlStateStore } from '../db/CrawlStateStore';
 import type { VulnerabilityStore, StoredFinding } from '../db/VulnerabilityStore';
 import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
-import { spliceSegment } from './segments';
+import { spliceSegment, candidateUrlFor } from './segments';
 import { runWithConcurrency } from '../utils/utils';
 import type { AuthzClassifier } from './authzClassifier';
 import { PagePool } from './PagePool';
@@ -29,6 +29,7 @@ export interface AnalysisPipelineOptions {
   maxSegmentMatches: number; // skip a URL segment whose value appears in more preindexed nodes than this: a generic keyword, not an identifier (see config.analysis.maxSegmentMatches)
   notFoundDomMaxDiff: number; // a client-routing candidate whose normalized DOM differs from the calibrated not-found page by no more than this fraction (of text nodes AND of element count) is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundDomMaxDiff)
   segmentBlacklist: string[]; // path-segment values never mutated: app-shell/section prefixes, not identifiers (see config.analysis.segmentBlacklist)
+  paramBlacklist: string[]; // query-param NAMES never mutated: pagination/sorting controls, not object references (see config.analysis.paramBlacklist)
   clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
@@ -101,6 +102,7 @@ export class AnalysisPipeline {
       reactStateStore: deps.reactStateStore,
       maxSegmentMatches: deps.options.maxSegmentMatches,
       segmentBlacklist: deps.options.segmentBlacklist,
+      paramBlacklist: deps.options.paramBlacklist,
     });
     this.clientRoutingVerifier = new ClientRoutingVerifier({
       pagePool: this.pagePool,
@@ -173,7 +175,9 @@ export class AnalysisPipeline {
       matchesFound += found.matches;
       for (const { segment, candidate } of found.items) {
         candidatesFound++;
-        const url = spliceSegment({ parts: segment.parts, index: segment.index, value: candidate.candidateValue, query: segment.query });
+        // candidateUrlFor, not spliceSegment: a query-param candidate must keep the event's OTHER
+        // params (see its doc comment — dropping them forged a different request entirely).
+        const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });
         if (historyUrls.has(normalizeUrl(url))) continue;
         const key = `http|${event.method}|${url}`;
         if (seen.has(key)) continue;

@@ -31,8 +31,8 @@ function graphWith({ a, b, key = 'id' }: { a: string; b: string; key?: string })
 }
 
 let n = 0;
-function newGenerator({ graph, url, maxSegmentMatches = 300, segmentBlacklist = [] as string[] }: {
-  graph: RapidorGraph; url: string; maxSegmentMatches?: number; segmentBlacklist?: string[];
+function newGenerator({ graph, url, maxSegmentMatches = 300, segmentBlacklist = [] as string[], paramBlacklist = [] as string[] }: {
+  graph: RapidorGraph; url: string; maxSegmentMatches?: number; segmentBlacklist?: string[]; paramBlacklist?: string[];
 }) {
   const db = new Database(join(root, `${n++}.db`));
   const preindexStore = new PreindexedValueStore({ db, clearOnStart: true });
@@ -40,7 +40,7 @@ function newGenerator({ graph, url, maxSegmentMatches = 300, segmentBlacklist = 
   const stateId = reactStateStore.record({ site: SITE, url, graph });
   assert.ok(stateId !== undefined, 'the fixture state should be recorded');
   preindexStore.reindex({ stateId, graph });
-  return new CandidateGenerator({ preindexStore, reactStateStore, maxSegmentMatches, segmentBlacklist });
+  return new CandidateGenerator({ preindexStore, reactStateStore, maxSegmentMatches, segmentBlacklist, paramBlacklist });
 }
 
 describe('CandidateGenerator', () => {
@@ -72,6 +72,28 @@ describe('CandidateGenerator', () => {
 
     // the source segment `speak` is allowed, but its only replacement value is blacklisted
     assert.deepEqual(items, []);
+  });
+
+  it('never mutates a blacklisted QUERY PARAM (a pagination control, not an object reference)', () => {
+    // busuu's case: ?limit=<n> looked the bare value up in the preindex and forged unrelated ids.
+    const url = `https://${SITE}/notifications?include_voice=1&limit=50`;
+    const graph = graphWith({ a: '50', b: '12538' });
+
+    // the candidate exists and IS proposed without the blacklist — so the assertion below is meaningful
+    assert.deepEqual(
+      newGenerator({ graph, url }).findUrlCandidates({ url }).items.map((i) => i.candidate.candidateValue),
+      ['12538'],
+    );
+    assert.deepEqual(newGenerator({ graph, url, paramBlacklist: ['limit'] }).findUrlCandidates({ url }).items, []);
+  });
+
+  it('gates the query param by NAME only — a path segment of the same name is still mutated', () => {
+    const url = `https://${SITE}/limit/50`;
+    const gen = newGenerator({ graph: graphWith({ a: '50', b: '60' }), url, paramBlacklist: ['limit'] });
+
+    const { items } = gen.findUrlCandidates({ url });
+
+    assert.deepEqual(items.map((i) => i.candidate.candidateValue), ['60']);
   });
 
   it('skips a segment whose value appears in more preindexed nodes than maxSegmentMatches', () => {
