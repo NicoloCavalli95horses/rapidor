@@ -10,7 +10,8 @@ import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, spliceSegment, type SegmentCandidate } from './segments';
 import { findCandidates } from './matchFinder';
-import { forgeRequestCached, runWithConcurrency, sleep } from './requestForge';
+import { forgeRequestCached } from './requestForge';
+import { runWithConcurrency, sleep, Semaphore, safePath, sameRoutePath, withParam } from '../utils/utils';
 import { getServerResponseSimilarity, isIdenticalResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
@@ -83,24 +84,6 @@ const CLIENT_ROUTING_RETRY_DELAY_MS = 250;
  * Every count along the way (segments extracted, matches found, candidates found, requests
  * generated) is recorded to AnalysisStatsStore, one row per site, for later averaging.
  */
-
-/** Minimal counting semaphore: bounds how many `run`s are in flight at once (used for forged HTTP). */
-class Semaphore {
-  private permits: number;
-  private waiters: (() => void)[] = [];
-  constructor(permits: number) { this.permits = Math.max(1, permits); }
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.permits > 0) this.permits--;
-    else await new Promise<void>((resolve) => this.waiters.push(resolve));
-    try {
-      return await fn();
-    } finally {
-      const next = this.waiters.shift();
-      if (next) next();
-      else this.permits++;
-    }
-  }
-}
 
 export class AnalysisPipeline {
   // Pool of pages the client-routing phase runs its probes/screenshots on, in parallel (see PagePool).
@@ -984,31 +967,9 @@ const INERT = Symbol('inert');
 /** The rejection reason a content guard returns for an inert render (the swapped value changed nothing). */
 const INERT_CONTENT_REASON = 'renders the same page as the reference (the swapped value has no effect on the DOM content)';
 
-/** The decoded pathname of a URL (trailing slash stripped); '' if it cannot be parsed. */
-function safePath(raw: string): string {
-  try { return decodeURIComponent(new URL(raw).pathname).replace(/\/+$/, '') || '/'; } catch { return ''; }
-}
-
-/** Whether two URLs resolve to the same route PATH (query/hash ignored): a redirect-away changes it. */
-function sameRoutePath(a: string, b: string): boolean {
-  const pathA = safePath(a);
-  return pathA !== '' && pathA === safePath(b);
-}
-
 /** True if the app answered the candidate's own fetch with a success status: trust it, skip the visual guard. */
 function networkConfirmsCandidate(probeRequests: { status: number }[]): boolean {
   return probeRequests.some((r) => r.status >= 200 && r.status < 300);
-}
-
-/** The URL with one query param set to `value` (used to build a query candidate's own route for the visual guard). */
-function withParam({ url, name, value }: { url: string; name: string; value: string }): string {
-  try {
-    const u = new URL(url);
-    u.searchParams.set(name, value);
-    return u.href;
-  } catch {
-    return url;
-  }
 }
 
 /** Same dedup id RAPIDOR's responseEvaluator.js computes (sha256 of candidate value + node id + method + url). */

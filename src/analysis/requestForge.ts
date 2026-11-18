@@ -66,21 +66,3 @@ export async function forgeRequestCached({ cache, site, page, url, method, heade
   cache.record({ site, method, url, postData, response });
   return response;
 }
-
-/** Port of RAPIDOR's utils.js runWithConcurrency: bounded-concurrency task pool. */
-export async function runWithConcurrency<T>({ tasks, limit }: { tasks: (() => Promise<T>)[]; limit: number }): Promise<T[]> {
-  const results = new Array<T>(tasks.length);
-  let next = 0;
-  async function worker(): Promise<void> {
-    while (next < tasks.length) {
-      const i = next++;
-      results[i] = await tasks[i]();
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
-  return results;
-}
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
