@@ -103,6 +103,15 @@ export interface CrawlConfig {
     // generic word fans out to thousands of matches times every URL that shares it, which is what
     // made candidate generation take tens of minutes (and produced thousands of junk candidates).
     maxSegmentMatches: number;
+    // per-site forge budget (main AND ablation): if candidate generation produces MORE than this many
+    // distinct forge requests, the analysis is abandoned for that site and flagged infeasible instead of
+    // dispatched. Guards against the combinatorial explosion of HTTP-JSON matching (promova's ablation
+    // alone generates ~4.8M distinct GETs) — a memory bound (generation early-aborts here, never
+    // materialising millions), a time bound (see the value's own note), and an ethical one (GET-only,
+    // but millions of live requests is a DoS). The main pipeline is bounded by the React preindex and
+    // rarely trips this; a site that does (promova's main generated ~12.5k before the volatile-param
+    // dedup trimmed it) is a genuine outlier the budget is meant to catch.
+    maxGeneratedRequests: number;
     // client-routing false-positive guard: when a candidate route has no decisive network signal,
     // its normalized DOM (text nodes + <img> src + element count, see analysis/domSnapshot.ts) is
     // compared against the app's own "not found" page (calibrated by rendering a garbage id in the
@@ -206,6 +215,11 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     ablationMode: process.env.ABLATION_MODE === 'true',
     // a value in more than this many preindexed nodes is a generic keyword, not an identifier: skipped
     maxSegmentMatches: 300,
+    // per-site forge budget: above this, the analysis is abandoned as infeasible (see the field doc).
+    // Kept loosely aligned with the pacing so a feasible site fits a ~45-min per-site time budget:
+    // maxGeneratedRequests x timeBetweenRequestsMs / maxConcurrentRequests ≈ 10000 x 250ms / 3 ≈ 14 min
+    // of pacing (roughly double with network time). Adjust the three together, by eye, if pacing changes.
+    maxGeneratedRequests: 10_000,
     // <= 5% of text nodes (and of elements) differing from the calibrated not-found page => the
     // candidate IS the not-found page. A real resource's page differs in most of its content.
     notFoundDomMaxDiff: 0.05,

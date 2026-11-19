@@ -104,6 +104,7 @@ export function buildExplorer(
       dbPath: cfg.db.path, userDataDir: cfg.userDataDir, reportsDir: cfg.analysis.reportsDir,
       clientRoutingProbe: cfg.analysis.clientRoutingProbe,
       maxSegmentMatches: cfg.analysis.maxSegmentMatches,
+      maxGeneratedRequests: cfg.analysis.maxGeneratedRequests,
       clientRoutingConcurrency: cfg.analysis.clientRoutingConcurrency,
       notFoundDomMaxDiff: cfg.analysis.notFoundDomMaxDiff,
       segmentBlacklist: cfg.analysis.segmentBlacklist,
@@ -121,7 +122,11 @@ export function buildExplorer(
     ? new AblationPipeline({
         httpEventStore, crawlStateStore: crawlStates,
         vulnerabilityStore: ablationVulnerabilityStore, statsStore: ablationStatsStore, forgedRequestStore, classifier,
-        options: { maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs, overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite },
+        options: {
+          maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs,
+          maxSegmentMatches: cfg.analysis.maxSegmentMatches, maxGeneratedRequests: cfg.analysis.maxGeneratedRequests,
+          overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
+        },
       })
     : undefined;
 

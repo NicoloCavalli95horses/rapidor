@@ -30,6 +30,14 @@ describe('findings: normalizeUrl (the history-filter canonical form)', () => {
   it('returns malformed input unchanged instead of throwing', () => {
     assert.equal(normalizeUrl('not a url'), 'not a url');
   });
+
+  it('strips volatile cache-busting params (_rsc) so RSC duplicates of one request canonicalize equal', () => {
+    // Next.js tags each navigation with a fresh `_rsc` token; two captures of the same request differ
+    // only by it and must collapse to one (history filter + finding dedup), while real params stay.
+    assert.equal(normalizeUrl('https://app.test/p/79?_rsc=abc'), normalizeUrl('https://app.test/p/79?_rsc=zzz'));
+    assert.equal(normalizeUrl('https://app.test/p/79?_rsc=abc'), 'https://app.test/p/79');
+    assert.equal(normalizeUrl('https://app.test/x?id=5&_rsc=abc'), 'https://app.test/x?id=5');
+  });
 });
 
 describe('findings: vulnerabilityId', () => {

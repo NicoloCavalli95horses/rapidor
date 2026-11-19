@@ -9,6 +9,7 @@ export interface AblationStatsRow {
   requestsGenerated: number;   // forged requests actually dispatched
   vulnerabilitiesFlagged: number;  // rows written to `ablation_vulnerabilities` for this site
   analysisMs: number;          // wall-clock time this runForSite() call took
+  infeasible?: boolean;        // true: candidate generation exceeded maxGeneratedRequests, the site was abandoned (nothing dispatched, requestsGenerated is the over-budget count)
 }
 
 export interface AblationStatsStoreOptions {
@@ -43,6 +44,9 @@ export class AblationStatsStore {
         analysis_ms INTEGER NOT NULL
       )
     `);
+    const columns = (this.db.prepare('PRAGMA table_info(ablation_stats)').all() as { name: string }[]).map((c) => c.name);
+    // Skip the one-time migration on a read-only connection (all() reads `infeasible` defensively).
+    if (!this.db.readonly && !columns.includes('infeasible')) this.db.exec('ALTER TABLE ablation_stats ADD COLUMN infeasible INTEGER NOT NULL DEFAULT 0');
     if (clearOnStart) this.db.exec('DELETE FROM ablation_stats');
   }
 
@@ -55,33 +59,34 @@ export class AblationStatsStore {
     this.db.prepare(`
       INSERT INTO ablation_stats (
         site, http_events, segments_extracted, json_matches_found, candidates_found,
-        requests_generated, vulnerabilities_flagged, analysis_ms
+        requests_generated, vulnerabilities_flagged, analysis_ms, infeasible
       ) VALUES (
         @site, @httpEvents, @segmentsExtracted, @jsonMatchesFound, @candidatesFound,
-        @requestsGenerated, @vulnerabilitiesFlagged, @analysisMs
+        @requestsGenerated, @vulnerabilitiesFlagged, @analysisMs, @infeasible
       )
       ON CONFLICT(site) DO UPDATE SET
         http_events = @httpEvents, segments_extracted = @segmentsExtracted,
         json_matches_found = @jsonMatchesFound, candidates_found = @candidatesFound,
         requests_generated = @requestsGenerated, vulnerabilities_flagged = @vulnerabilitiesFlagged,
-        analysis_ms = @analysisMs
-    `).run(row);
+        analysis_ms = @analysisMs, infeasible = @infeasible
+    `).run({ ...row, infeasible: row.infeasible ? 1 : 0 });
   }
 
   all(): AblationStatsRow[] {
+    const hasInfeasible = (this.db.prepare('PRAGMA table_info(ablation_stats)').all() as { name: string }[]).some((c) => c.name === 'infeasible');
     const rows = this.db.prepare(`
       SELECT site, http_events, segments_extracted, json_matches_found, candidates_found,
-        requests_generated, vulnerabilities_flagged, analysis_ms
+        requests_generated, vulnerabilities_flagged, analysis_ms, ${hasInfeasible ? 'infeasible' : '0 AS infeasible'}
       FROM ablation_stats ORDER BY site ASC
     `).all() as {
       site: string; http_events: number; segments_extracted: number; json_matches_found: number;
-      candidates_found: number; requests_generated: number; vulnerabilities_flagged: number; analysis_ms: number;
+      candidates_found: number; requests_generated: number; vulnerabilities_flagged: number; analysis_ms: number; infeasible: number;
     }[];
     return rows.map((r) => ({
       site: r.site, httpEvents: r.http_events, segmentsExtracted: r.segments_extracted,
       jsonMatchesFound: r.json_matches_found, candidatesFound: r.candidates_found,
       requestsGenerated: r.requests_generated, vulnerabilitiesFlagged: r.vulnerabilities_flagged,
-      analysisMs: r.analysis_ms,
+      analysisMs: r.analysis_ms, infeasible: r.infeasible === 1,
     }));
   }
 }

@@ -27,6 +27,7 @@ export interface AnalysisPipelineOptions {
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };  // see config.analysis.clientRoutingProbe's own comment
   clientRoutingConcurrency: number; // pages the client-routing phase probes on in parallel (see config.analysis.clientRoutingConcurrency)
   maxSegmentMatches: number; // skip a URL segment whose value appears in more preindexed nodes than this: a generic keyword, not an identifier (see config.analysis.maxSegmentMatches)
+  maxGeneratedRequests: number; // per-site forge budget: if candidate generation exceeds this, the site is abandoned as infeasible instead of dispatched (see config.analysis.maxGeneratedRequests)
   notFoundDomMaxDiff: number; // a client-routing candidate whose normalized DOM differs from the calibrated not-found page by no more than this fraction (of text nodes AND of element count) is the app's own not-found page, not a real resource — rejected (see config.analysis.notFoundDomMaxDiff)
   segmentBlacklist: string[]; // path-segment values never mutated: app-shell/section prefixes, not identifiers (see config.analysis.segmentBlacklist)
   paramBlacklist: string[]; // query-param NAMES never mutated: pagination/sorting controls, not object references (see config.analysis.paramBlacklist)
@@ -197,7 +198,10 @@ export class AnalysisPipeline {
         // params (see its doc comment — dropping them forged a different request entirely).
         const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });
         if (historyUrls.has(normalizeUrl(url))) continue;
-        const key = `http|${event.method}|${url}`;
+        // Dedup by the CANONICAL url (normalizeUrl strips volatile `_rsc`-style tokens): two carrier
+        // events differing only by an RSC token forge the same logical request, so probe it once and
+        // record one finding (promova's main dropped ~20 duplicate findings this way).
+        const key = `http|${event.method}|${normalizeUrl(url)}`;
         if (seen.has(key)) continue;
         seen.add(key);
         tasks.push(() => this.candidateEvaluator.evaluateHttpCandidate({ page, site, event, url, candidate, segment }));
@@ -235,6 +239,21 @@ export class AnalysisPipeline {
           tasks.push(() => this.candidateEvaluator.evaluateClientRoutingPathCandidate({ site, pageUrl, candidateUrl, candidate }));
         }
       }
+    }
+
+    // Per-site forge budget: candidate generation produced more distinct forges than we will fire at a
+    // live site (see config.analysis.maxGeneratedRequests). Abandon the site as infeasible — the
+    // combinatorial-explosion outcome — instead of dispatching thousands of extra live requests. The
+    // main pipeline is bounded by the React preindex so it rarely trips this; it is the shared budget
+    // the far more explosive ablation leans on.
+    if (tasks.length > options.maxGeneratedRequests) {
+      log.warning(`AnalysisPipeline: ${site} ABANDONED as infeasible — ${tasks.length} candidate requests exceed the ${options.maxGeneratedRequests} budget; nothing dispatched`);
+      statsStore.record({
+        site, httpEvents: events.length, segmentsExtracted, reactStates: reactStateStore.countBySite(site),
+        matchesFound, candidatesFound, requestsGenerated: tasks.length, vulnerabilitiesFlagged: 0,
+        explorationMs, analysisMs: Date.now() - analysisStartedAt, infeasible: true,
+      });
+      return;
     }
 
     if (tasks.length > 0) {
@@ -280,6 +299,7 @@ export class AnalysisPipeline {
       vulnerabilitiesFlagged: vulnerabilityStore.count(site),
       explorationMs,
       analysisMs,
+      infeasible: false,
     });
   }
 

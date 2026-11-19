@@ -56,6 +56,7 @@ const pipeline = new AnalysisPipeline({
   classifier: new AuthzClassifier(new AuthzClassificationStore({ db, clearOnStart: false })),
   options: {
     maxConcurrentRequests: config.analysis.maxConcurrentRequests,
+    maxGeneratedRequests: config.analysis.maxGeneratedRequests,
     timeBetweenRequestsMs: config.analysis.timeBetweenRequestsMs,
     dbPath: config.db.path,
     userDataDir: config.userDataDir,

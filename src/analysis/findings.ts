@@ -30,10 +30,22 @@ export function vulnerabilityId({ candidateValue, nodeId, method, url }: {
  * falls back to the raw string rather than throwing: a failed normalization should just miss this
  * optimization, not break the pipeline.
  */
+/**
+ * Volatile / cache-busting query params, stripped during canonicalization so two URLs differing ONLY
+ * by such a token compare equal. `_rsc` is Next.js's React-Server-Components request token (changes
+ * every navigation): not an object reference, so carrying it never crosses an authz boundary, but
+ * leaving it in inflated the history filter, the finding dedup (promova flagged the same IDOR ~20
+ * extra times, one per token) and the ablation's candidate dedup. A module const like preindex.ts's
+ * PREINDEXED_KEYS — a framework fact, not a per-run setting. Canonicalization only: the FORGED request
+ * still keeps the original's params, so an RSC request stays an RSC request and its response comparable.
+ */
+const VOLATILE_PARAMS = new Set(['_rsc']);
+
 export function normalizeUrl(raw: string): string {
   try {
     const url = new URL(raw);
     const path = decodeURIComponent(url.pathname).replace(/\/+$/, '') || '/';
+    for (const p of VOLATILE_PARAMS) url.searchParams.delete(p);
     const params = [...url.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));
     const search = params.map(([key, value]) => `${key}=${decodeURIComponent(value)}`).join('&');
     return `${url.origin}${path}${search ? `?${search}` : ''}`;

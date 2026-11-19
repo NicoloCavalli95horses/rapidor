@@ -2,6 +2,18 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-19 — analysis: tame the ablation's combinatorial explosion (carrier-cap, volatile params, per-site forge budget)
+
+Re-running promova end-to-end surfaced that the ablation generates **~4.8M distinct forge GETs** (vs the main pipeline's ~12.5k) and OOM'd / would have DoS'd the site. Measured the drivers and fixed them; the explosion itself is genuine (a result for the paper), but it is now bounded and flagged instead of fatal.
+
+- **Why it explodes**: candidate count ≈ Σ over matched values of (distinct URLs carrying the value as a segment) × (bodies it matches) × (array siblings). The amplifier is **low-entropy values** — tiny integers like `"1"` (a page number / version / flag in 3222 distinct URLs) that coincidentally sit under an id-like key in a few JSON bodies. The main pipeline filters these for free (such a value saturates the rendered DOM, > `maxSegmentMatches` React nodes, and is skipped); the sparser JSON corpus holds it in only ~28 bodies, so the hit-count cap never fires. React state is an implicit saliency prior the HTTP-JSON ablation lacks.
+- **What changed**:
+  - **Carrier-cap** (the missing `maxSegmentMatches` analog): the ablation now also skips a value carried by more than `maxSegmentMatches` *distinct request URLs*. On promova, dropping 7 such values (`0,1,3,6,8,11,1080`) cut candidates **12×** (4.8M → 392k). Plus the existing **hit-cap** (`hits > maxSegmentMatches`).
+  - **Volatile-param canonicalization**: `normalizeUrl` now strips Next.js RSC `_rsc` tokens (a module const in `findings.ts`, like `PREINDEXED_KEYS`), so two captures of one request differing only by the token canonicalize equal. Barely dents the ablation (0.7%) but **de-duplicates the main pipeline's findings** — promova's main http candidates dropped 8184 → 1986 (−76%), collapsing ~20 duplicate `_rsc` findings. The forged request still carries the original's params (an RSC request stays comparable).
+  - **Per-site forge budget** (`config.analysis.maxGeneratedRequests`, 10k, main AND ablation): generation early-aborts the moment distinct forges exceed it and the site is recorded **infeasible** (new `infeasible` column on `analysis_stats` / `ablation_stats`) instead of dispatched — a memory bound (never materialises millions), a time bound (~10k × 250ms / 3 ≈ a ~45-min per-site budget) and an ethical one (GET-only, but millions of live requests is a DoS). promova's ablation → infeasible even with the caps (still ~118k); its main (~6.4k after the `_rsc` dedup) stays feasible.
+  - Removed the earlier `maxJsonSiblingsPerMatch` idea: siblings are not the driver (arrays are <50), so the budget + caps suffice and the config stays lean.
+- **Effect/regressions**: `test/AblationPipeline.test.ts`, `test/findings.test.ts` (new `_rsc` case), `test/jsonMatchFinder.test.ts`, `test/HttpEventStore.test.ts` green; typecheck clean. `normalizeUrl` is a decision-logic change (history filter + finding dedup), so a `recheckFindings` on the 4 reference sites is still owed before this is trusted on them.
+
 ## 2026-11-19 11:54 — fix: analysis loads http_events without materialising all response bodies (OOM)
 
 A completed promova crawl (17,426 http_events, ~568 MB of response bodies) then OOM'd in analysis: `httpEventStore.listBySite` did `SELECT *`, pulling every body into one array (~1.2 GB in JS, measured), and `primeResponseHistory` parsed all 568 MB on top of that — past Node's 4,144 MB heap. busuu never hit this (8,618 events, only 4 MB of bodies).

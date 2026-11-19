@@ -58,6 +58,8 @@ const pipeline = new AblationPipeline({
   options: {
     maxConcurrentRequests: config.analysis.maxConcurrentRequests,
     timeBetweenRequestsMs: config.analysis.timeBetweenRequestsMs,
+    maxSegmentMatches: config.analysis.maxSegmentMatches,
+    maxGeneratedRequests: config.analysis.maxGeneratedRequests,
   },
 });
 

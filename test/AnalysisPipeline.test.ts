@@ -50,7 +50,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
     const pipeline = new AnalysisPipeline({
       httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier,
       options: {
-        maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, dbPath, reportsDir: join(root, 'reports'),
+        maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, maxGeneratedRequests: 100000, dbPath, reportsDir: join(root, 'reports'),
         // test pages react near-instantly: a short window keeps the suite fast without masking a real miss
         clientRoutingProbe: { minWaitMs: 300, idleMs: 50, maxWaitMs: 500 },
         maxSegmentMatches: 300,
@@ -231,7 +231,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
     const pipeline = new AnalysisPipeline({
       httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier,
       options: {
-        maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, dbPath, reportsDir: join(root, 'reports'),
+        maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, maxGeneratedRequests: 100000, dbPath, reportsDir: join(root, 'reports'),
         clientRoutingProbe: { minWaitMs: 300, idleMs: 50, maxWaitMs: 500 },
         maxSegmentMatches: 300,
         clientRoutingConcurrency: 1,

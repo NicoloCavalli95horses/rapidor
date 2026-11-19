@@ -68,6 +68,7 @@ const pipeline = new AnalysisPipeline({
     reportsDir: config.analysis.reportsDir,
     clientRoutingProbe: config.analysis.clientRoutingProbe,
     maxSegmentMatches: config.analysis.maxSegmentMatches,
+    maxGeneratedRequests: config.analysis.maxGeneratedRequests,
     clientRoutingConcurrency: config.analysis.clientRoutingConcurrency,
     notFoundDomMaxDiff: config.analysis.notFoundDomMaxDiff,
     segmentBlacklist: config.analysis.segmentBlacklist,

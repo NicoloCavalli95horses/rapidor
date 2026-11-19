@@ -18,6 +18,13 @@ import { normalizeUrl } from './findings';
 export interface AblationPipelineOptions {
   maxConcurrentRequests: number;
   timeBetweenRequestsMs: number;
+  // JSON analogs of the main pipeline's guards (same config values): a value matching more than this
+  // many bodies (hit-cap) OR carried by more than this many distinct URLs (carrier-cap) is a generic
+  // keyword, not an identifier, and is skipped (see config.analysis.maxSegmentMatches / runForSite).
+  maxSegmentMatches: number;
+  // per-site forge budget: above this many distinct candidates, generation early-aborts and the site is
+  // flagged infeasible instead of dispatched (see config.analysis.maxGeneratedRequests).
+  maxGeneratedRequests: number;
   // Mirrors config.analysis.overwriteFindingsPerSite for the ablation's own table: when not explicitly
   // false, a re-run clears this site's previous ablation_vulnerabilities before recording.
   overwriteFindingsPerSite?: boolean;
@@ -83,19 +90,30 @@ export class AblationPipeline {
     // accumulating (record is INSERT OR IGNORE on a deterministic id). Reset the per-run guard sets too.
     if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
     this.recordedForgedBodyKeys = new Set<string>();
-    // Scoped to THIS site only: listBySite already filters by site, and both `bodies`/`preindex`
-    // below are built fresh from exactly this array on every call — never cached across sites, so a
-    // JSON body captured for a different site can never leak into this one's index.
-    const events = httpEventStore.listBySite(site);
-    // Response-history guard (same as AnalysisPipeline): the content key of every captured response, so
-    // a forge that returns data the crawler already collected legitimately is not flagged as a leak.
+    // Scoped to THIS site only: listMetaBySite/forEachResponse already filter by site, and both
+    // `bodies`/`preindex` below are built fresh from exactly this stream on every call — never cached
+    // across sites, so a JSON body captured for a different site can never leak into this one's index.
+    // Metadata only (no response_body): the generation loop needs each event's URL/method and the
+    // parsed JSON bodies, never the raw body strings all at once. On a body-rich site those are ~0.6 GB
+    // (promova: 595 MB over 17k events) — materialising them in one array is what OOM'd here.
+    const events = httpEventStore.listMetaBySite(site);
+    // One streaming pass over the bodies (same id ASC order as events, so the Nth body aligns with
+    // events[N]): fold the response-history guard key set (same as AnalysisPipeline — a forge that
+    // returns data the crawler already collected legitimately is not flagged) AND keep only the parsed
+    // JSON objects for the preindex/sibling walk. Non-JSON bodies (images/JS/CSS — the bulk of the
+    // bytes) parse to undefined and cost nothing to retain, so what stays in memory is just the JSON
+    // subset (promova: 2981 of 17k, ~106 MB), never the raw 0.6 GB.
     this.responseHistoryKeys = new Set<string>();
-    for (const e of events) {
-      const k = canonicalResponseKey({ status: e.status ?? 0, body: e.responseBody ?? '' });
-      if (k) this.responseHistoryKeys.add(k);
-    }
-    // Parsed once, same order/indices as `events`; undefined for a non-JSON/unparseable body.
-    const bodies = events.map((e) => parseJsonBody(e.responseBody));
+    const bodies = new Array<unknown>(events.length);
+    let bodyIndex = 0;
+    httpEventStore.forEachResponse({
+      site,
+      onRow: ({ status, body }) => {
+        const k = canonicalResponseKey({ status: status ?? 0, body: body ?? '' });
+        if (k) this.responseHistoryKeys.add(k);
+        bodies[bodyIndex++] = parseJsonBody(body);
+      },
+    });
     // Every body walked exactly once; a segment is then looked up against the WHOLE corpus in O(1)
     // instead of being re-walked body-by-body — see buildJsonPreindex's own doc comment.
     const preindex = buildJsonPreindex({ bodies });
@@ -108,20 +126,49 @@ export class AblationPipeline {
       ...crawlStateStore.listBySite(site).map((s) => normalizeUrl(s.url)),
     ]);
 
+    // Carrier-count per matched value: how many DISTINCT (canonical) request URLs carry each value as a
+    // segment. Only the handful of values that match the preindex at all are counted (promova: 77), so
+    // this is cheap. It powers the carrier-cap below — the piece of the main pipeline's maxSegmentMatches
+    // the JSON path cannot get for free: in React a generic value saturates the rendered DOM (> cap
+    // nodes) and is skipped, but the sparser JSON corpus holds a low-entropy value ("1", "0", a page
+    // number / version / flag — never an object reference) in only a few bodies, so the hit-cap never
+    // fires; yet that same value is carried by thousands of URLs and fans out combinatorially (on
+    // promova just 7 such values drive a 12x candidate blow-up). normalizeUrl strips volatile `_rsc`
+    // tokens so RSC duplicates of one request count once.
+    const carriersByValue = new Map<string, Set<string>>();
+    for (const event of events) {
+      for (const segment of extractSegments({ url: event.url })) {
+        if (!preindex.has(segment.value)) continue;
+        let set = carriersByValue.get(segment.value);
+        if (!set) { set = new Set<string>(); carriersByValue.set(segment.value, set); }
+        set.add(`${event.method} ${normalizeUrl(event.url)}`);
+      }
+    }
+
     const seen = new Set<string>();
     const tasks: (() => Promise<void>)[] = [];
 
     let segmentsExtracted = 0;
     let jsonMatchesFound = 0;
     let candidatesFound = 0;
+    // Per-site forge budget: generation early-aborts the moment distinct forges exceed the budget, so a
+    // combinatorially explosive site (promova's ablation wants ~4.8M GETs) is flagged infeasible without
+    // ever materialising millions of tasks or firing them at a live site (see maxGeneratedRequests).
+    let infeasible = false;
 
     // `event` provides the segment's own URL (the splice target and, via `evaluateCandidate`, the
     // baseline response to compare the forged candidate against) — NOT necessarily the body the
     // match/siblings were found in: that's `bodies[hit.bodyIndex]`, resolved independently per hit.
+    generation:
     for (const event of events) {
       for (const segment of extractSegments({ url: event.url })) {
         segmentsExtracted++;
         const hits = preindex.get(segment.value) ?? [];
+        // Two maxSegmentMatches guards (JSON analogs of the main pipeline's, see the carriersByValue
+        // note above): skip a value that matches too many bodies (hit-cap) OR is carried by too many
+        // distinct URLs (carrier-cap). Both are generic-keyword signals, not identifiers.
+        if (hits.length > options.maxSegmentMatches) continue;
+        if ((carriersByValue.get(segment.value)?.size ?? 0) > options.maxSegmentMatches) continue;
         jsonMatchesFound += hits.length;
         for (const hit of hits) {
           const matchBody = bodies[hit.bodyIndex];
@@ -131,13 +178,25 @@ export class AblationPipeline {
             // keeps the event's other query params (see candidateUrlFor's doc comment)
             const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });
             if (historyUrls.has(normalizeUrl(url))) continue;
-            const key = `${event.method}|${url}`;
+            // dedup by the CANONICAL url (normalizeUrl strips volatile `_rsc` tokens, see findings.ts)
+            const key = `${event.method}|${normalizeUrl(url)}`;
             if (seen.has(key)) continue;
             seen.add(key);
             tasks.push(() => this.evaluateCandidate({ page, site, event, url, candidate }));
+            if (seen.size > options.maxGeneratedRequests) { infeasible = true; break generation; }
           }
         }
       }
+    }
+
+    if (infeasible) {
+      log.warning(`AblationPipeline: ${site} ABANDONED as infeasible — candidate generation exceeded the ${options.maxGeneratedRequests} forge budget (combinatorial explosion); nothing dispatched`);
+      statsStore.record({
+        site, httpEvents: events.length, segmentsExtracted, jsonMatchesFound, candidatesFound,
+        requestsGenerated: seen.size, vulnerabilitiesFlagged: 0, analysisMs: Date.now() - analysisStartedAt,
+        infeasible: true,
+      });
+      return;
     }
 
     if (tasks.length > 0) {
@@ -151,13 +210,18 @@ export class AblationPipeline {
     statsStore.record({
       site, httpEvents: events.length, segmentsExtracted, jsonMatchesFound, candidatesFound,
       requestsGenerated: tasks.length, vulnerabilitiesFlagged: vulnerabilityStore.count(site), analysisMs,
+      infeasible: false,
     });
   }
 
   private async evaluateCandidate({ page, site, event, url, candidate }: {
     page: Page; site: string; event: HttpEventRow; url: string; candidate: JsonCandidate;
   }): Promise<void> {
-    const { vulnerabilityStore, classifier, forgedRequestStore, options } = this.deps;
+    const { vulnerabilityStore, classifier, forgedRequestStore, httpEventStore, options } = this.deps;
+
+    // event came from listMetaBySite (no body): fetch the reference body lazily, once, here — bounded by
+    // maxConcurrentRequests, so only a handful of bodies are ever in memory at a time (not all 0.6 GB).
+    const referenceBody = event.id !== undefined ? httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
 
     const forged = await forgeRequestCached({
       cache: forgedRequestStore, site, page, url, method: event.method, headers: event.requestHeaders, postData: event.postData,
@@ -165,7 +229,7 @@ export class AblationPipeline {
     await sleep(options.timeBetweenRequestsMs);
 
     const similarity = getServerResponseSimilarity(
-      { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType },
+      { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: referenceBody ?? '', contentType: event.contentType },
       forged,
     );
     if (!similarity.areSimilar) {
@@ -190,7 +254,7 @@ export class AblationPipeline {
     // URL. (This ablation deliberately lacks AnalysisPipeline's isIdenticalResponse gate, so such a
     // candidate stays flaggable here — the studied weakness; only a match with a DIFFERENT captured
     // response is suppressed.)
-    const referenceKey = canonicalResponseKey({ status: event.status ?? 0, body: event.responseBody ?? '' });
+    const referenceKey = canonicalResponseKey({ status: event.status ?? 0, body: referenceBody ?? '' });
     if (forgedKey !== undefined) {
       if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
         log.debug(`AblationPipeline: candidate not flagged (forged response already in http_events at a different URL — already-accessible data) — ${event.method} ${event.url} -> ${url}`);

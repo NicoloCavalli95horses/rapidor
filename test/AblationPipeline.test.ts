@@ -53,7 +53,7 @@ after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
 describe('AblationPipeline', () => {
   let n = 0;
-  function newPipeline() {
+  function newPipeline(optionOverrides: Partial<{ maxSegmentMatches: number; maxGeneratedRequests: number }> = {}) {
     const dbPath = join(root, `${n++}.db`);
     const db = new Database(dbPath);
     const httpEventStore = new HttpEventStore({ db, clearOnStart: true });
@@ -64,7 +64,7 @@ describe('AblationPipeline', () => {
     const classifier = new AuthzClassifier(new AuthzClassificationStore({ db, clearOnStart: true }));
     const pipeline = new AblationPipeline({
       httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier,
-      options: { maxConcurrentRequests: 1, timeBetweenRequestsMs: 0 },
+      options: { maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, maxSegmentMatches: 300, maxGeneratedRequests: 100000, ...optionOverrides },
     });
     return { pipeline, db, httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier };
   }
@@ -96,6 +96,38 @@ describe('AblationPipeline', () => {
     await pipeline.runForSite({ page, site });
 
     assert.equal(vulnerabilityStore.count(site), 1);
+  });
+
+  it('abandons a site as infeasible (nothing dispatched, stats flagged) when generation exceeds the forge budget', async () => {
+    // budget of 1: the two-sibling body yields >1 distinct candidate, so generation early-aborts and
+    // the site is recorded infeasible with nothing forged — the combinatorial-explosion safeguard.
+    const { pipeline, db, httpEventStore, vulnerabilityStore, statsStore, classifier } = newPipeline({ maxGeneratedRequests: 1 });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+
+    const site = 'app.test';
+    // one carrier whose body has several siblings whose forge URLs are NOT in history (only ?id=101 is
+    // recorded) → >1 distinct candidate, over the budget of 1. We abort before any forge, so the body
+    // only needs to exist for the preindex; its response-similarity is never exercised.
+    httpEventStore.record({
+      site,
+      request: {
+        url: `${baseUrl}/api/users?id=101`, method: 'GET', requestHeaders: {}, status: 200,
+        responseHeaders: { 'content-type': 'application/json' }, contentType: 'application/json',
+        responseBody: JSON.stringify({ users: [{ id: '101', premium: false }, { id: '102', premium: true }, { id: '103', premium: true }, { id: '104', premium: true }] }),
+        timestamp: new Date().toISOString(), pageUrl: `${baseUrl}/`,
+      },
+    });
+
+    const page = await newPage();
+    const forgedBefore = (db.prepare('SELECT COUNT(*) AS n FROM forged_requests').get() as { n: number }).n;
+    await pipeline.runForSite({ page, site });
+
+    assert.equal(vulnerabilityStore.count(site), 0, 'nothing flagged');
+    const forgedAfter = (db.prepare('SELECT COUNT(*) AS n FROM forged_requests').get() as { n: number }).n;
+    assert.equal(forgedAfter, forgedBefore, 'nothing forged (no dispatch)');
+    const row = statsStore.all().find((r) => r.site === site);
+    assert.equal(row?.infeasible, true, 'site recorded as infeasible');
   });
 
   it('never flags anything when the differing props are not authz-relevant', async () => {

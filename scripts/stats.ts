@@ -34,6 +34,9 @@ console.table(rows.map((r) => ({
   states: crawlStates.count(r.site),
   edges: crawlEdges.count(r.site),
   ...Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, r[f]])),
+  // infeasible: generation exceeded the forge budget, the site was abandoned (requestsGenerated is the
+  // over-budget count, nothing was dispatched or flagged) — not the same as a genuine 0 findings.
+  infeasible: r.infeasible ? 'YES' : '',
 })));
 
 console.log('\nAverage per site (where available):');
