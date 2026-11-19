@@ -2,6 +2,14 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-19 11:54 — fix: analysis loads http_events without materialising all response bodies (OOM)
+
+A completed promova crawl (17,426 http_events, ~568 MB of response bodies) then OOM'd in analysis: `httpEventStore.listBySite` did `SELECT *`, pulling every body into one array (~1.2 GB in JS, measured), and `primeResponseHistory` parsed all 568 MB on top of that — past Node's 4,144 MB heap. busuu never hit this (8,618 events, only 4 MB of bodies).
+
+- **Why**: make analysis memory scale with the number of events, not the total body bytes.
+- **What changed**: `HttpEventStore` gained `listMetaBySite` (events without `response_body`), `getResponseBody({site,id})` (lazy single body) and `forEachResponse` (streams bodies one row at a time via `.iterate()`). The main pipeline and `recheckRunner` now list metadata only, fetch a reference body lazily per candidate (bounded by the forge concurrency), and build the response-history key set by streaming. `run*FromDb`/`runDemo` count events instead of loading them for a log line. Ablation still uses `listBySite` (it needs every JSON body for its preindex) and stays off by default.
+- **Effect/regressions**: promova's data-load + history-prime drops from ~1.2 GB retained (RSS 1.5 GB) to ~90 MB (RSS ~300 MB), measured. No change to what gets flagged — `test/AnalysisPipeline.test.ts`, `test/AblationPipeline.test.ts`, `test/HttpEventStore.test.ts` green; typecheck clean.
+
 ## 2026-11-19 — fix: NetworkObserver no longer buffers every captured request in memory (OOM on long crawls)
 
 A long headed Promova crawl died with `JavaScript heap out of memory`. Cause: `NetworkObserver.handle()` pushed every same-site request — each with its response body (up to `maxBodyBytes`, default 200 KB) — into an in-memory `requests[]` that was never cleared and lived for the whole per-site exploration, *in addition to* persisting each one to SQLite. Nothing ever reads that array in production (only `stats` is consumed, for one log line; dedup is the store's job via `UNIQUE(site, fingerprint)` + `ON CONFLICT seen_count+1`, not the array's). On a site that loads ~140 requests per page, across a deep crawl with `tabsPerSite: 10`, it grew to GBs and blew past Node's default heap.

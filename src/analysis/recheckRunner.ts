@@ -46,7 +46,7 @@ export class RecheckRunner {
     page: Page; site: string; findings: StoredFinding[];
   }): Promise<{ finding: StoredFinding; kept: boolean; reason: string }[]> {
     this.deps.clientRoutingVerifier.reset();
-    const events = this.deps.httpEventStore.listBySite(site);
+    const events = this.deps.httpEventStore.listMetaBySite(site);   // metadata only; bodies fetched lazily below
     await this.deps.pagePool.setup({ page, size: Math.max(1, this.deps.options.clientRoutingConcurrency) });
     try {
       return await Promise.all(findings.map(async (finding) => {
@@ -79,7 +79,8 @@ export class RecheckRunner {
         const forged = await forgeRequestCached({
           cache: this.deps.forgedRequestStore, site, page, url: candidateUrl, method: event.method, headers: event.requestHeaders, postData: event.postData,
         });
-        const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType };
+        const responseBody = event.id !== undefined ? this.deps.httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
+        const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: responseBody ?? '', contentType: event.contentType };
         const similar = getServerResponseSimilarity(original, forged).areSimilar;
         if (similar && !isIdenticalResponse({ reference: original, candidate: forged })) return null;
         const why = similar ? 'forged response identical to the original (server ignores the value)' : 'forged response not similar';

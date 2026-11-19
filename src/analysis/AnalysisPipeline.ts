@@ -120,6 +120,7 @@ export class AnalysisPipeline {
       },
     });
     this.candidateEvaluator = new CandidateEvaluator({
+      httpEventStore: deps.httpEventStore,
       vulnerabilityStore: deps.vulnerabilityStore,
       forgedRequestStore: deps.forgedRequestStore,
       classifier: deps.classifier,
@@ -155,10 +156,11 @@ export class AnalysisPipeline {
     // Cleared here, before any recording, per site, and ONLY vulnerabilities: the capture tables and
     // the shared forged_requests cache are untouched, and analysis_stats self-overwrites on its PK.
     if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
-    const events = httpEventStore.listBySite(site);
-    // Response-history guard: let the evaluator recognise a forged response whose content the crawler
-    // already collected legitimately (anywhere in these events) as already-accessible data, not a leak.
-    this.candidateEvaluator.primeResponseHistory({ events });
+    // Metadata only (no response bodies): the candidate loop needs URLs/methods, and the few reference
+    // bodies it actually compares are fetched lazily per candidate (see listMetaBySite / getResponseBody).
+    const events = httpEventStore.listMetaBySite(site);
+    // Response-history guard, built by streaming the bodies one row at a time (no full-corpus copy).
+    this.candidateEvaluator.primeResponseHistory({ site });
     const pageUrls = reactStateStore.listUrlsBySite(site);
     const crawledStates = crawlStateStore.listBySite(site);
     // Every URL the crawler already reached on its own, through any channel it records — not just

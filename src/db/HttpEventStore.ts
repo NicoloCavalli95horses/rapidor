@@ -8,6 +8,7 @@ export interface HttpEventStoreOptions {
 }
 
 export interface HttpEventRow {
+  id?: number;             // row id, present on rows read back from the DB; lets a caller fetch the body lazily
   method: string;
   url: string;
   pageUrl: string;
@@ -16,7 +17,7 @@ export interface HttpEventRow {
   requestHeaders: Record<string, string>;
   responseHeaders?: Record<string, string>;
   postData?: string;
-  responseBody?: string;
+  responseBody?: string;   // undefined on rows from listMetaBySite — fetch it lazily with getResponseBody
 }
 
 /**
@@ -93,13 +94,15 @@ export class HttpEventStore {
     return (row as { n: number }).n;
   }
 
-  /** All distinct events for a site, in capture order — what the analysis pipeline iterates over. */
+  /** All distinct events for a site, WITH bodies, in capture order. Heavy on body-rich sites: prefer
+   *  listMetaBySite + getResponseBody/forEachResponse unless every body is genuinely needed at once. */
   listBySite(site: string): HttpEventRow[] {
     const rows = this.db.prepare('SELECT * FROM http_events WHERE site = ? ORDER BY id ASC').all(site) as {
-      method: string; url: string; page_url: string; status: number | null; content_type: string | null;
+      id: number; method: string; url: string; page_url: string; status: number | null; content_type: string | null;
       request_headers: string | null; response_headers: string | null; post_data: string | null; response_body: string | null;
     }[];
     return rows.map((r) => ({
+      id: r.id,
       method: r.method,
       url: r.url,
       pageUrl: r.page_url,
@@ -110,6 +113,45 @@ export class HttpEventStore {
       postData: r.post_data ?? undefined,
       responseBody: r.response_body ?? undefined,
     }));
+  }
+
+  /** Same as listBySite but WITHOUT response_body (the one big column): the analysis iterates all events
+   *  for metadata/URLs and only needs the body of the few it actually compares, fetched lazily below.
+   *  Keeps a body-rich site (promova: 17k events, ~568 MB of bodies) from being materialised in one array. */
+  listMetaBySite(site: string): HttpEventRow[] {
+    const rows = this.db.prepare(
+      'SELECT id, method, url, page_url, status, content_type, request_headers, response_headers, post_data FROM http_events WHERE site = ? ORDER BY id ASC',
+    ).all(site) as {
+      id: number; method: string; url: string; page_url: string; status: number | null; content_type: string | null;
+      request_headers: string | null; response_headers: string | null; post_data: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      method: r.method,
+      url: r.url,
+      pageUrl: r.page_url,
+      status: r.status ?? undefined,
+      contentType: r.content_type ?? undefined,
+      requestHeaders: r.request_headers ? JSON.parse(r.request_headers) : {},
+      responseHeaders: r.response_headers ? JSON.parse(r.response_headers) : undefined,
+      postData: r.post_data ?? undefined,
+      responseBody: undefined,
+    }));
+  }
+
+  /** One event's response body, by row id — the lazy counterpart to listMetaBySite. */
+  getResponseBody({ site, id }: { site: string; id: number }): string | undefined {
+    const row = this.db.prepare('SELECT response_body AS body FROM http_events WHERE site = ? AND id = ?').get(site, id) as { body: string | null } | undefined;
+    return row?.body ?? undefined;
+  }
+
+  /** Streams (status, body) for every event of a site one row at a time (never materialising all bodies),
+   *  so a caller can fold them — e.g. build the response-history key set — with bounded memory. */
+  forEachResponse({ site, onRow }: { site: string; onRow: (row: { status?: number; body?: string }) => void }): void {
+    const stmt = this.db.prepare('SELECT status, response_body AS body FROM http_events WHERE site = ? ORDER BY id ASC');
+    for (const r of stmt.iterate(site) as IterableIterator<{ status: number | null; body: string | null }>) {
+      onRow({ status: r.status ?? undefined, body: r.body ?? undefined });
+    }
   }
 }
 

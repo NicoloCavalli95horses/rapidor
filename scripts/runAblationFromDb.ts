@@ -63,7 +63,7 @@ const pipeline = new AblationPipeline({
 
 console.log(`AblationPipeline on ${SITE} against ${DB_PATH} (no exploration, nothing cleared)`);
 console.log(`  start_url=${START_URL}`);
-console.log(`  http_events=${httpEventStore.listBySite(SITE).length}, crawl_states=${crawlStateStore.listBySite(SITE).length}`);
+console.log(`  http_events=${httpEventStore.count(SITE)}, crawl_states=${crawlStateStore.listBySite(SITE).length}`);
 console.log(`  profile=${config.userDataDir}`);
 
 const context = await chromium.launchPersistentContext(config.userDataDir, { headless: true, channel: 'chromium' });

@@ -78,7 +78,7 @@ const pipeline = new AnalysisPipeline({
 });
 
 console.log(`Offline demo analysis for ${site} against ${dbPath} (HTTP-only, no network)`);
-console.log(`  http_events=${httpEventStore.listBySite(site).length}, react_states=${reactStateStore.countBySite(site)}, forged_requests cached for this site`);
+console.log(`  http_events=${httpEventStore.count(site)}, react_states=${reactStateStore.countBySite(site)}, forged_requests cached for this site`);
 
 // No `page`: offline mode never forges live nor opens a browser.
 await pipeline.runForSite({ site, explorationMs: 0 });

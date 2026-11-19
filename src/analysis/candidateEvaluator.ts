@@ -24,6 +24,7 @@ export interface CandidateEvaluatorOptions {
 }
 
 export interface CandidateEvaluatorDeps {
+  httpEventStore: HttpEventStore;   // for the lazy reference-body fetch + the streamed response-history prime
   vulnerabilityStore: VulnerabilityStore;
   forgedRequestStore: ForgedRequestStore;
   classifier: AuthzClassifier;
@@ -81,12 +82,15 @@ export class CandidateEvaluator {
    * candidate is evaluated, so an HTTP forge whose response matches one of these — data the crawler
    * already obtained legitimately — is recognised as already-accessible and never flagged.
    */
-  primeResponseHistory({ events }: { events: ReturnType<HttpEventStore['listBySite']> }): void {
+  primeResponseHistory({ site }: { site: string }): void {
+    // Streamed one row at a time (forEachResponse), so the full corpus of bodies is never held in
+    // memory at once — only the resulting hash set is kept. This is what the 568 MB/17k-event promova
+    // site needs: folding the bodies into keys, not materialising them.
     this.responseHistoryKeys = new Set<string>();
-    for (const e of events) {
-      const key = canonicalResponseKey({ status: e.status ?? 0, body: e.responseBody ?? '' });
+    this.deps.httpEventStore.forEachResponse({ site, onRow: (r) => {
+      const key = canonicalResponseKey({ status: r.status ?? 0, body: r.body ?? '' });
       if (key !== undefined) this.responseHistoryKeys.add(key);
-    }
+    } });
   }
 
   /** How many findings THIS run confirmed (what the end-of-run summary reports). */
@@ -153,7 +157,10 @@ export class CandidateEvaluator {
       return res;
     });
 
-    const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: event.responseBody ?? '', contentType: event.contentType };
+    // Reference body fetched lazily (events are listed without bodies, see listMetaBySite): past the
+    // forge semaphore this path has no further await, so only a few bodies are ever live at once.
+    const responseBody = event.id !== undefined ? this.deps.httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
+    const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: responseBody ?? '', contentType: event.contentType };
     const similarity = getServerResponseSimilarity(original, forged);
     // A forged response identical to the original one means the server ignored the swapped value:
     // nothing leaked over HTTP, however similar the two look. Treated like a non-similar response, so
@@ -246,7 +253,7 @@ export class CandidateEvaluator {
         id, site, motivation: describeDiffs(differences), differences: authz.differences, sensitiveKeys: authz.sensitiveKeys,
         candidate,
         ...(detectionMethod === 'http'
-          ? { referenceUrl: event.url, candidateUrl: url, kind: { type: 'http' as const, method: event.method, headers: event.requestHeaders, postData: event.postData, baselineStatus: event.status ?? 0, baselineHeaders: event.responseHeaders ?? {}, baselineBody: event.responseBody ?? '', baselineContentType: event.contentType } }
+          ? { referenceUrl: event.url, candidateUrl: url, kind: { type: 'http' as const, method: event.method, headers: event.requestHeaders, postData: event.postData, baselineStatus: event.status ?? 0, baselineHeaders: event.responseHeaders ?? {}, baselineBody: responseBody ?? '', baselineContentType: event.contentType } }
           : { referenceUrl: event.pageUrl, candidateUrl: url, kind: { type: 'client-routing-query' as const, paramName: segment.paramName!, candidateValue: candidate.candidateValue } }),
       });
     }
