@@ -1,6 +1,6 @@
 # RAPIDOR
 
-RAPIDOR runs **IDOR/BOLA detection** by crawling web apps (**clicking**, not just following links): it builds a `state → click → state` graph per site (DFS over UI states). It reads React component state through the a browser extension, correlates it with the observed HTTP traffic, then forges sibling-value GET requests and probes client-side routing.
+RAPIDOR runs **IDOR/BOLA detection** related to paid resources. RAPIDOR does not detect access to data belonging to other users, but access to content that requires higher privileges (for example, a paid subscription). It crawls web apps (**clicking**, not just following links): it builds a `state → click → state` graph per site (DFS over UI states). It reads React component state through the a browser extension, correlates it with the observed HTTP traffic, then forges sibling-value GET requests and probes client-side routing.
 Stack: TypeScript (ESM, `.js` import suffixes), Crawlee + Playwright (Chromium), better-sqlite3, `@huggingface/transformers`.
 
 Docs (don't read them whole, grep the section you need):

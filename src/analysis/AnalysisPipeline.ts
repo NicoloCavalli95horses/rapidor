@@ -122,6 +122,7 @@ export class AnalysisPipeline {
     });
     this.candidateEvaluator = new CandidateEvaluator({
       httpEventStore: deps.httpEventStore,
+      reactStateStore: deps.reactStateStore,
       vulnerabilityStore: deps.vulnerabilityStore,
       forgedRequestStore: deps.forgedRequestStore,
       classifier: deps.classifier,
@@ -162,6 +163,7 @@ export class AnalysisPipeline {
     const events = httpEventStore.listMetaBySite(site);
     // Response-history guard, built by streaming the bodies one row at a time (no full-corpus copy).
     this.candidateEvaluator.primeResponseHistory({ site });
+    this.candidateEvaluator.primeReactHistory({ site });   // client-routing novelty corpus (reactContentKey of every collected state)
     const pageUrls = reactStateStore.listUrlsBySite(site);
     const crawledStates = crawlStateStore.listBySite(site);
     // Every URL the crawler already reached on its own, through any channel it records — not just

@@ -236,6 +236,12 @@ export class AblationPipeline {
       log.debug(`AblationPipeline: candidate rejected (forged response not similar) — ${event.method} ${event.url} -> ${url}`);
       return;
     }
+    // Error-status guard, same as AnalysisPipeline: a 4xx/5xx forge (access denied / error) never
+    // reached the resource, so it is never a leak — even if two error responses look similar.
+    if (forged.status >= 400) {
+      log.debug(`AblationPipeline: candidate rejected (forged response status ${forged.status}: denied/error) — ${event.method} ${event.url} -> ${url}`);
+      return;
+    }
 
     const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
     const authz = await assessAuthZ({ differences, classifier });

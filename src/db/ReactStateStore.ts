@@ -102,4 +102,17 @@ export class ReactStateStore {
     const rows = this.db.prepare('SELECT DISTINCT url FROM react_states WHERE site = ?').all(site) as { url: string }[];
     return rows.map((r) => r.url);
   }
+
+  /**
+   * Streams every captured React graph for a site one row at a time (never materialising them all at
+   * once — a site can hold a few hundred, each a non-trivial component tree). Used to build the
+   * client-routing novelty corpus (reactContentKey of each already-collected state) with bounded memory,
+   * the React analog of HttpEventStore.forEachResponse.
+   */
+  forEachGraphBySite({ site, onGraph }: { site: string; onGraph: (graph: RapidorGraph) => void }): void {
+    const stmt = this.db.prepare('SELECT graph FROM react_states WHERE site = ? ORDER BY id ASC');
+    for (const r of stmt.iterate(site) as IterableIterator<{ graph: string }>) {
+      try { onGraph(JSON.parse(r.graph) as RapidorGraph); } catch { /* a malformed stored graph is skipped, not fatal */ }
+    }
+  }
 }

@@ -29,6 +29,8 @@ import { AblationPipeline } from '../src/analysis/AblationPipeline';
 import { AblationVulnerabilityStore } from '../src/db/AblationVulnerabilityStore';
 import { AblationStatsStore } from '../src/db/AblationStatsStore';
 import { installParamUsageTracking } from '../src/browser/paramUsageTracker';
+import { extensionLaunchArgs } from '../src/browser/ExtensionCalls';
+import { checkAuthFresh } from '../src/analysis/authFreshness';
 import { config } from '../src/config';
 
 log.setLevel(process.env.LOG_LEVEL?.toLowerCase() === 'debug' ? LogLevel.DEBUG : LogLevel.INFO);
@@ -85,10 +87,32 @@ console.log(`  start_url=${START_URL}`);
 console.log(`  http_events=${httpEventStore.count(SITE)}, react_states=${reactStateStore.countBySite(SITE)}, crawl_states=${crawlStateStore.listBySite(SITE).length}`);
 console.log(`  profile=${config.userDataDir}`);
 
-const context = await chromium.launchPersistentContext(config.userDataDir, { headless: true, channel: 'chromium' });
+// Load the React instrumentation extension (same as the crawler) so the client-routing novelty guard
+// can read a candidate route's React state (window.__RAPIDOR__getLatestState). Without it the guard is
+// simply inactive (captureReactContentKey returns undefined → findings kept), never wrong.
+const context = await chromium.launchPersistentContext(config.userDataDir, {
+  headless: true, channel: 'chromium',
+  args: config.extension ? extensionLaunchArgs(config.extension) : [],
+});
 const page = context.pages()[0] ?? (await context.newPage());
 await installParamUsageTracking(page);   // init script: must be in place before the first navigation (client-routing probe reads __accessedParams)
 await page.goto(START_URL, { waitUntil: 'load', timeout: 30_000 }).catch((e) => console.warn('initial goto failed (continuing):', (e as Error).message));
+
+// Auth freshness pre-check: a run on an EXPIRED token is meaningless — every forge is denied (401/403),
+// so nothing is flagged, or (worse) the URL-keyed forge cache serves stale authenticated responses from
+// an earlier session and flags findings you cannot reproduce. Warn loudly and abort so the profile is
+// re-authenticated first. The end-of-crawl analysis never needs this (it runs in the just-authenticated
+// crawl session); only this standalone re-runner can meet a token that expired since capture.
+const auth = await checkAuthFresh({ page, events: httpEventStore.listMetaBySite(SITE) });
+if (auth.expired) {
+  console.error(`\n⚠️  AUTH TOKEN EXPIRED — ${auth.denied}/${auth.probed} previously-authenticated endpoints now return 401/403 (e.g. ${auth.sampleUrl}).`);
+  console.error(`    Re-authenticate in the browser profile before analysing:  ${config.userDataDir}`);
+  console.error('    (DEBUG_NO_CRAWLING=true HEADLESS=false npm start  opens that profile for a manual login.)');
+  console.error(`    The forge cache is keyed by URL, so after re-authenticating it is still valid to reuse; clear it only to force fresh forges:`);
+  console.error(`        sqlite3 ${DB_PATH} "DELETE FROM forged_requests WHERE site='${SITE}'"\n`);
+  await context.close();
+  process.exit(2);
+}
 
 const startedAt = Date.now();
 await pipeline.runForSite({ page, site: SITE, explorationMs: 0 });

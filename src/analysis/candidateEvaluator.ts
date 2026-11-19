@@ -1,8 +1,10 @@
 import { log } from 'crawlee';
 import type { Page } from 'playwright';
 import type { HttpEventStore } from '../db/HttpEventStore';
+import type { ReactStateStore } from '../db/ReactStateStore';
 import type { VulnerabilityStore } from '../db/VulnerabilityStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
+import { reactContentKey } from './reactFingerprint';
 import { findCandidates } from './matchFinder';
 import { type SegmentCandidate } from './segments';
 import { forgeRequestCached } from './requestForge';
@@ -25,6 +27,7 @@ export interface CandidateEvaluatorOptions {
 
 export interface CandidateEvaluatorDeps {
   httpEventStore: HttpEventStore;   // for the lazy reference-body fetch + the streamed response-history prime
+  reactStateStore: ReactStateStore; // for the client-routing novelty corpus (reactContentKey of every collected state)
   vulnerabilityStore: VulnerabilityStore;
   forgedRequestStore: ForgedRequestStore;
   classifier: AuthzClassifier;
@@ -67,13 +70,63 @@ export class CandidateEvaluator {
   // and never includes anything the forge itself produced.
   private responseHistoryKeys = new Set<string>();
 
+  // CLIENT-ROUTING content guards, the React analog of the HTTP pair above (reactContentKey):
+  // `collectedReactKeys` holds the content key of every React state the crawler already captured (the
+  // novelty corpus, primed per run); `recordedReactKeys` holds the keys of client-routing findings
+  // already recorded THIS run (the uniqueness/dedup set, reset per run). A client-routing candidate
+  // whose rendered state is in the first is already-accessible; one in the second is a duplicate.
+  private collectedReactKeys = new Set<string>();
+  private recordedReactKeys = new Set<string>();
+
   constructor(private deps: CandidateEvaluatorDeps) {}
 
   /** Starts a fresh run: drops the per-run log/dedup state and re-sizes the forge concurrency bound. */
   reset(): void {
     this.loggedFindingIds.clear();
     this.recordedForgedBodyKeys.clear();
+    this.recordedReactKeys.clear();
     this.forgeSemaphore = new Semaphore(this.deps.options.maxConcurrentRequests);
+  }
+
+  /**
+   * Builds the client-routing NOVELTY corpus: the reactContentKey of every React state the crawler
+   * already captured for this site. A client-routing candidate whose live-rendered state hashes to one
+   * of these renders a page the user can already reach by normal browsing — not a leak. Streamed one
+   * graph at a time (forEachGraphBySite) so the full corpus is never materialised; called once per run
+   * before any candidate, mirroring primeResponseHistory on the HTTP side.
+   */
+  primeReactHistory({ site }: { site: string }): void {
+    this.collectedReactKeys = new Set<string>();
+    this.deps.reactStateStore.forEachGraphBySite({ site, onGraph: (graph) => {
+      const key = reactContentKey({ graph });
+      if (key !== undefined) this.collectedReactKeys.add(key);
+    } });
+  }
+
+  /**
+   * Content-uniqueness/novelty gate for a client-routing finding (the client-side analog of the HTTP
+   * path's canonicalResponseKey guards): captures the candidate route's live React state and requires it
+   * to be NEW (not a page the crawler already collected) and UNIQUE (no earlier finding this run rendered
+   * the same content). Returns true to KEEP, false to DROP. A missing key (no extension / unreadable
+   * graph) KEEPS the finding — drop only on positive evidence. (The capture is async, so the check-and-add
+   * on recordedReactKeys is not atomic across candidates: a rare concurrent duplicate may slip through,
+   * never a wrongful drop.)
+   */
+  private async keepClientRoutingByContent({ pageUrl, candidateUrl, context }: {
+    pageUrl: string; candidateUrl: string; context: string;
+  }): Promise<boolean> {
+    const key = await this.deps.clientRoutingVerifier.captureReactContentKey({ pageUrl, candidateUrl });
+    if (key === undefined) return true;
+    if (this.collectedReactKeys.has(key)) {
+      log.debug(`AnalysisPipeline: client-routing candidate not flagged (renders a React state the crawler already collected — already-accessible) — ${context}`);
+      return false;
+    }
+    if (this.recordedReactKeys.has(key)) {
+      log.debug(`AnalysisPipeline: client-routing candidate not flagged (duplicate rendered content of an already-recorded finding) — ${context}`);
+      return false;
+    }
+    this.recordedReactKeys.add(key);
+    return true;
   }
 
   /**
@@ -202,6 +255,10 @@ export class CandidateEvaluator {
         return;
       }
       detectionMethod = 'client-routing';
+      // Content novelty/uniqueness gate for the client-routing fallback (navigates the client route, not
+      // the forge URL): drop if it renders a state the crawler already collected, or a duplicate of an
+      // earlier finding this run.
+      if (!await this.keepClientRoutingByContent({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, context: `${event.pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
     }
 
     // HTTP-only content guards (see canonicalResponseKey). Both key on the forged response's CONTENT,
@@ -212,6 +269,15 @@ export class CandidateEvaluator {
     // no await between here and the record below on the HTTP path, so the check-and-add on
     // recordedForgedBodyKeys is atomic despite concurrent candidate evaluation.
     if (detectionMethod === 'http') {
+      // A forged request the server REJECTED or errored on (4xx/5xx — notably 401/403 "access denied")
+      // never reached the resource, so it is never a leak. This fires when the ORIGINAL was also an
+      // error (two similar error bodies would otherwise look like a match), and it keeps an expired-token
+      // run honest: every forge comes back 401/403 and nothing is flagged, instead of a stale 200 being
+      // trusted. The client-routing fallback above is independent and already ran for a query param.
+      if (forged.status >= 400) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response status ${forged.status}: access denied / error, not a leak) — ${event.url} -> ${url}`);
+        return;
+      }
       const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
       // The reference event's own response, EXCLUDED from the history check below: a forge that returns
       // the original's own body is the "server ignored the swapped value" case (already handled above by
@@ -284,6 +350,7 @@ export class CandidateEvaluator {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
       return;
     }
+    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
 
     const id = vulnerabilityId({
       candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId,
@@ -336,6 +403,7 @@ export class CandidateEvaluator {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${candidateUrl}`);
       return;
     }
+    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} -> ${candidateUrl}` })) return;
 
     const id = vulnerabilityId({
       candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId,

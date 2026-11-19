@@ -3,6 +3,8 @@ import type { Page } from 'playwright';
 import { checkClientSideRouting, checkClientSideRoutingForPath, type ClientRoutingResult } from './clientRouting';
 import { captureRouteByNavigation, captureDomSnapshot, diffDomSnapshots, domNoise, maskValue, makeGarbageValue, type DomSnapshot, type DomNoise } from './domSnapshot';
 import type { PagePool } from './PagePool';
+import { reactContentKey } from './reactFingerprint';
+import type { RapidorGraph } from '../db/ReactStateStore';
 import { sleep, safePath, sameRoutePath } from '../utils/utils';
 
 // enqueueClientRoutingCheck: a negative client-routing probe is retried this many times in total
@@ -110,6 +112,38 @@ export class ClientRoutingVerifier {
       run: (p) => checkClientSideRoutingForPath({ page: p, targetUrl: candidateUrl, candidateValue, ...probe }),
     });
     return this.clientSideConfirmed({ pageUrl, candidateUrl, candidateValue, referenceValue, clientRouting, highSuspicion });
+  }
+
+  /**
+   * Captures the CONTENT key (reactContentKey) of the candidate route's rendered React state — the
+   * client-side evidence a client-routing finding has, the analog of an HTTP forge's response body.
+   * Deliberately a SEPARATE real navigation, run only AFTER the (heavily-guarded) verifier has already
+   * accepted a candidate: it keeps the verifier's accept/reject ladder untouched, and costs one extra
+   * render on the few accepted findings, not every probe. A micro-test showed a synthetic popstate often
+   * does NOT update the React tree (Next.js ignores it for sibling routes), so a real goto is required
+   * to read the candidate's true state. Returns undefined when the extension is absent or the graph can't
+   * be read — the caller then keeps the finding (never drops on missing evidence).
+   */
+  async captureReactContentKey({ pageUrl, candidateUrl }: { pageUrl: string; candidateUrl: string }): Promise<string | undefined> {
+    const maxWaitMs = this.deps.options.clientRoutingProbe.maxWaitMs;
+    return this.deps.pagePool.withPage({ pageUrl, run: async (page) => {
+      try {
+        await page.goto(candidateUrl, { waitUntil: 'load', timeout: 30_000 });
+        // Extension absent (no __RAPIDOR__ API) → bail at once, no polling: the guard is simply inactive.
+        const hasApi = await page.evaluate(() => typeof (window as unknown as { __RAPIDOR__getLatestState?: unknown }).__RAPIDOR__getLatestState === 'function').catch(() => false);
+        if (!hasApi) return undefined;
+        await page.waitForLoadState('networkidle', { timeout: maxWaitMs }).catch(() => {});
+        // Poll the extension's MAIN-world API until the app has mounted and emitted a non-empty graph.
+        let graph: RapidorGraph | undefined;
+        for (let i = 0; i < 20 && !(graph?.nodes && Object.keys(graph.nodes).length > 0); i++) {
+          graph = await page.evaluate(() => (window as unknown as { __RAPIDOR__getLatestState?: () => RapidorGraph | undefined }).__RAPIDOR__getLatestState?.() ?? undefined).catch(() => undefined);
+          if (!(graph?.nodes && Object.keys(graph.nodes).length > 0)) await sleep(150);
+        }
+        return reactContentKey({ graph });
+      } catch {
+        return undefined;
+      }
+    } });
   }
 
   /**
