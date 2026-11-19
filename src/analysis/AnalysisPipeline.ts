@@ -37,6 +37,13 @@ export interface AnalysisPipelineOptions {
   // skipped entirely (its pushState probe + not-found screenshot are live-only and not deterministically
   // replayable — see demo/README.md), and no browser/page is needed. Default false (normal live run).
   offline?: boolean;
+  // When not explicitly false, runForSite deletes this site's previous `vulnerabilities` rows before
+  // recording, so the table reflects the current engine's output rather than the union of every past
+  // run (VulnerabilityStore.record is INSERT OR IGNORE on a deterministic id, so a stale now-rejected
+  // finding would otherwise linger). See config.analysis.overwriteFindingsPerSite. Only `vulnerabilities`
+  // is cleared — never the capture tables or the shared forged_requests cache; analysis_stats
+  // self-overwrites per site. Undefined => clear (the safe default for a re-analysis).
+  overwriteFindingsPerSite?: boolean;
 }
 
 export interface AnalysisPipelineDeps {
@@ -142,6 +149,12 @@ export class AnalysisPipeline {
     this.clientRoutingVerifier.reset();
     this.candidateEvaluator.reset();
     const { httpEventStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore, options } = this.deps;
+    // Re-analysis hygiene (see config.analysis.overwriteFindingsPerSite): this run's findings REPLACE
+    // this site's previous ones. VulnerabilityStore.record is INSERT OR IGNORE on a deterministic id,
+    // so without this a false positive the current engine now rejects would survive from an older run.
+    // Cleared here, before any recording, per site, and ONLY vulnerabilities: the capture tables and
+    // the shared forged_requests cache are untouched, and analysis_stats self-overwrites on its PK.
+    if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
     const events = httpEventStore.listBySite(site);
     const pageUrls = reactStateStore.listUrlsBySite(site);
     const crawledStates = crawlStateStore.listBySite(site);

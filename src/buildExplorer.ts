@@ -109,6 +109,7 @@ export function buildExplorer(
       segmentBlacklist: cfg.analysis.segmentBlacklist,
       paramBlacklist: cfg.analysis.paramBlacklist,
       clientRoutingFullNavigationEscalation: cfg.analysis.clientRoutingFullNavigationEscalation,
+      overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
     },
   });
 

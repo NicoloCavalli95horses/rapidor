@@ -134,6 +134,16 @@ export interface CrawlConfig {
     // gate's safety on the real load (a redirect-away or a failed capture is a REJECT). Kill switch for
     // regression bisection; leave on. See AnalysisPipeline.clientSideConfirmed / confirmByFullNavigation.
     clientRoutingFullNavigationEscalation: boolean;
+    // Re-analysis hygiene: before recording a site's findings, delete that site's PREVIOUS rows in
+    // `vulnerabilities` (clearSite) so the table always reflects the CURRENT engine's output, not the
+    // union of every past run. Needed because VulnerabilityStore.record is INSERT OR IGNORE keyed by a
+    // deterministic finding id: without this, a false positive the improved engine now correctly
+    // rejects would stay in the table forever (its old row is never revisited). Only `vulnerabilities`
+    // is cleared — never the crawler/extension capture tables (http_events / react_states /
+    // preindexed_values / crawl_states), and never the forged_requests forge cache (shared with the
+    // ablation). analysis_stats self-overwrites per site (ON CONFLICT(site)), so it needs no clear.
+    // Default true;
+    overwriteFindingsPerSite: boolean;
   };
   lightweight: LightweightConfig;
   extension?: ExtensionConfig;  // Chrome extension to load (optional)
@@ -172,7 +182,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   // case-insensitive substring match on text, aria-label and href
   blocklist: ['logout', 'log out', 'sign out', 'quit', 'delete'],
   // skip clickables inside site chrome so exploration focuses on the main content; set to [] to explore everything
-  ignoreClickablesWithin: ['nav', 'header', 'footer'],
+  ignoreClickablesWithin: [], //['nav', 'header', 'footer'],
   // close blocking modals (Escape, then an explicit close control) before capturing a state
   dismissOverlays: true,
   // single SQLite file every store
@@ -189,7 +199,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   analysis: {
     maxConcurrentRequests: 3,
     timeBetweenRequestsMs: 250,
-    clientRoutingConcurrency: 5,
+    clientRoutingConcurrency: 8,
     reportsDir: 'reports',
     clientRoutingProbe: { minWaitMs: 1_000, idleMs: 300, maxWaitMs: 3_000 },
     // ABLATION_MODE=true npm start to turn it on from the shell instead of editing this file
@@ -206,9 +216,11 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     paramBlacklist: [
       'limit', 'offset', 'page', 'per_page', 'perpage', 'page_size', 'pagesize',
       'size', 'count', 'skip', 'take', 'sort', 'order', 'order_by', 'orderby',
+      'depth',
     ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,
+    overwriteFindingsPerSite: true,
   },
   // USER_DATA_DIR enables a persistent profile (~ and $HOME are expanded); when unset, a temporary profile is used
   userDataDir: process.env.USER_DATA_DIR ? expandHome({ value: process.env.USER_DATA_DIR }) : undefined,

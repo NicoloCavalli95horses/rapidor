@@ -60,4 +60,23 @@ describe('AuthzClassifier', { timeout: 120_000 }, () => {
     const cosmeticAssessment = await assessAuthZ({ differences: cosmeticDiff, classifier });
     assert.equal(cosmeticAssessment.isAuthzRelevant, false);
   });
+
+  it('ignores an entitlement-named key whose value is an asset URL, but keeps a string-enum value', async () => {
+    const classifier = newClassifier();
+
+    // busuu's course-pack FP: the key reads like an entitlement ("paywall") but its value is a cover
+    // image URL — content, not an access flag. Must NOT be authz-relevant.
+    const assetDiff = compareObj(
+      { course_pack_paywall_1000: 'https://cdn.busuu.com/course-overview/images/fr/complete/medium/fr_complete.jpg' },
+      { course_pack_paywall_1000: 'https://cdn.busuu.com/course-overview/images/ja/complete/medium/ja_complete.jpg' },
+    );
+    const assetAssessment = await assessAuthZ({ differences: assetDiff, classifier });
+    assert.equal(assetAssessment.isAuthzRelevant, false);
+
+    // A real string-enum access flag still counts even though the value is a string, not a boolean.
+    const tierDiff = compareObj({ tier: 'free' }, { tier: 'premium' });
+    const tierAssessment = await assessAuthZ({ differences: tierDiff, classifier });
+    assert.equal(tierAssessment.isAuthzRelevant, true);
+    assert.ok(tierAssessment.sensitiveKeys.includes('premium'));
+  });
 });

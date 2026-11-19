@@ -114,15 +114,42 @@ export interface AuthzAssessment {
   sensitiveKeys: string[];
 }
 
-/** Port of responseEvaluator.js's assessAuthZ: diffed keys/paths/values classified, not the raw props. */
+// A value that is a URL, path or filename is an ASSET reference, not an access-control state. A key
+// whose NAME reads like an entitlement but whose VALUE is such an asset is content, not authorization:
+// busuu's `course_pack_paywall_1000` is the cover image shown on the paywall screen (value an
+// `https://…jpg`), and its name alone tripped the classifier ("paywall", 0.342) on all 96 course-pack
+// false positives. Real access flags (`unlocked: true`, `tier: "premium"`) never look like this.
+const ASSET_VALUE = /[/\\]|:\/\/|\.(?:jpe?g|png|gif|svg|webp|bmp|ico|mp[34]|wav|ogg|pdf|json|css|js|woff2?)(?:$|\?)/i;
+function valueLooksLikeAsset(value: unknown): boolean {
+  return typeof value === 'string' && (ASSET_VALUE.test(value) || value.length > 60);
+}
+
+/**
+ * Port of responseEvaluator.js's assessAuthZ: diffed keys/paths/values classified, not the raw props.
+ * The verdict is taken PER DIFF so a key's authz-relevance can be tied to the shape of its own value
+ * (see valueLooksLikeAsset): a value that is itself an authz term (`tier: "free" -> "premium"`) always
+ * counts, so string enums are preserved; a key that merely READS like an entitlement is honoured only
+ * when its differing value is not a URL/asset.
+ */
 export async function assessAuthZ({ differences, classifier }: {
   differences: PropDiff[]; classifier: AuthzClassifier;
 }): Promise<AuthzAssessment> {
-  const payload = differences.flatMap((d) => [d.key, d.pathStr, d.current, d.reference]);
-  const filtered = [...new Set(payload.filter(isValidString))];
+  // Classify every candidate token once (cached): keys, path strings and values alike.
+  const tokens = [...new Set(differences.flatMap((d) => [d.key, d.pathStr, d.current, d.reference]).filter(isValidString))];
+  const relevant = new Map<string, boolean>();
+  await Promise.all(tokens.map(async (t) => { relevant.set(t, (await classifier.classify(t)).isAuthZRelevant); }));
+  const isRel = (v: unknown): v is string => typeof v === 'string' && relevant.get(v) === true;
 
-  const classifications = await Promise.all(filtered.map(async (value) => ({ value, ...(await classifier.classify(value)) })));
-  const sensitiveKeys = classifications.filter((c) => c.isAuthZRelevant).map((c) => c.value);
+  const sensitiveKeys = [...new Set(differences.flatMap((d) => {
+    const hits: string[] = [];
+    // A value that is itself an authz term always counts (string enums like `premium`/`locked`).
+    if (isRel(d.current)) hits.push(d.current);
+    if (isRel(d.reference)) hits.push(d.reference);
+    // A key/path that reads like an entitlement counts only if the differing value is not an asset URL.
+    const nameHit = [d.key, d.pathStr].find(isRel);
+    if (nameHit !== undefined && !valueLooksLikeAsset(d.current) && !valueLooksLikeAsset(d.reference)) hits.push(nameHit);
+    return hits;
+  }))];
 
   const hasAnyDifference = differences.some((d) => d.reference !== d.current);
   return { isAuthzRelevant: hasAnyDifference && sensitiveKeys.length > 0, differences, sensitiveKeys };
