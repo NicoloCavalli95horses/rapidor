@@ -121,7 +121,7 @@ export function buildExplorer(
     ? new AblationPipeline({
         httpEventStore, crawlStateStore: crawlStates,
         vulnerabilityStore: ablationVulnerabilityStore, statsStore: ablationStatsStore, forgedRequestStore, classifier,
-        options: { maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs },
+        options: { maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs, overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite },
       })
     : undefined;
 

@@ -156,6 +156,9 @@ export class AnalysisPipeline {
     // the shared forged_requests cache are untouched, and analysis_stats self-overwrites on its PK.
     if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
     const events = httpEventStore.listBySite(site);
+    // Response-history guard: let the evaluator recognise a forged response whose content the crawler
+    // already collected legitimately (anywhere in these events) as already-accessible data, not a leak.
+    this.candidateEvaluator.primeResponseHistory({ events });
     const pageUrls = reactStateStore.listUrlsBySite(site);
     const crawledStates = crawlStateStore.listBySite(site);
     // Every URL the crawler already reached on its own, through any channel it records — not just

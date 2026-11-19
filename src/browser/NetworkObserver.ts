@@ -43,6 +43,8 @@ export class NetworkObserver {
   private allowedBaseDomains: Set<string>;
   private maxBodyBytes: number;
   private store?: HttpEventStore;
+  // Only populated when there is NO `store` (store-less unit tests inspect it). In production a store
+  // is always passed, so captures go straight to SQLite and nothing accumulates here — see handle().
   private requests: CapturedRequest[] = [];
   private stats: NetworkStats = {
     total: 0, byMethod: {}, byStatus: {}, failed: 0, skippedOffDomain: 0,
@@ -100,8 +102,10 @@ export class NetworkObserver {
     };
     await this.fillResponse(entry, res);
 
-    this.requests.push(entry);
-    this.store?.record({ site: this.site, request: entry });
+    // when a store is present (always, in production) we record straight to SQLite and keep nothing in memory;
+    // the in-memory buffer is only the fallback sink when there is no store 
+    if (this.store) this.store.record({ site: this.site, request: entry });
+    else this.requests.push(entry);
     this.stats.total++;
     this.stats.byMethod[entry.method] = (this.stats.byMethod[entry.method] ?? 0) + 1;
     if (entry.status !== undefined) {

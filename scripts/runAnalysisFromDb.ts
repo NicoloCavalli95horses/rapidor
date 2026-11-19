@@ -25,6 +25,9 @@ import { ForgedRequestStore } from '../src/db/ForgedRequestStore';
 import { AuthzClassificationStore } from '../src/db/AuthzClassificationStore';
 import { AuthzClassifier } from '../src/analysis/authzClassifier';
 import { AnalysisPipeline } from '../src/analysis/AnalysisPipeline';
+import { AblationPipeline } from '../src/analysis/AblationPipeline';
+import { AblationVulnerabilityStore } from '../src/db/AblationVulnerabilityStore';
+import { AblationStatsStore } from '../src/db/AblationStatsStore';
 import { installParamUsageTracking } from '../src/browser/paramUsageTracker';
 import { config } from '../src/config';
 
@@ -93,6 +96,32 @@ console.log(`\nAnalysis wall-clock: ${((Date.now() - startedAt) / 1000).toFixed(
 console.log(`\n=== analysis_stats (${SITE}) ===`);
 console.log(statsStore.all().filter((r) => r.site === SITE));
 console.log('=== vulnerabilities flagged ===', vulnerabilityStore.count(SITE));
+
+// Ablation pass: mirrors the end-of-crawl ordering (AnalysisHooks before AblationHooks). Runs ONLY
+// when config.analysis.ablationMode is on (ABLATION_MODE=true), exactly like buildExplorer — so this
+// re-runner reproduces whatever the crawl would have produced, ablation included. Writes only to the
+// ablation_* tables (same overwrite-per-site hygiene as the main pipeline).
+if (config.analysis.ablationMode) {
+  const ablationVulnerabilityStore = new AblationVulnerabilityStore({ db, clearOnStart: false });
+  const ablationStatsStore = new AblationStatsStore({ db, clearOnStart: false });
+  const ablation = new AblationPipeline({
+    httpEventStore, crawlStateStore,
+    vulnerabilityStore: ablationVulnerabilityStore, statsStore: ablationStatsStore, forgedRequestStore, classifier,
+    options: {
+      maxConcurrentRequests: config.analysis.maxConcurrentRequests,
+      timeBetweenRequestsMs: config.analysis.timeBetweenRequestsMs,
+      overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
+    },
+  });
+  const ablationStartedAt = Date.now();
+  await ablation.runForSite({ page, site: SITE });
+  console.log(`\nAblation wall-clock: ${((Date.now() - ablationStartedAt) / 1000).toFixed(0)}s`);
+  console.log(`\n=== ablation_stats (${SITE}) ===`);
+  console.log(ablationStatsStore.all().filter((r) => r.site === SITE));
+  console.log('=== ablation_vulnerabilities flagged ===', ablationVulnerabilityStore.count(SITE));
+} else {
+  console.log('\n(ablation skipped: set ABLATION_MODE=true to also run the HTTP-JSON-only ablation pass)');
+}
 
 await context.close();
 process.exit(0);

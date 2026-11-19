@@ -6,7 +6,7 @@ import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { findCandidates } from './matchFinder';
 import { type SegmentCandidate } from './segments';
 import { forgeRequestCached } from './requestForge';
-import { getServerResponseSimilarity, isIdenticalResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam } from '../utils/utils';
@@ -53,12 +53,40 @@ export class CandidateEvaluator {
   // from two reference events is not logged twice. Reset per run.
   private loggedFindingIds = new Set<string>();
 
+  // The forged-response CONTENT keys (see canonicalResponseKey) of the HTTP findings already recorded
+  // THIS run. Two different swaps whose forged response is byte/JSON-identical describe the same leak
+  // (the server's answer does not depend on which sibling proposed the value), so the second is
+  // suppressed as a duplicate instead of producing a redundant finding row. Reset per run.
+  private recordedForgedBodyKeys = new Set<string>();
+
+  // CONTENT keys of every response the crawler already collected legitimately (http_events) for the
+  // site under analysis. An HTTP forge whose response is in here returned data this user can already
+  // reach by normal browsing — not an access-control leak — so it is not flagged, even when that
+  // response differs from the one the reference request returned. Primed per run (primeResponseHistory)
+  // and never includes anything the forge itself produced.
+  private responseHistoryKeys = new Set<string>();
+
   constructor(private deps: CandidateEvaluatorDeps) {}
 
-  /** Starts a fresh run: drops the per-run log dedup and re-sizes the forge concurrency bound. */
+  /** Starts a fresh run: drops the per-run log/dedup state and re-sizes the forge concurrency bound. */
   reset(): void {
     this.loggedFindingIds.clear();
+    this.recordedForgedBodyKeys.clear();
     this.forgeSemaphore = new Semaphore(this.deps.options.maxConcurrentRequests);
+  }
+
+  /**
+   * Rebuilds the response-history guard set from the site's already-captured http_events: the content
+   * key (canonicalResponseKey) of every event that carries a body. Called once per run, before any
+   * candidate is evaluated, so an HTTP forge whose response matches one of these — data the crawler
+   * already obtained legitimately — is recognised as already-accessible and never flagged.
+   */
+  primeResponseHistory({ events }: { events: ReturnType<HttpEventStore['listBySite']> }): void {
+    this.responseHistoryKeys = new Set<string>();
+    for (const e of events) {
+      const key = canonicalResponseKey({ status: e.status ?? 0, body: e.responseBody ?? '' });
+      if (key !== undefined) this.responseHistoryKeys.add(key);
+    }
   }
 
   /** How many findings THIS run confirmed (what the end-of-run summary reports). */
@@ -167,6 +195,37 @@ export class CandidateEvaluator {
         return;
       }
       detectionMethod = 'client-routing';
+    }
+
+    // HTTP-only content guards (see canonicalResponseKey). Both key on the forged response's CONTENT,
+    // so they apply only to a genuine HTTP finding — the forged response IS the evidence there; a
+    // client-routing finding carries no server-response evidence and is never deduped this way. A
+    // forged response with no body yields no key, so neither guard can fire and the finding is kept
+    // (same conservative stance as isIdenticalResponse: drop only on positive evidence). Note there is
+    // no await between here and the record below on the HTTP path, so the check-and-add on
+    // recordedForgedBodyKeys is atomic despite concurrent candidate evaluation.
+    if (detectionMethod === 'http') {
+      const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
+      // The reference event's own response, EXCLUDED from the history check below: a forge that returns
+      // the original's own body is the "server ignored the swapped value" case (already handled above by
+      // isIdenticalResponse / serverIgnoredValue), not "data accessible at some OTHER URL". Only a match
+      // with a DIFFERENT captured response means already-accessible-elsewhere.
+      const referenceKey = canonicalResponseKey({ status: original.status, body: original.body });
+      if (forgedKey !== undefined) {
+        // (1) History: the forged data is a response the crawler already collected legitimately at a
+        // DIFFERENT URL (http_events) — this user can already reach it, so it is not a leak.
+        if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
+          log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${event.url} -> ${url}`);
+          return;
+        }
+        // (2) Dedup: an earlier candidate this run already produced a byte/JSON-identical forged
+        // response — the same leak reached from a second sibling. Record it once, drop the duplicate.
+        if (this.recordedForgedBodyKeys.has(forgedKey)) {
+          log.debug(`AnalysisPipeline: HTTP candidate not flagged (duplicate forged response of an already-recorded finding) — ${event.url} -> ${url}`);
+          return;
+        }
+        this.recordedForgedBodyKeys.add(forgedKey);
+      }
     }
 
     const id = vulnerabilityId({ candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId, method: event.method, url });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ResponseLike } from './requestForge';
 
 /**
@@ -167,4 +168,34 @@ export function isIdenticalResponse({ reference, candidate }: { reference: Respo
   } catch {
     return false;
   }
+}
+
+/**
+ * A canonical identity for a response's CONTENT, so the HTTP detection path can recognise two
+ * responses that `isIdenticalResponse` would call equal as THE SAME response — both across candidates
+ * (two swaps that forge the same payload are one leak) and against the crawler's already-collected
+ * http_events (a forge that returns data the user can already reach is not a leak). It folds in the
+ * status and canonicalises the body exactly the way isIdenticalResponse compares it: the raw text for
+ * a non-JSON body, or a key-order-independent serialisation for JSON (so `{a,b}` and `{b,a}` collapse
+ * to one key). Returns undefined when there is no body to key on, so a caller keeps the finding —
+ * mirroring isIdenticalResponse returning false on a missing body: these guards only ever drop on
+ * positive evidence, never fabricate a drop.
+ */
+export function canonicalResponseKey({ status, body }: { status: number; body: string }): string | undefined {
+  if (!body) return undefined;
+  let canonical: string;
+  try {
+    canonical = `json:${stableStringify(JSON.parse(body))}`;
+  } catch {
+    canonical = `raw:${body}`;
+  }
+  return createHash('sha256').update(`${status}\n${canonical}`).digest('hex');
+}
+
+/** Deterministic JSON serialisation with object keys sorted, so two deep-equal values stringify identically. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`).join(',')}}`;
 }

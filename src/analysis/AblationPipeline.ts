@@ -10,7 +10,7 @@ import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
-import { getServerResponseSimilarity, compareObj, describeDiffs } from './responseEvaluate';
+import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
 import { formatDuration } from '../core/duration';
 import { normalizeUrl } from './findings';
@@ -18,6 +18,9 @@ import { normalizeUrl } from './findings';
 export interface AblationPipelineOptions {
   maxConcurrentRequests: number;
   timeBetweenRequestsMs: number;
+  // Mirrors config.analysis.overwriteFindingsPerSite for the ablation's own table: when not explicitly
+  // false, a re-run clears this site's previous ablation_vulnerabilities before recording.
+  overwriteFindingsPerSite?: boolean;
 }
 
 export interface AblationPipelineDeps {
@@ -64,15 +67,33 @@ export interface AblationPipelineDeps {
  * related data just because a value happens to appear in both.
  */
 export class AblationPipeline {
+  // HTTP content guards, identical to AnalysisPipeline's (always on): the forged-response content keys
+  // already recorded this run (dedup), and the content keys the crawler already collected legitimately
+  // (history). Both reset at the start of runForSite so a per-site run never leaks state across sites.
+  private recordedForgedBodyKeys = new Set<string>();
+  private responseHistoryKeys = new Set<string>();
+
   constructor(private deps: AblationPipelineDeps) {}
 
   async runForSite({ page, site }: { page: Page; site: string }): Promise<void> {
     const analysisStartedAt = Date.now();
     const { httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, options } = this.deps;
+    // Re-analysis hygiene, mirroring AnalysisPipeline (see config.analysis.overwriteFindingsPerSite):
+    // a re-run's ablation findings REPLACE this site's previous ablation_vulnerabilities instead of
+    // accumulating (record is INSERT OR IGNORE on a deterministic id). Reset the per-run guard sets too.
+    if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
+    this.recordedForgedBodyKeys = new Set<string>();
     // Scoped to THIS site only: listBySite already filters by site, and both `bodies`/`preindex`
     // below are built fresh from exactly this array on every call — never cached across sites, so a
     // JSON body captured for a different site can never leak into this one's index.
     const events = httpEventStore.listBySite(site);
+    // Response-history guard (same as AnalysisPipeline): the content key of every captured response, so
+    // a forge that returns data the crawler already collected legitimately is not flagged as a leak.
+    this.responseHistoryKeys = new Set<string>();
+    for (const e of events) {
+      const k = canonicalResponseKey({ status: e.status ?? 0, body: e.responseBody ?? '' });
+      if (k) this.responseHistoryKeys.add(k);
+    }
     // Parsed once, same order/indices as `events`; undefined for a non-JSON/unparseable body.
     const bodies = events.map((e) => parseJsonBody(e.responseBody));
     // Every body walked exactly once; a segment is then looked up against the WHOLE corpus in O(1)
@@ -157,6 +178,29 @@ export class AblationPipeline {
     if (!authz.isAuthzRelevant) {
       log.debug(`AblationPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${event.method} ${event.url} -> ${url} | ${describeDiffs(differences)}`);
       return;
+    }
+
+    // Same always-on HTTP content guards as AnalysisPipeline: drop a forged response already present in
+    // the crawler's own http_events (already-accessible data), and dedup two swaps that forge an
+    // identical response. No body => no key => finding kept. There is no await between here and the
+    // record below, so the check-and-add on recordedForgedBodyKeys is atomic under concurrent evaluation.
+    const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
+    // The reference event's own response is EXCLUDED from the history check: a forge returning the
+    // original's body is the "server ignored the swapped value" case, not data accessible at another
+    // URL. (This ablation deliberately lacks AnalysisPipeline's isIdenticalResponse gate, so such a
+    // candidate stays flaggable here — the studied weakness; only a match with a DIFFERENT captured
+    // response is suppressed.)
+    const referenceKey = canonicalResponseKey({ status: event.status ?? 0, body: event.responseBody ?? '' });
+    if (forgedKey !== undefined) {
+      if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
+        log.debug(`AblationPipeline: candidate not flagged (forged response already in http_events at a different URL — already-accessible data) — ${event.method} ${event.url} -> ${url}`);
+        return;
+      }
+      if (this.recordedForgedBodyKeys.has(forgedKey)) {
+        log.debug(`AblationPipeline: candidate not flagged (duplicate forged response of an already-recorded finding) — ${event.method} ${event.url} -> ${url}`);
+        return;
+      }
+      this.recordedForgedBodyKeys.add(forgedKey);
     }
 
     const id = ablationVulnerabilityId({ candidateValue: candidate.candidateValue, path: candidate.candidatePath, method: event.method, url });
