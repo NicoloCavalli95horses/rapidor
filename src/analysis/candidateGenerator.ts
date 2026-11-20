@@ -3,6 +3,7 @@ import type { PreindexedValueStore } from '../db/PreindexedValueStore';
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import { findCandidates } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
+import { nodeChromeZone, zoneWalkDepthFor } from './domZone';
 
 /**
  * Split a query-param NAME into lowercase tokens across camelCase, snake_case, kebab and letter/digit
@@ -32,6 +33,25 @@ export function paramNameBlacklisted({ name, blacklist }: { name: string; blackl
   return tokenizeParamName(name).some((t) => set.has(t));
 }
 
+/**
+ * Locale / UI-language query params. In this corpus (language-learning apps) a locale param selects the
+ * response's REPRESENTATION — which language its texts/UI come back in — not WHOSE resource it is. Like a
+ * pagination param, swapping it returns the same resource rendered differently, so the response differs
+ * legitimately and no content guard can ever reject it (Mondly's `notification-preferences?mother_language=22`
+ * came back in Arabic/Thai/Korean/… → one FP per language). Matched by REGEX, deliberately NOT a blacklist
+ * token: the bare token `language` would also drop `target_language`/`learning_language`, which in a language
+ * app name the RESOURCE you study (possibly paid) — a real TP. The optional prefix set is only
+ * UI/native/mother-style, so `mother_language`/`ui_language`/`locale`/`lang` match while `target_language`
+ * does not; a trailing `_id` (`language_id`) fails too, keeping an id reference mutable. Not a config knob —
+ * a semantic fact about param names, like VOLATILE_PARAMS/PREINDEXED_KEYS.
+ */
+export const LOCALE_PARAM = /^(?:ui|interface|display|native|mother|app|site|user)?[-_]?(?:language|lang|lng|locale|langcode|tongue)$/i;
+
+/** True when a query-param NAME is a locale/UI-language selector (see LOCALE_PARAM). */
+export function isLocaleParam({ name }: { name: string }): boolean {
+  return LOCALE_PARAM.test(name.trim());
+}
+
 /** One proposed swap: the extracted segment and a sibling-component replacement value for it. */
 export interface UrlCandidate {
   segment: SegmentCandidate;
@@ -52,6 +72,10 @@ export class CandidateGenerator {
   // run so it never grows across sites or goes stale against a later re-run.
   private graphCache = new Map<number, RapidorGraph | undefined>();
 
+  // Per-run cache of each graph's size-scaled chrome-zone walk depth (zoneWalkDepthFor is O(nodes), so it
+  // is computed once per state, not once per match). Keyed by stateId like graphCache; reset per run.
+  private zoneDepthCache = new Map<number, number>();
+
   constructor(private deps: {
     preindexStore: PreindexedValueStore;
     reactStateStore: ReactStateStore;
@@ -60,16 +84,18 @@ export class CandidateGenerator {
     paramBlacklist: string[];
   }) {}
 
-  /** Drops the per-run graph cache. Call once at the start of each site's analysis. */
+  /** Drops the per-run caches. Call once at the start of each site's analysis. */
   reset(): void {
     this.graphCache.clear();
+    this.zoneDepthCache.clear();
   }
 
   /** Runs the preindex -> matchFinder steps for one URL (an http_event's or a crawled page's). */
-  findUrlCandidates({ url }: { url: string }): { segments: number; matches: number; items: UrlCandidate[] } {
+  findUrlCandidates({ url }: { url: string }): { segments: number; matches: number; chromeSkipped: number; items: UrlCandidate[] } {
     const { preindexStore, maxSegmentMatches, segmentBlacklist, paramBlacklist } = this.deps;
     let segments = 0;
     let matches = 0;
+    let chromeSkipped = 0;
     const items: UrlCandidate[] = [];
 
     for (const segment of extractSegments({ url })) {
@@ -82,6 +108,10 @@ export class CandidateGenerator {
       // like `maxLevel`/`minScore`/`pageSize` is dropped, not just an exact `limit`. Query params only —
       // a path segment named `limit` is not gated.
       if (segment.paramName && paramNameBlacklisted({ name: segment.paramName, blacklist: paramBlacklist })) continue;
+      // A locale / UI-language param selects the response's LANGUAGE, not its owner (see LOCALE_PARAM): a
+      // swap returns the same resource in another language, a guaranteed non-finding. Regex, not a token,
+      // so `target_language`/`learning_language` (the studied resource, maybe paid) stay mutable.
+      if (segment.paramName && isLocaleParam({ name: segment.paramName })) continue;
       // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
       // mutating one only switches the app's section, which renders a different DOM and so masquerades
       // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query
@@ -99,6 +129,15 @@ export class CandidateGenerator {
         matches++;
         const graph = this.getGraph(match.stateId);
         if (!graph) continue;
+        // Skip a match whose React node sits inside the site's navigation/footer chrome (see domZone):
+        // a URL value coming from nav/footer furniture is never a user-scoped resource id, so every
+        // candidate it would spawn is noise. Scoped to nav/footer/sidebar ONLY — <header>/<section> are
+        // deliberately NOT chrome (busuu renders its objective-id cards inside a <header>). No-op on old
+        // captures without the `dom` field (nodeChromeZone returns null), so this only skips on evidence.
+        if (nodeChromeZone({ graph, nodeId: match.nodeId, maxDepth: this.getZoneDepth(match.stateId, graph) })) {
+          chromeSkipped++;
+          continue;
+        }
         for (const candidate of findCandidates({ stateId: match.stateId, graph, nodeId: match.nodeId, path: match.path })) {
           // Blacklist applies to the swap in BOTH directions: skip not only a blacklisted segment as
           // the value being mutated (above), but also any candidate whose REPLACEMENT value is
@@ -110,7 +149,17 @@ export class CandidateGenerator {
         }
       }
     }
-    return { segments, matches, items };
+    return { segments, matches, chromeSkipped, items };
+  }
+
+  /** zoneWalkDepthFor(graph), memoized per state for this run (it is O(nodes), called once per match). */
+  private getZoneDepth(stateId: number, graph: RapidorGraph): number {
+    let depth = this.zoneDepthCache.get(stateId);
+    if (depth === undefined) {
+      depth = zoneWalkDepthFor({ graph });
+      this.zoneDepthCache.set(stateId, depth);
+    }
+    return depth;
   }
 
   /** reactStateStore.getById, memoized for this run: each distinct graph is read + JSON.parsed once. */

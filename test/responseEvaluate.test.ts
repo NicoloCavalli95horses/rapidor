@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, scopeDiffsToResource } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, isErrorEnvelopeResponse, scopeDiffsToResource } from '../src/analysis/responseEvaluate';
 
 describe('scopeDiffsToResource', () => {
   const diff = (path: (string | number)[], reference: unknown, current: unknown) =>
@@ -45,6 +45,33 @@ describe('isEmptyJsonResponse', () => {
   it('false for a non-JSON body (drop only on positive evidence of emptiness)', () => {
     assert.equal(isEmptyJsonResponse({ body: '<html>not found</html>' }), false);
     assert.equal(isEmptyJsonResponse({ body: '' }), false);
+  });
+});
+
+describe('isErrorEnvelopeResponse', () => {
+  it('true for an error envelope despite 200, even with fields beside the flag', () => {
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":true}' }), true);               // Mondly's case
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":true,"errorCode":123,"requestId":"a"}' }), true);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":"Not authorized"}' }), true);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":{"code":403,"message":"x"}}' }), true);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"success":false,"data":{"id":5}}' }), true);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"ok":false}' }), true);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"status":"error"}' }), true);
+  });
+
+  it('false for a real resource (no top-level error signal)', () => {
+    assert.equal(isErrorEnvelopeResponse({ body: '{"id":5,"free":false}' }), false);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":false}' }), false);             // not truthy
+    assert.equal(isErrorEnvelopeResponse({ body: '{"error":""}' }), false);                // empty string
+    assert.equal(isErrorEnvelopeResponse({ body: '{"success":true,"data":{"id":5}}' }), false);
+    assert.equal(isErrorEnvelopeResponse({ body: '{"lesson":{"error":true}}' }), false);   // nested, not an envelope
+    assert.equal(isErrorEnvelopeResponse({ body: '{"status":"active"}' }), false);
+  });
+
+  it('false for a non-object / non-JSON body (drop only on positive evidence)', () => {
+    assert.equal(isErrorEnvelopeResponse({ body: '[{"error":true}]' }), false);
+    assert.equal(isErrorEnvelopeResponse({ body: 'oops' }), false);
+    assert.equal(isErrorEnvelopeResponse({ body: '' }), false);
   });
 });
 

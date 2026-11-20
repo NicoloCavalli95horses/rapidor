@@ -3,7 +3,9 @@ import type Database from 'better-sqlite3';
 /** Loose on purpose: the graph's shape is owned by RAPIDOR, not the crawler. */
 export interface RapidorGraph {
   fingerprint: string;
-  nodes?: Record<string, { id: string; componentId?: number; key?: unknown; tag?: number; name?: string; props?: unknown }>;
+  // `dom` (serialized nearest DOM element, children stripped) and `parent` are added by the newer browser
+  // extension; absent on captures from the old one, so every reader must tolerate them being undefined.
+  nodes?: Record<string, { id: string; componentId?: number; key?: unknown; tag?: number; name?: string; props?: unknown; dom?: string | null; parent?: string }>;
   relations?: Record<string, unknown>;
   componentIndex?: Record<string, string[]>;
   [key: string]: unknown;

@@ -8,10 +8,10 @@ import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
-import { paramNameBlacklisted } from './candidateGenerator';
+import { paramNameBlacklisted, isLocaleParam } from './candidateGenerator';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
-import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse } from './responseEvaluate';
+import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse, isErrorEnvelopeResponse } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
 import { formatDuration } from '../core/duration';
 import { normalizeUrl } from './findings';
@@ -176,6 +176,9 @@ export class AblationPipeline {
         // (`curPage`, `limit`, …) is not an object reference, and an app-shell/section path root is not a
         // user-scoped id — mutating either is a guaranteed false positive, so skip before any forge.
         if (segment.paramName && paramNameBlacklisted({ name: segment.paramName, blacklist: options.paramBlacklist })) continue;
+        // Locale / UI-language params select the response's language, not its owner (see isLocaleParam):
+        // shared with the main pipeline so the ablation differs from it ONLY in using JSON siblings.
+        if (segment.paramName && isLocaleParam({ name: segment.paramName })) continue;
         if (!segment.paramName && options.segmentBlacklist.includes(segment.value.toLowerCase())) continue;
         const hits = preindex.get(segment.value) ?? [];
         // Two maxSegmentMatches guards (JSON analogs of the main pipeline's, see the carriersByValue
@@ -264,6 +267,12 @@ export class AblationPipeline {
     // much it differs from the reference — not a finding.
     if (isEmptyJsonResponse({ body: forged.body })) {
       log.debug(`AblationPipeline: candidate rejected (forged response carries no data: empty object/array) — ${event.method} ${event.url} -> ${url}`);
+      return;
+    }
+    // Error-envelope guard, same as AnalysisPipeline: a 200 whose top-level JSON is an error/denial
+    // envelope (`{"error":true}`, `success:false`, `status:"error"`) reached nothing, not a leak.
+    if (isErrorEnvelopeResponse({ body: forged.body })) {
+      log.debug(`AblationPipeline: candidate rejected (forged response is an error envelope despite 200) — ${event.method} ${event.url} -> ${url}`);
       return;
     }
 

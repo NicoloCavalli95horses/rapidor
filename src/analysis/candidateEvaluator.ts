@@ -10,7 +10,7 @@ import { type SegmentCandidate } from './segments';
 import { forgeRequestCached } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
@@ -298,6 +298,14 @@ export class CandidateEvaluator {
       // as {"data":{"data":[],"total":0}}) leaked nothing, however much it differs from the reference.
       if (isEmptyJsonResponse({ body: forged.body })) {
         log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response carries no data: empty object/array) — ${event.url} -> ${url}`);
+        return;
+      }
+      // Error-envelope guard: a 200 whose top-level JSON signals an error/denial (`{"error":true}`, a
+      // top-level `error` string/object, `success:false`, `status:"error"`) reached nothing, even when
+      // real-looking fields sit beside the flag. Apps not following HTTP-status best practices (Mondly)
+      // answer 200; the response-similarity ratios alone can't tell a short error body from a short leak.
+      if (isErrorEnvelopeResponse({ body: forged.body })) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response is an error envelope despite 200) — ${event.url} -> ${url}`);
         return;
       }
       const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });

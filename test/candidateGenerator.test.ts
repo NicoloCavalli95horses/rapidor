@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { PreindexedValueStore } from '../src/db/PreindexedValueStore';
 import { ReactStateStore, type RapidorGraph } from '../src/db/ReactStateStore';
-import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted } from '../src/analysis/candidateGenerator';
+import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted, isLocaleParam } from '../src/analysis/candidateGenerator';
 
 describe('paramNameBlacklisted (tokenized)', () => {
   const blacklist = ['limit', 'offset', 'page', 'size', 'max', 'min', 'order'];
@@ -25,6 +25,21 @@ describe('paramNameBlacklisted (tokenized)', () => {
     assert.equal(paramNameBlacklisted({ name: 'id', blacklist }), false);
     assert.equal(paramNameBlacklisted({ name: 'lessonId', blacklist }), false);
     assert.equal(paramNameBlacklisted({ name: 'courseId', blacklist }), false);
+  });
+});
+
+describe('isLocaleParam (locale / UI-language selectors)', () => {
+  it('matches the locale family (representation, not owner — Mondly mother_language)', () => {
+    for (const name of ['locale', 'lang', 'lng', 'language', 'mother_language', 'ui_language',
+      'interface_language', 'mother_tongue', 'appLanguage', 'langcode']) {
+      assert.equal(isLocaleParam({ name }), true, name);
+    }
+  });
+  it('KEEPS learning-target / resource params mutable (language apps — a real TP must survive)', () => {
+    for (const name of ['target_language', 'learning_language', 'source_language',
+      'course_language', 'to_language', 'language_id', 'languageId', 'lang_level']) {
+      assert.equal(isLocaleParam({ name }), false, name);
+    }
   });
 });
 

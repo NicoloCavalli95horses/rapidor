@@ -234,6 +234,34 @@ export function isEmptyJsonResponse({ body }: { body: string }): boolean {
   return isEmptyData(json);
 }
 
+/**
+ * Whether a forged JSON response is an ERROR ENVELOPE despite a 200 — the server treated the request as a
+ * denial/failure but answered 200 anyway (apps that don't follow HTTP-status best practices, e.g. Mondly's
+ * `{"error":true}`). Unlike isEmptyJsonResponse, which fires only when the WHOLE body is empty/metadata,
+ * this fires even when real-looking fields sit ALONGSIDE the flag (an `errorCode`/`requestId` next to
+ * `error:true` is still an error, not a leak). TOP-LEVEL only: a nested `error` buried inside a genuine
+ * resource is content, not an envelope, so it must not trigger. Signals: a truthy top-level `error`
+ * (boolean true, non-zero number, non-empty string/object), `success:false`/`ok:false`, or a top-level
+ * `status` of "error"/"fail"/"failure". Drops only on positive evidence: a non-object/non-JSON body
+ * returns false (kept), same conservative stance as the other content guards.
+ */
+export function isErrorEnvelopeResponse({ body }: { body: string }): boolean {
+  if (!body) return false;
+  let json: unknown;
+  try { json = JSON.parse(body); } catch { return false; }
+  if (!isPlainObject(json)) return false;
+  const obj = json as Record<string, unknown>;
+  const truthyError = (v: unknown): boolean =>
+    v === true ||
+    (typeof v === 'number' && v !== 0) ||
+    (typeof v === 'string' && v.trim().length > 0) ||
+    (isPlainObject(v) && Object.keys(v as object).length > 0);
+  if (truthyError(obj.error)) return true;
+  if (obj.success === false || obj.ok === false) return true;
+  if (typeof obj.status === 'string' && /^(error|fail|failure)$/i.test(obj.status.trim())) return true;
+  return false;
+}
+
 function isEmptyData(v: unknown): boolean {
   if (v === null || v === undefined) return true;
   if (Array.isArray(v)) return v.every(isEmptyData);

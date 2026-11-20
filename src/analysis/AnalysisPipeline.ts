@@ -192,6 +192,7 @@ export class AnalysisPipeline {
     let segmentsExtracted = 0;
     let matchesFound = 0;
     let candidatesFound = 0;
+    let chromeZoneSkipped = 0;   // matches dropped because their node sits in nav/footer chrome (domZone)
 
     for (const event of events) {
       // Only GET is ever forged. Replaying a captured POST/PUT/PATCH/DELETE with a swapped id would
@@ -202,6 +203,7 @@ export class AnalysisPipeline {
       const found = this.candidateGenerator.findUrlCandidates({ url: event.url });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
+      chromeZoneSkipped += found.chromeSkipped;
       for (const { segment, candidate } of found.items) {
         candidatesFound++;
         // candidateUrlFor, not spliceSegment: a query-param candidate must keep the event's OTHER
@@ -226,6 +228,7 @@ export class AnalysisPipeline {
       const found = this.candidateGenerator.findUrlCandidates({ url: pageUrl });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
+      chromeZoneSkipped += found.chromeSkipped;
       for (const { segment, candidate } of found.items) {
         candidatesFound++;
         const paramName = segment.paramName;
@@ -264,6 +267,10 @@ export class AnalysisPipeline {
         explorationMs, analysisMs: Date.now() - analysisStartedAt, infeasible: true,
       });
       return;
+    }
+
+    if (chromeZoneSkipped > 0) {
+      log.info(`AnalysisPipeline: ${site} — ${chromeZoneSkipped} preindex match(es) skipped as navigation/footer chrome (domZone), out of ${matchesFound} (${(100 * chromeZoneSkipped / Math.max(1, matchesFound)).toFixed(1)}%)`);
     }
 
     if (tasks.length > 0) {
