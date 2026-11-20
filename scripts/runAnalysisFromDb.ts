@@ -85,6 +85,7 @@ const pipeline = new AnalysisPipeline({
     segmentBlacklist: config.analysis.segmentBlacklist,
     paramBlacklist: config.analysis.paramBlacklist,
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
+    clientRoutingQueryStripFallback: config.analysis.clientRoutingQueryStripFallback,
     overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
     authOverride,
   },
@@ -147,6 +148,8 @@ if (config.analysis.ablationMode) {
       timeBetweenRequestsMs: config.analysis.timeBetweenRequestsMs,
       maxSegmentMatches: config.analysis.maxSegmentMatches,
       maxGeneratedRequests: config.analysis.maxGeneratedRequests,
+      paramBlacklist: config.analysis.paramBlacklist,
+      segmentBlacklist: config.analysis.segmentBlacklist,
       overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
     },
   });

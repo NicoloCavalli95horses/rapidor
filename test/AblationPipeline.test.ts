@@ -53,7 +53,7 @@ after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
 describe('AblationPipeline', () => {
   let n = 0;
-  function newPipeline(optionOverrides: Partial<{ maxSegmentMatches: number; maxGeneratedRequests: number }> = {}) {
+  function newPipeline(optionOverrides: Partial<{ maxSegmentMatches: number; maxGeneratedRequests: number; paramBlacklist: string[]; segmentBlacklist: string[] }> = {}) {
     const dbPath = join(root, `${n++}.db`);
     const db = new Database(dbPath);
     const httpEventStore = new HttpEventStore({ db, clearOnStart: true });
@@ -64,7 +64,7 @@ describe('AblationPipeline', () => {
     const classifier = new AuthzClassifier(new AuthzClassificationStore({ db, clearOnStart: true }));
     const pipeline = new AblationPipeline({
       httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier,
-      options: { maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, maxSegmentMatches: 300, maxGeneratedRequests: 100000, ...optionOverrides },
+      options: { maxConcurrentRequests: 1, timeBetweenRequestsMs: 0, maxSegmentMatches: 300, maxGeneratedRequests: 100000, paramBlacklist: [], segmentBlacklist: [], ...optionOverrides },
     });
     return { pipeline, db, httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier };
   }
@@ -96,6 +96,35 @@ describe('AblationPipeline', () => {
     await pipeline.runForSite({ page, site });
 
     assert.equal(vulnerabilityStore.count(site), 1);
+  });
+
+  it('applies the query-param blacklist (exact and tokenized): a pagination param like curPage is never mutated', async () => {
+    const primeClassifier = (classifier: AuthzClassifier) => {
+      (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+      (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+    };
+    const site = 'app.test';
+
+    // Baseline: with no blacklist, ?curPage=101 matches the body sibling 102 and IS flagged.
+    const base = newPipeline();
+    primeClassifier(base.classifier);
+    recordEvent(base.httpEventStore, site, `${baseUrl}/api/users?curPage=101`);
+    await base.pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(base.vulnerabilityStore.count(site), 1);
+
+    // Exact-name blacklist: curPage listed -> skipped -> nothing flagged.
+    const exact = newPipeline({ paramBlacklist: ['curpage'] });
+    primeClassifier(exact.classifier);
+    recordEvent(exact.httpEventStore, site, `${baseUrl}/api/users?curPage=101`);
+    await exact.pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(exact.vulnerabilityStore.count(site), 0);
+
+    // Tokenized blacklist: 'page' matches the 'page' token of curPage -> also skipped.
+    const token = newPipeline({ paramBlacklist: ['page'] });
+    primeClassifier(token.classifier);
+    recordEvent(token.httpEventStore, site, `${baseUrl}/api/users?curPage=101`);
+    await token.pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(token.vulnerabilityStore.count(site), 0);
   });
 
   it('abandons a site as infeasible (nothing dispatched, stats flagged) when generation exceeds the forge budget', async () => {

@@ -53,6 +53,17 @@ export function sameRoutePath(a: string, b: string): boolean {
   return pathA !== '' && pathA === safePath(b);
 }
 
+/** The URL with its entire query string removed (unchanged on malformed input, or if it had none). */
+export function stripUrlQuery(url: string): string {
+  try {
+    const u = new URL(url);
+    u.search = '';
+    return u.href;
+  } catch {
+    return url;
+  }
+}
+
 /** The URL with one query param set to `value` (unchanged on malformed input). */
 export function withParam({ url, name, value }: { url: string; name: string; value: string }): string {
   try {

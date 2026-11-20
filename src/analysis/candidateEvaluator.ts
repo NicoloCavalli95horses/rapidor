@@ -12,7 +12,7 @@ import { applyAuthOverride, type AuthOverride } from './authSession';
 import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
-import { Semaphore, sleep, withParam } from '../utils/utils';
+import { Semaphore, sleep, withParam, stripUrlQuery } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
 
@@ -26,6 +26,8 @@ export interface CandidateEvaluatorOptions {
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
   // see AnalysisPipelineOptions.authOverride — applied to the captured headers before every forge
   authOverride?: AuthOverride;
+  // see config.analysis.clientRoutingQueryStripFallback — path-candidate query-strip retry
+  clientRoutingQueryStripFallback?: boolean;
 }
 
 export interface CandidateEvaluatorDeps {
@@ -411,20 +413,35 @@ export class CandidateEvaluator {
     // authorization boundary — which is what licenses clientSideConfirmed to escalate to a real
     // navigation (stage 3) when the cheap pushState stage is inconclusive (e.g. ejoy's Next.js router
     // ignoring a synthetic popstate for a sibling lesson).
-    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion: true });
+    let confirmedUrl = candidateUrl;
+    let reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion: true });
+    if (reason && this.deps.options.clientRoutingQueryStripFallback) {
+      // Query-strip fallback: the candidate kept the reference's query (spliceSegment re-attaches it), so
+      // swapping only the id yields an INCOHERENT url for a route that infers its params from the PATH
+      // (ejoy's lesson /courses/37/314/<id> with a stale ?path=.../<oldId>/<hash>.json pointing at the
+      // ORIGINAL lesson). Retry once against the clean path — the SPA then infers the params from it.
+      // Only for high-suspicion candidates (authz already fired), and only when there is a query to drop.
+      const stripped = stripUrlQuery(candidateUrl);
+      if (stripped !== candidateUrl) {
+        const r2 = await this.probeClientRoutingPath({ pageUrl, candidateUrl: stripped, candidate, highSuspicion: true });
+        if (!r2) { confirmedUrl = stripped; reason = null; }
+      }
+    }
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${candidateUrl}`);
       return;
     }
-    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} -> ${candidateUrl}` })) return;
+    // Everything downstream uses `confirmedUrl` (the clean path when the fallback confirmed it), so the
+    // content guard, finding id, record and reproduction all reflect the url that actually leaked.
+    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
 
     const id = vulnerabilityId({
       candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId,
-      method: CLIENT_ROUTING_METHOD, url: candidateUrl,
+      method: CLIENT_ROUTING_METHOD, url: confirmedUrl,
     });
     const inserted = vulnerabilityStore.record({
       id, site,
-      referenceUrl: pageUrl, candidateUrl, method: CLIENT_ROUTING_METHOD,
+      referenceUrl: pageUrl, candidateUrl: confirmedUrl, method: CLIENT_ROUTING_METHOD,
       referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
       motivation: describeDiffs(differences),
       detectionMethod: 'client-routing',
@@ -432,13 +449,13 @@ export class CandidateEvaluator {
     });
     this.logConfirmedFinding({
       id, inserted,
-      message: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
+      message: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
     });
     if (inserted) {
       this.writeReproduction({
-        id, site, referenceUrl: pageUrl, candidateUrl, motivation: describeDiffs(differences),
+        id, site, referenceUrl: pageUrl, candidateUrl: confirmedUrl, motivation: describeDiffs(differences),
         differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
-        kind: { type: 'client-routing-path', candidateUrl },
+        kind: { type: 'client-routing-path', candidateUrl: confirmedUrl },
       });
     }
   }

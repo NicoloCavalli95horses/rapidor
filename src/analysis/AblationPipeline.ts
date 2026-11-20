@@ -8,6 +8,7 @@ import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
+import { paramNameBlacklisted } from './candidateGenerator';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
 import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse } from './responseEvaluate';
@@ -25,6 +26,14 @@ export interface AblationPipelineOptions {
   // per-site forge budget: above this many distinct candidates, generation early-aborts and the site is
   // flagged infeasible instead of dispatched (see config.analysis.maxGeneratedRequests).
   maxGeneratedRequests: number;
+  // Same candidate-generation blacklists as the main pipeline (the ablation differs only in using JSON
+  // siblings instead of React ones — every other analysis rule applies). A query param whose NAME (or a
+  // token of it, via paramNameBlacklisted) is listed is never mutated (pagination/sorting controls like
+  // `curPage`/`limit` are not object references); a path segment whose VALUE is blacklisted is never
+  // mutated nor used as a replacement (app-shell/section roots). See config.analysis.paramBlacklist /
+  // segmentBlacklist.
+  paramBlacklist: string[];
+  segmentBlacklist: string[];
   // Mirrors config.analysis.overwriteFindingsPerSite for the ablation's own table: when not explicitly
   // false, a re-run clears this site's previous ablation_vulnerabilities before recording.
   overwriteFindingsPerSite?: boolean;
@@ -163,6 +172,11 @@ export class AblationPipeline {
     for (const event of events) {
       for (const segment of extractSegments({ url: event.url })) {
         segmentsExtracted++;
+        // Same blacklists as the main pipeline (candidateGenerator): a pagination/sorting query param
+        // (`curPage`, `limit`, …) is not an object reference, and an app-shell/section path root is not a
+        // user-scoped id — mutating either is a guaranteed false positive, so skip before any forge.
+        if (segment.paramName && paramNameBlacklisted({ name: segment.paramName, blacklist: options.paramBlacklist })) continue;
+        if (!segment.paramName && options.segmentBlacklist.includes(segment.value.toLowerCase())) continue;
         const hits = preindex.get(segment.value) ?? [];
         // Two maxSegmentMatches guards (JSON analogs of the main pipeline's, see the carriersByValue
         // note above): skip a value that matches too many bodies (hit-cap) OR is carried by too many
@@ -174,6 +188,9 @@ export class AblationPipeline {
           const matchBody = bodies[hit.bodyIndex];
           if (matchBody === undefined) continue;
           for (const candidate of findJsonCandidates({ root: matchBody, path: hit.path })) {
+            // Blacklist applies in BOTH directions (as in the main pipeline): also skip a candidate whose
+            // REPLACEMENT value is a blacklisted path-segment root (mutating an id INTO `/app` etc.).
+            if (!segment.paramName && options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
             candidatesFound++;
             // keeps the event's other query params (see candidateUrlFor's doc comment)
             const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });

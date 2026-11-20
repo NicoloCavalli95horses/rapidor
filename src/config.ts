@@ -143,6 +143,13 @@ export interface CrawlConfig {
     // gate's safety on the real load (a redirect-away or a failed capture is a REJECT). Kill switch for
     // regression bisection; leave on. See AnalysisPipeline.clientSideConfirmed / confirmByFullNavigation.
     clientRoutingFullNavigationEscalation: boolean;
+    // client-routing PATH fallback: a path candidate keeps the reference URL's query (spliceSegment
+    // re-attaches it), so swapping only the id makes an INCOHERENT url for a route that infers its
+    // params from the PATH (ejoy's lesson /courses/37/314/<id> with a stale ?path=.../<oldId>/<hash>.json).
+    // When the primary probe rejects such a high-suspicion candidate, retry ONCE with the query stripped
+    // (the SPA then infers params from the clean path). One extra navigation per rejected high-suspicion
+    // path candidate. Kill switch; leave on. See CandidateEvaluator.evaluateClientRoutingPathCandidate.
+    clientRoutingQueryStripFallback: boolean;
     // Re-analysis hygiene: before recording a site's findings, delete that site's PREVIOUS rows in
     // `vulnerabilities` (clearSite) so the table always reflects the CURRENT engine's output, not the
     // union of every past run. Needed because VulnerabilityStore.record is INSERT OR IGNORE keyed by a
@@ -242,6 +249,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,
+    clientRoutingQueryStripFallback: true,
     overwriteFindingsPerSite: true,
     // AUTH_HEADERS=x-auth-token,authorization to override from the shell
     volatileAuthHeaders: process.env.AUTH_HEADERS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? ['authorization'],

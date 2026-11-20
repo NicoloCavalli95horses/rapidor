@@ -59,6 +59,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         segmentBlacklist: [],
         paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
+        clientRoutingQueryStripFallback: true,
       },
     });
     return { pipeline, httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -239,6 +240,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         segmentBlacklist: [],
         paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
+        clientRoutingQueryStripFallback: true,
       },
     });
     return { pipeline, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };

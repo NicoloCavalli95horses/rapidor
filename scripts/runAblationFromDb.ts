@@ -60,6 +60,8 @@ const pipeline = new AblationPipeline({
     timeBetweenRequestsMs: config.analysis.timeBetweenRequestsMs,
     maxSegmentMatches: config.analysis.maxSegmentMatches,
     maxGeneratedRequests: config.analysis.maxGeneratedRequests,
+    paramBlacklist: config.analysis.paramBlacklist,
+    segmentBlacklist: config.analysis.segmentBlacklist,
   },
 });
 
