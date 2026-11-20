@@ -1,6 +1,6 @@
 website,done,has IDOR,detected,explored depth 3,findings
-https://arabicroad.com,yes,no,no,yes,0
-https://promova.com/my-plan/appyj8hJ1VFshCjHj,no,yes,no,no,
+https://arabicroad.com,no,no,no,no,0
+https://promova.com/my-plan/appyj8hJ1VFshCjHj,no,yes,yes,no,
 https://celpipsimulator.com,no,no,no,no,
 https://www.clozemaster.com/l/ita-eng/stories,no,no,no,no,
 https://www.duolingo.com/learn,no,no,no,no,
@@ -13,6 +13,6 @@ https://app.getpronounce.com/courses/HZnLJPJ2ut?unit=6AXfdnWxKD,no,no,no,no,
 https://app.rocketlanguages.com/members/products/186/dashboard,no,no,no,no,
 https://app.talkpal.ai/dashboard,no,no,no,no,
 https://learn.pimsleur.com/MiniLearn,no,yes,yes,no,
-https://www.busuu.com/dashboard/timeline/a1,no,yes,yes,yes,73
+https://www.busuu.com/dashboard/timeline/a1,no,yes,yes,no,73
 https://my.babbel.com/dashboard/inprogress,no,no,no,no,
 https://lingualeo.com/en/training,no,yes,yes,no,

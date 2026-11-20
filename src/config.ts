@@ -153,6 +153,11 @@ export interface CrawlConfig {
     // ablation). analysis_stats self-overwrites per site (ON CONFLICT(site)), so it needs no clear.
     // Default true;
     overwriteFindingsPerSite: boolean;
+    // header NAMES (lowercased) whose value is session auth material (a bearer token etc.). When a
+    // re-analysis run re-authenticates (scripts/refreshAuth.ts), these are the headers harvested fresh
+    // at t2 and overlaid onto every forged request (see analysis/authSession.ts). Cookie-auth sites need
+    // no entry here — they ride the browser context's cookies. Default: just Authorization.
+    volatileAuthHeaders: string[];
   };
   lightweight: LightweightConfig;
   extension?: ExtensionConfig;  // Chrome extension to load (optional)
@@ -227,14 +232,19 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     segmentBlacklist: ['app'],
     // pagination/sorting controls, not object references: swapping one changes how much of your own
     // data you get, never whose, so a differing response is expected and proves nothing.
+    // matched by exact name AND by token (see paramNameBlacklisted): `max`/`min` here also drop
+    // `maxLevel`/`minScore`; keep entries to bound/pagination words (a token like `order` would also
+    // drop `orderId`).
     paramBlacklist: [
       'limit', 'offset', 'page', 'per_page', 'perpage', 'page_size', 'pagesize',
       'size', 'count', 'skip', 'take', 'sort', 'order', 'order_by', 'orderby',
-      'depth',
+      'depth', 'max', 'min',
     ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,
     overwriteFindingsPerSite: true,
+    // AUTH_HEADERS=x-auth-token,authorization to override from the shell
+    volatileAuthHeaders: process.env.AUTH_HEADERS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? ['authorization'],
   },
   // USER_DATA_DIR enables a persistent profile (~ and $HOME are expanded); when unset, a temporary profile is used
   userDataDir: process.env.USER_DATA_DIR ? expandHome({ value: process.env.USER_DATA_DIR }) : undefined,

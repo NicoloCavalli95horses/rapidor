@@ -4,6 +4,34 @@ import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import { findCandidates } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
 
+/**
+ * Split a query-param NAME into lowercase tokens across camelCase, snake_case, kebab and letter/digit
+ * boundaries, so `maxLevel` / `max_level` / `MaxLevel` all yield `['max','level']`. Used to blacklist a
+ * param whose NAME merely CONTAINS a pagination/bound word (`maxLevel`, `minScore`, `pageSize`), not only
+ * one that equals it exactly.
+ */
+export function tokenizeParamName(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')                                        // camelCase boundary
+    .split(/[^a-zA-Z0-9]+/)                                                         // snake / kebab / other separators
+    .flatMap((s) => s.split(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/))       // letter/digit boundary
+    .map((s) => s.toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * A param name is blacklisted when its full lowercased name is in the list OR any of its tokens is — so
+ * a compound like `maxLevel` is dropped on the `max` token. NOTE the token rule is intentionally broad:
+ * a blacklist word that is also a common English token (`order`, `page`, `size`) will drop a real-ref
+ * param that happens to contain it (`orderId`, `pageId`); keep the list made of bound/pagination words.
+ */
+export function paramNameBlacklisted({ name, blacklist }: { name: string; blacklist: string[] }): boolean {
+  const lower = name.toLowerCase();
+  if (blacklist.includes(lower)) return true;
+  const set = new Set(blacklist);
+  return tokenizeParamName(name).some((t) => set.has(t));
+}
+
 /** One proposed swap: the extracted segment and a sibling-component replacement value for it. */
 export interface UrlCandidate {
   segment: SegmentCandidate;
@@ -50,8 +78,10 @@ export class CandidateGenerator {
       // own data comes back, never WHOSE, so the response legitimately differs and no downstream guard
       // can ever reject it (config.analysis.paramBlacklist). busuu's `?limit=5` is the motivating case:
       // the bare value "5" matched 77 unrelated preindexed nodes (paddings, counts, array indices) and
-      // forged dozens of nonsense ids. Query params only — a path segment named `limit` is not gated.
-      if (segment.paramName && paramBlacklist.includes(segment.paramName.toLowerCase())) continue;
+      // forged dozens of nonsense ids. Matched by TOKEN too (paramNameBlacklisted), so a compound bound
+      // like `maxLevel`/`minScore`/`pageSize` is dropped, not just an exact `limit`. Query params only —
+      // a path segment named `limit` is not gated.
+      if (segment.paramName && paramNameBlacklisted({ name: segment.paramName, blacklist: paramBlacklist })) continue;
       // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
       // mutating one only switches the app's section, which renders a different DOM and so masquerades
       // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query

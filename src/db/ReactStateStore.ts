@@ -104,6 +104,17 @@ export class ReactStateStore {
   }
 
   /**
+   * The structural fingerprints captured at one exact URL for a site — the seed set of the entry-point
+   * auth-freshness gate (checkEntryPointFresh). Exact-URL match: the crawl stores the entry state under
+   * START_URL verbatim, and an authenticated internal page's structure is what the gate compares against.
+   */
+  fingerprintsForUrl({ site, url }: { site: string; url: string }): string[] {
+    const rows = this.db.prepare('SELECT DISTINCT fingerprint FROM react_states WHERE site = ? AND url = ?')
+      .all(site, url) as { fingerprint: string }[];
+    return rows.map((r) => r.fingerprint);
+  }
+
+  /**
    * Streams every captured React graph for a site one row at a time (never materialising them all at
    * once — a site can hold a few hundred, each a non-trivial component tree). Used to build the
    * client-routing novelty corpus (reactContentKey of each already-collected state) with bounded memory,

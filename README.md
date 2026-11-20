@@ -144,6 +144,22 @@ USER_DATA_DIR=$HOME/.crawler-profile START_URL=https://example.com/dashboard npm
 * Do not point it at the Chrome profile you actually use day-to-day: it gets locked, and Chrome 136+ forbids automating it anyway. Use a dedicated folder (or a copy of one).
 * `debugNoCrawling: true` (`DEBUG_NO_CRAWLING=true`) skips exploration entirely: the browser opens on `startUrl` and stays open until you close it — exactly the window you need to log in by hand.
 
+### Analysing later, after the session expired (re-auth, no re-crawl)
+
+Exploration (t1) and analysis (t2) can be hours apart, but the analysis forges live requests and needs a valid session. [scripts/runAnalysisFromDb.ts](scripts/runAnalysisFromDb.ts) checks this up front with an **entry-point gate**: it re-renders the `START_URL` (an internal authenticated page) and compares its live React fingerprint to the one captured at crawl time. A match means the session is alive; a mismatch means the profile was redirected to login (expired). The gate is on a resource you are *entitled* to, so it is never confused by a forged request's own `403` (which, for a paid-resource IDOR, is the correct "no leak" answer — and so never triggers re-authentication).
+
+If the gate reports **EXPIRED**, re-authenticate without re-crawling:
+
+```bash
+# opens the profile headed, waits for you to log in, then stores fresh credentials for that site
+USER_DATA_DIR=$HOME/.crawler-profile npx tsx scripts/refreshAuth.ts https://example.com/dashboard
+
+# the forge now overlays the refreshed session (fresh cookies / bearer token)
+USER_DATA_DIR=$HOME/.crawler-profile npx tsx scripts/runAnalysisFromDb.ts https://example.com/dashboard
+```
+
+`refreshAuth` strips the stale captured `Cookie` so cookie-auth sites ride the profile's fresh cookies, and harvests the fresh header-auth (`analysis.volatileAuthHeaders`, default `authorization`) for bearer sites — both stored per-site in `session_auth` (never wiped by `clearOnStart`) and clears that site's `forged_requests` cache so no response forged under the dead session is reused. Two fresh profiles are assumed to carry the same privileges.
+
 ## Browser extension (RAPIDOR)
 
 The crawler loads RAPIDOR's unpacked Chrome extension to read React component state as it explores. It runs in RAPIDOR's own `mode: 'minimal'` (set in its `config.js`): the extension only exposes `window.__RAPIDOR__getLatestState()` (Bridge + StateManager) — HTTP tracking and IDOR analysis both happen in this crawler instead (see [IDOR analysis](docs/analysis.md)), not in the extension.

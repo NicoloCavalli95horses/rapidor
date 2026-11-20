@@ -144,8 +144,10 @@ export function createCrawler(cfg: CrawlConfig = defaultConfig): PlaywrightCrawl
     },
     preNavigationHooks: [
       async ({ page, request }) => {
-        // before the first navigation, so this run's own captures are not wiped along with the old ones
-        overwriteDomainRows({ site: new URL(request.url).hostname });
+        // before the first navigation, so this run's own captures are not wiped along with the old ones.
+        // NEVER in debugNoCrawling (manual-login) mode: that run explores nothing, so wiping the domain's
+        // hard-won data just to open the browser for a login is pure data loss (it bit a real user).
+        if (!cfg.debugNoCrawling) overwriteDomainRows({ site: new URL(request.url).hostname });
         await page.setViewportSize(cfg.viewport);
         await installParamUsageTracking(page);
         const assetCache = makeAssetCache();

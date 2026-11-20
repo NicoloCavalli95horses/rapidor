@@ -8,7 +8,8 @@ import { reactContentKey } from './reactFingerprint';
 import { findCandidates } from './matchFinder';
 import { type SegmentCandidate } from './segments';
 import { forgeRequestCached } from './requestForge';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
+import { applyAuthOverride, type AuthOverride } from './authSession';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam } from '../utils/utils';
@@ -23,6 +24,8 @@ export interface CandidateEvaluatorOptions {
   userDataDir?: string;
   reportsDir: string;
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
+  // see AnalysisPipelineOptions.authOverride — applied to the captured headers before every forge
+  authOverride?: AuthOverride;
 }
 
 export interface CandidateEvaluatorDeps {
@@ -203,7 +206,11 @@ export class CandidateEvaluator {
 
     const forged = await this.forgeSemaphore.run(async () => {
       const res = await forgeRequestCached({
-        cache: forgedRequestStore, site, page, url, method: event.method, headers: event.requestHeaders, postData: event.postData,
+        cache: forgedRequestStore, site, page, url, method: event.method,
+        // Re-point the captured t1 headers at the re-authenticated session when a refresh happened
+        // (strip stale cookie / overlay fresh bearer); a no-op when authOverride is undefined.
+        headers: applyAuthOverride({ headers: event.requestHeaders, override: options.authOverride }),
+        postData: event.postData,
         requireCache: options.offline,
       });
       await sleep(options.timeBetweenRequestsMs);
@@ -276,6 +283,12 @@ export class CandidateEvaluator {
       // trusted. The client-routing fallback above is independent and already ran for a query param.
       if (forged.status >= 400) {
         log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response status ${forged.status}: access denied / error, not a leak) — ${event.url} -> ${url}`);
+        return;
+      }
+      // Empty-data guard: a forge that returns no actual data (`{}`, `[]`, or an all-empty wrapper such
+      // as {"data":{"data":[],"total":0}}) leaked nothing, however much it differs from the reference.
+      if (isEmptyJsonResponse({ body: forged.body })) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response carries no data: empty object/array) — ${event.url} -> ${url}`);
         return;
       }
       const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });

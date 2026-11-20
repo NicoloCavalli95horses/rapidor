@@ -192,6 +192,38 @@ export function canonicalResponseKey({ status, body }: { status: number; body: s
   return createHash('sha256').update(`${status}\n${canonical}`).digest('hex');
 }
 
+// Metadata keys whose scalar value is bookkeeping, not content (a count/pagination/status field): when
+// everything else in a response is empty, a `total: 0` / `success: true` alongside does not make it a
+// data leak. Deliberately narrow — an id/name/title/slug is NOT here, so a real record is never "empty".
+const METADATA_KEY = /^(total|count|total_count|totalcount|total_pages|totalpages|size|page|per_page|perpage|offset|limit|length|num|status|code|success|ok|error|message)$/i;
+
+/**
+ * Whether a forged JSON response carries NO actual data — an empty object/array, or a wrapper whose only
+ * payload arrays are empty (ejoy's `search-new` returning `{"data":{"data":[],"total":0}}` for a mutated
+ * param). Such a response leaks nothing, so it is never an access-control finding, however much it
+ * "differs" from the reference. A non-JSON body, or any body with a real content leaf (a string, or a
+ * scalar under a non-metadata key like `id`/`title`), is NOT empty. Drops only on positive evidence of
+ * emptiness: an unparseable body returns false (kept), mirroring the other content guards.
+ */
+export function isEmptyJsonResponse({ body }: { body: string }): boolean {
+  if (!body) return false;
+  let json: unknown;
+  try { json = JSON.parse(body); } catch { return false; }
+  return isEmptyData(json);
+}
+
+function isEmptyData(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (Array.isArray(v)) return v.every(isEmptyData);
+  if (typeof v === 'object') {
+    const entries = Object.entries(v as Record<string, unknown>);
+    // empty object, or every field is itself empty / a known metadata scalar
+    return entries.every(([k, val]) => isEmptyData(val) || METADATA_KEY.test(k));
+  }
+  if (typeof v === 'string') return v.length === 0;
+  return false;   // a number/boolean under a non-metadata key is content (an id, a flag that matters)
+}
+
 /** Deterministic JSON serialisation with object keys sorted, so two deep-equal values stringify identically. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';

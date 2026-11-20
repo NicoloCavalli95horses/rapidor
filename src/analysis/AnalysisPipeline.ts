@@ -16,6 +16,7 @@ import { normalizeUrl } from './findings';
 import { ClientRoutingVerifier } from './clientRoutingVerifier';
 import { RecheckRunner } from './recheckRunner';
 import { CandidateEvaluator } from './candidateEvaluator';
+import type { AuthOverride } from './authSession';
 import { formatDuration } from '../core/duration';
 
 export interface AnalysisPipelineOptions {
@@ -45,6 +46,10 @@ export interface AnalysisPipelineOptions {
   // is cleared — never the capture tables or the shared forged_requests cache; analysis_stats
   // self-overwrites per site. Undefined => clear (the safe default for a re-analysis).
   overwriteFindingsPerSite?: boolean;
+  // Refreshed auth material for a re-analysis run whose captured (t1) session expired: re-points the
+  // HTTP forge at the re-authenticated session (strip stale cookie / overlay fresh bearer). Undefined
+  // on the common path (token never expired) => forge replays the captured headers verbatim, unchanged.
+  authOverride?: AuthOverride;
 }
 
 export interface AnalysisPipelineDeps {
@@ -134,6 +139,7 @@ export class AnalysisPipeline {
         userDataDir: deps.options.userDataDir,
         reportsDir: deps.options.reportsDir,
         clientRoutingProbe: deps.options.clientRoutingProbe,
+        authOverride: deps.options.authOverride,
       },
     });
     this.recheckRunner = new RecheckRunner({

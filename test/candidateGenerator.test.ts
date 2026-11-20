@@ -6,7 +6,27 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { PreindexedValueStore } from '../src/db/PreindexedValueStore';
 import { ReactStateStore, type RapidorGraph } from '../src/db/ReactStateStore';
-import { CandidateGenerator } from '../src/analysis/candidateGenerator';
+import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted } from '../src/analysis/candidateGenerator';
+
+describe('paramNameBlacklisted (tokenized)', () => {
+  const blacklist = ['limit', 'offset', 'page', 'size', 'max', 'min', 'order'];
+  it('tokenizes across camelCase / snake / kebab / digit boundaries', () => {
+    assert.deepEqual(tokenizeParamName('maxLevel'), ['max', 'level']);
+    assert.deepEqual(tokenizeParamName('max_level'), ['max', 'level']);
+    assert.deepEqual(tokenizeParamName('pageSize2'), ['page', 'size', '2']);
+  });
+  it('drops a param whose name equals OR contains a blacklisted token', () => {
+    assert.equal(paramNameBlacklisted({ name: 'limit', blacklist }), true);      // exact
+    assert.equal(paramNameBlacklisted({ name: 'maxLevel', blacklist }), true);   // token "max"
+    assert.equal(paramNameBlacklisted({ name: 'minScore', blacklist }), true);   // token "min"
+    assert.equal(paramNameBlacklisted({ name: 'pageSize', blacklist }), true);   // token "page"/"size"
+  });
+  it('keeps a param with no blacklisted token (a real reference)', () => {
+    assert.equal(paramNameBlacklisted({ name: 'id', blacklist }), false);
+    assert.equal(paramNameBlacklisted({ name: 'lessonId', blacklist }), false);
+    assert.equal(paramNameBlacklisted({ name: 'courseId', blacklist }), false);
+  });
+});
 
 // CandidateGenerator is the pure (no browser, no network) half of the analysis, so these run in
 // milliseconds against real SQLite stores — the point of extracting it out of AnalysisPipeline, whose

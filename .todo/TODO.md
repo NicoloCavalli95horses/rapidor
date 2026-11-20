@@ -1,3 +1,11 @@
+Correzioni fatte (tutte typecheck pulito)
+Pre-check auth ora ri-gioca gli header catturati (niente più falso "expired").
+Protezione data-loss: DEBUG_NO_CRAWLING non wipa più il dominio (main.ts) — il login manuale non distrugge mai i dati.
+Messaggio pre-check corretto: se il token catturato scade, serve ri-crawlare (ri-loggarsi nel browser non aggiorna gli header catturati).
+
+Da chiedere: cosa server rifare il login se tanto gli header non sono aggiornati? devo rifare per forza l'esplorazione ogni volta che mi scade il token? spero di no!
+
+
 Preindexing:
 
 Indagando il perché dei 77 match ho trovato la causa a monte, in preindex.ts:45-50:

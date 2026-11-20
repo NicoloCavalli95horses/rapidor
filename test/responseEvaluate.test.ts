@@ -1,6 +1,28 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse } from '../src/analysis/responseEvaluate';
+
+describe('isEmptyJsonResponse', () => {
+  it('true for empty object/array and all-empty wrappers (the ejoy search-new FP)', () => {
+    assert.equal(isEmptyJsonResponse({ body: '{}' }), true);
+    assert.equal(isEmptyJsonResponse({ body: '[]' }), true);
+    assert.equal(isEmptyJsonResponse({ body: '{"data":[]}' }), true);
+    assert.equal(isEmptyJsonResponse({ body: '{"data":{"data":[],"total":0}}' }), true);
+    assert.equal(isEmptyJsonResponse({ body: '{"success":true,"items":[]}' }), true);
+  });
+
+  it('false when there is real content (a record, a non-empty array, a non-metadata scalar)', () => {
+    assert.equal(isEmptyJsonResponse({ body: '{"data":{"data":[{"id":153}],"total":1}}' }), false);
+    assert.equal(isEmptyJsonResponse({ body: '{"id":153}' }), false);
+    assert.equal(isEmptyJsonResponse({ body: '{"title":"7.3.1"}' }), false);
+    assert.equal(isEmptyJsonResponse({ body: '[1,2,3]' }), false);
+  });
+
+  it('false for a non-JSON body (drop only on positive evidence of emptiness)', () => {
+    assert.equal(isEmptyJsonResponse({ body: '<html>not found</html>' }), false);
+    assert.equal(isEmptyJsonResponse({ body: '' }), false);
+  });
+});
 
 describe('checkIntSimilarity', () => {
   it('true when both are zero, false when only one is', () => {

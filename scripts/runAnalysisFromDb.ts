@@ -30,7 +30,8 @@ import { AblationVulnerabilityStore } from '../src/db/AblationVulnerabilityStore
 import { AblationStatsStore } from '../src/db/AblationStatsStore';
 import { installParamUsageTracking } from '../src/browser/paramUsageTracker';
 import { extensionLaunchArgs } from '../src/browser/ExtensionCalls';
-import { checkAuthFresh } from '../src/analysis/authFreshness';
+import { checkEntryPointFresh } from '../src/analysis/authFreshness';
+import { SessionAuthStore } from '../src/db/SessionAuthStore';
 import { config } from '../src/config';
 
 log.setLevel(process.env.LOG_LEVEL?.toLowerCase() === 'debug' ? LogLevel.DEBUG : LogLevel.INFO);
@@ -61,6 +62,12 @@ const statsStore = new AnalysisStatsStore({ db, clearOnStart: false });
 const forgedRequestStore = new ForgedRequestStore({ db, clearOnStart: false });
 const classifier = new AuthzClassifier(new AuthzClassificationStore({ db, clearOnStart: false }));
 
+// Refreshed auth material from a prior `refreshAuth.ts` re-login (undefined on the common path, where
+// the captured session never expired). Present => the forge overlays it on every request (strip stale
+// cookie / fresh bearer), so the analysis runs against the re-authenticated session, not a re-crawl.
+const sessionAuthStore = new SessionAuthStore({ db });
+const authOverride = sessionAuthStore.get({ site: SITE });
+
 const pipeline = new AnalysisPipeline({
   httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, statsStore,
   forgedRequestStore, classifier,
@@ -79,6 +86,7 @@ const pipeline = new AnalysisPipeline({
     paramBlacklist: config.analysis.paramBlacklist,
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
     overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
+    authOverride,
   },
 });
 
@@ -98,18 +106,20 @@ const page = context.pages()[0] ?? (await context.newPage());
 await installParamUsageTracking(page);   // init script: must be in place before the first navigation (client-routing probe reads __accessedParams)
 await page.goto(START_URL, { waitUntil: 'load', timeout: 30_000 }).catch((e) => console.warn('initial goto failed (continuing):', (e as Error).message));
 
-// Auth freshness pre-check: a run on an EXPIRED token is meaningless — every forge is denied (401/403),
-// so nothing is flagged, or (worse) the URL-keyed forge cache serves stale authenticated responses from
-// an earlier session and flags findings you cannot reproduce. Warn loudly and abort so the profile is
-// re-authenticated first. The end-of-crawl analysis never needs this (it runs in the just-authenticated
-// crawl session); only this standalone re-runner can meet a token that expired since capture.
-const auth = await checkAuthFresh({ page, events: httpEventStore.listMetaBySite(SITE) });
-if (auth.expired) {
-  console.error(`\n⚠️  AUTH TOKEN EXPIRED — ${auth.denied}/${auth.probed} previously-authenticated endpoints now return 401/403 (e.g. ${auth.sampleUrl}).`);
-  console.error(`    Re-authenticate in the browser profile before analysing:  ${config.userDataDir}`);
-  console.error('    (DEBUG_NO_CRAWLING=true HEADLESS=false npm start  opens that profile for a manual login.)');
-  console.error(`    The forge cache is keyed by URL, so after re-authenticating it is still valid to reuse; clear it only to force fresh forges:`);
-  console.error(`        sqlite3 ${DB_PATH} "DELETE FROM forged_requests WHERE site='${SITE}'"\n`);
+// Entry-point auth-freshness gate: decide ONCE, on a resource the user is unambiguously entitled to (the
+// crawl's own entry point), whether the session is still live — never from a per-forge 403 (ambiguous: a
+// 403 on a forged paid resource is the CORRECT "no leak" answer, so using it would risk a re-auth loop).
+// Signal = the entry point's live React fingerprint vs the one captured at crawl time (checkEntryPointFresh).
+// Expired => tell the user to re-authenticate with refreshAuth.ts (which re-points the forge at the fresh
+// session), not re-crawl. The end-of-crawl analysis never needs this (it runs in the just-authenticated
+// crawl session); only this standalone re-runner can meet a session that expired since capture.
+const gate = await checkEntryPointFresh({ page, reactStateStore, site: SITE, entryUrl: START_URL, maxWaitMs: config.analysis.clientRoutingProbe.maxWaitMs });
+console.log(`  auth gate: ${gate.fresh ? 'FRESH' : 'EXPIRED'} — ${gate.reason} (seed fingerprints=${gate.seedCount})${authOverride ? ' | using refreshed credentials (session_auth)' : ''}`);
+if (!gate.fresh) {
+  console.error(`\n⚠️  SESSION EXPIRED — ${START_URL} did not render the captured authenticated state (its live React fingerprint differs from every state captured there at crawl time — the profile was redirected to login).`);
+  console.error('    Re-authenticate and capture fresh credentials, then re-run this analysis (no re-crawl needed):');
+  console.error(`        npx tsx scripts/refreshAuth.ts ${START_URL}`);
+  console.error('    (opens the profile headed for a manual login, then stores the fresh cookies/token so the forge uses them).\n');
   await context.close();
   process.exit(2);
 }

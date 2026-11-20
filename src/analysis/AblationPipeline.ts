@@ -10,7 +10,7 @@ import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
-import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs } from './responseEvaluate';
+import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
 import { formatDuration } from '../core/duration';
 import { normalizeUrl } from './findings';
@@ -240,6 +240,13 @@ export class AblationPipeline {
     // reached the resource, so it is never a leak — even if two error responses look similar.
     if (forged.status >= 400) {
       log.debug(`AblationPipeline: candidate rejected (forged response status ${forged.status}: denied/error) — ${event.method} ${event.url} -> ${url}`);
+      return;
+    }
+    // Empty-data guard: a forge that returns no actual data (`{}`, `[]`, or an all-empty wrapper like
+    // ejoy's `search-new` -> {"data":{"data":[],"total":0}} for a mutated param) leaked nothing, however
+    // much it differs from the reference — not a finding.
+    if (isEmptyJsonResponse({ body: forged.body })) {
+      log.debug(`AblationPipeline: candidate rejected (forged response carries no data: empty object/array) — ${event.method} ${event.url} -> ${url}`);
       return;
     }
 
