@@ -33,6 +33,7 @@ export interface AnalysisPipelineOptions {
   segmentBlacklist: string[]; // path-segment values never mutated: app-shell/section prefixes, not identifiers (see config.analysis.segmentBlacklist)
   paramBlacklist: string[]; // query-param NAMES never mutated: pagination/sorting controls, not object references (see config.analysis.paramBlacklist)
   clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
+  clientRoutingEscalationAttempts: number; // total stage-3 attempts (1 = no retry); a retry recovers a flaky false-negative (see config.analysis.clientRoutingEscalationAttempts)
   clientRoutingPathCoherence: boolean; // retry a rejected high-suspicion path candidate once with its query stripped, for routes that infer params from the path (see config.analysis.clientRoutingPathCoherence)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
@@ -124,6 +125,7 @@ export class AnalysisPipeline {
         clientRoutingProbe: deps.options.clientRoutingProbe,
         notFoundDomMaxDiff: deps.options.notFoundDomMaxDiff,
         clientRoutingFullNavigationEscalation: deps.options.clientRoutingFullNavigationEscalation,
+        clientRoutingEscalationAttempts: deps.options.clientRoutingEscalationAttempts,
       },
     });
     this.candidateEvaluator = new CandidateEvaluator({

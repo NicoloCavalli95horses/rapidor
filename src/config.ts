@@ -149,6 +149,13 @@ export interface CrawlConfig {
     // gate's safety on the real load (a redirect-away or a failed capture is a REJECT). Kill switch for
     // regression bisection; leave on. See AnalysisPipeline.clientSideConfirmed / confirmByFullNavigation.
     clientRoutingFullNavigationEscalation: boolean;
+    // total attempts (1 = no retry) for the STAGE-3 full-navigation escalation, the costly real-load
+    // confirmation that decides for ejoy-class Next.js routes. Unlike the pushState probe it was single-
+    // shot, so a one-off incomplete render (a fetch-gated lesson not finished loading) produced a false
+    // NEGATIVE, flipping which paid siblings surface run-to-run. A retry on a FLAKY reject (capture
+    // failed / inert / not-found — never an accept, never a deterministic redirect-away) recovers them.
+    // Can only recover a finding, never lose one. Lower to 1 on a huge site if the 45-min budget is tight.
+    clientRoutingEscalationAttempts: number;
     // client-routing PATH coherence: a path candidate keeps the reference URL's query (spliceSegment
     // re-attaches it), so when the swapped identity is DUPLICATED in the url (ejoy's lesson
     // /courses/37/314/<id>?path=.../lessons/<id>/<hash>.json) the query copy goes stale. When on, the query
@@ -184,7 +191,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   startUrl: process.env.START_URL || 'https://example.com/',
   // START_URLS="https://a.com,https://b.com" (comma and/or newline separated, quoted in .env if on several lines), or fill the array here: replaces startUrl in `npm start`
   startUrls: (process.env.START_URLS || '').split(/[\s,]+/).filter(Boolean),
-  maxDepth: process.env.MAX_DEPTH ? Number(process.env.MAX_DEPTH) : 3, // MAX_DEPTH=2 for a quick, shallow debug run
+  maxDepth: process.env.MAX_DEPTH ? Number(process.env.MAX_DEPTH) : 4,
   // on by default (big sites waste the budget on nav otherwise)
   randomizeClickOrder: true,
   maxStates: 500,
@@ -212,7 +219,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   // case-insensitive substring match on text, aria-label and href
   blocklist: ['logout', 'log out', 'sign out', 'quit', 'delete'],
   // skip clickables inside site chrome so exploration focuses on the main content; set to [] to explore everything
-  ignoreClickablesWithin: [], //['nav', 'header', 'footer'],
+  ignoreClickablesWithin: ['nav', 'footer'],
   // close blocking modals (Escape, then an explicit close control) before capturing a state
   dismissOverlays: true,
   // single SQLite file every store
@@ -258,6 +265,8 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,
+    // 2 = one retry of the stage-3 escalation on a flaky reject (reduces ejoy's run-to-run sibling flapping).
+    clientRoutingEscalationAttempts: 2,
     clientRoutingPathCoherence: true,
     overwriteFindingsPerSite: true,
     // AUTH_HEADERS=x-auth-token,authorization to override from the shell
@@ -284,7 +293,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   },
   // browser extension details: this is launched with the Chromium browser
   extension: {
-    path: 'browser_extension/react-instrumented', // path to th extension (unpacked)
+    path: 'browser_extension/react-instrumented', // path to the extension (unpacked)
     calls: [
       // [called on start] clears the extension's shared IndexedDB once, so a run on a persistent profile starts clean
       { fn: '__RAPIDOR__reset', when: 'start' },

@@ -2,6 +2,19 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-20 17:15 — design: explore ONE deep target page; retry the stage-3 client-routing escalation
+
+Two coupled changes, both driven by how noisy these language-learning SPAs are to crawl neutrally.
+
+**Design shift — a single, manually-chosen target page explored deeply, not a wide shallow sweep.** A neutral seed wastes the 45-min budget wandering chrome/sections and never reaches the deep lesson/exercise flow where the IDORs live (busuu's `objective_<uuid>` sits ~3 clicks below the timeline). New defaults encode the workflow:
+- `maxDepth` **3 → 4** (headroom for a lesson→start→exercise flow, with margin for an intermediate step).
+- `ignoreClickablesWithin` default **`['nav','footer']`** (was `[]`): keep the crawler on the target page by not clicking navigation/footer chrome. **`header` is deliberately NOT included** — busuu renders its lesson cards (the real targets) inside a `<header>`, so ignoring it would make them unreachable (the same header-is-content trap as the domZone filter). This is what the earlier busuu run hit: `header` was still blacklisted, the lesson cards were never clicked, and the crawl stayed on one URL.
+- Combines with `randomizeClickOrder` (already on) so the deep exploration samples the whole clickable set.
+
+**Stage-3 client-routing retry** (`config.analysis.clientRoutingEscalationAttempts`, default **2**). The strict stage-3 full-navigation escalation (`confirmByFullNavigation`) — the costly real-load confirmation that decides for ejoy-class Next.js routes — was **single-shot**, while the cheap pushState probe already retried 3×. A single real load of a fetch-gated route (ejoy's lessons fetch their content by id over XHR) can snapshot an *incomplete* render and read as a false NEGATIVE, flipping which paid siblings surface run-to-run (ejoy's 4 locked lessons 1032/1033/1034/1035: 2 found per run, but a different 2). Now retried on a **flaky** reject only — capture failed / inert / not-found; an ACCEPT (null) or a DETERMINISTIC redirect-away ends immediately (re-navigating can't change those). Split `confirmByFullNavigation` into a retry loop + `confirmByFullNavigationOnce`; the redirect-away reason is now a shared `REDIRECT_AWAY_PREFIX` constant. **Can only ever recover a finding, never lose one** (a genuine inert/not-found still rejects on the last attempt). Cost is bounded: the retry fires only on a high-suspicion candidate that reached stage 3 and got a negative — a small set — and the knob can be lowered to 1 on a huge site. Threaded through `AnalysisPipelineOptions` / `ClientRoutingVerifierOptions` / the three scripts.
+
+Decision-logic change (owner-run `recheckFindings` on the 4 reference sites owed). Typecheck clean; `clientRouting` + `AnalysisPipeline` tests green.
+
 ## 2026-11-20 16:30 — refactor: decompose candidateEvaluator (525 → 499 lines), behavior-preserving
 
 `candidateEvaluator.ts` had crossed the 500-line smell threshold and `evaluateHttpCandidate` was a ~160-line method; the record/log/reproduction tail was duplicated verbatim across all three `evaluate*` paths. Pure structure change — no decision logic touched (the user runs `recheckFindings` separately).

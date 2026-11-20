@@ -20,6 +20,13 @@ const INERT = Symbol('inert');
 /** The rejection reason a content guard returns for an inert render (the swapped value changed nothing). */
 const INERT_CONTENT_REASON = 'renders the same page as the reference (the swapped value has no effect on the DOM content)';
 
+/**
+ * Prefix of the stage-3 reject for a DETERMINISTIC redirect-away (the app moved off the candidate route).
+ * Unlike a flaky capture/content reject, retrying it cannot change the outcome, so the escalation retry
+ * loop returns it immediately instead of re-navigating.
+ */
+const REDIRECT_AWAY_PREFIX = 'full navigation redirected away';
+
 /** True if the app answered the candidate's own fetch with a success status: trust it, skip the visual guard. */
 function networkConfirmsCandidate(probeRequests: { status: number }[]): boolean {
   return probeRequests.some((r) => r.status >= 200 && r.status < 300);
@@ -44,6 +51,7 @@ export interface ClientRoutingVerifierOptions {
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
   notFoundDomMaxDiff: number;
   clientRoutingFullNavigationEscalation: boolean;
+  clientRoutingEscalationAttempts: number;   // total stage-3 attempts (1 = no retry); see config
 }
 
 export interface ClientRoutingVerifierDeps {
@@ -258,13 +266,32 @@ export class ClientRoutingVerifier {
    *  - otherwise the SHARED content guard decides (inert -> reject; distinct and not the not-found page ->
    *    accept), identical to every other stage.
    */
-  private async confirmByFullNavigation({ pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs }: {
+  private async confirmByFullNavigation(args: {
+    pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; corroborated: boolean; settleMs: number;
+  }): Promise<string | null> {
+    // Retry the escalation on a FLAKY reject: a single real load of a fetch-gated route (ejoy's lessons
+    // fetch their content by id over XHR) can snapshot an incomplete render and read as a false NEGATIVE,
+    // flipping which paid siblings surface run-to-run. An ACCEPT (null) ends immediately, and so does a
+    // DETERMINISTIC redirect-away (re-navigating can't change where the app sends us). Only ever recovers
+    // a finding — a genuine inert/not-found still rejects on the last attempt. See config.
+    const attempts = Math.max(1, this.deps.options.clientRoutingEscalationAttempts);
+    let reason: string | null = null;
+    for (let i = 0; i < attempts; i++) {
+      reason = await this.confirmByFullNavigationOnce(args);
+      if (reason === null || reason.startsWith(REDIRECT_AWAY_PREFIX)) return reason;
+      if (i < attempts - 1) await sleep(CLIENT_ROUTING_RETRY_DELAY_MS);
+    }
+    return reason;
+  }
+
+  /** One stage-3 full-navigation pass: capture, redirect-away guard, shared content guard. See confirmByFullNavigation. */
+  private async confirmByFullNavigationOnce({ pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, settleMs }: {
     pageUrl: string; candidateUrl: string; candidateValue: string; referenceValue: string; corroborated: boolean; settleMs: number;
   }): Promise<string | null> {
     const renders = await this.deps.pagePool.withPage({ pageUrl, run: (page) => this.captureAroundCandidate({ page, pageUrl, candidateUrl, navigate: true, settleMs }) });
     if (!renders) return 'full-navigation capture failed (strict escalation needs a decisive render)';
     if (renders.candidateFinalUrl && !sameRoutePath(renders.candidateFinalUrl, candidateUrl)) {
-      return `full navigation redirected away from the candidate route (${safePath(renders.candidateFinalUrl)} != ${safePath(candidateUrl)})`;
+      return `${REDIRECT_AWAY_PREFIX} from the candidate route (${safePath(renders.candidateFinalUrl)} != ${safePath(candidateUrl)})`;
     }
     const verdict = await this.judgeRenderedContent({ renders, pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate: true, settleMs });
     return verdict === INERT ? INERT_CONTENT_REASON : verdict;

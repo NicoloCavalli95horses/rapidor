@@ -59,6 +59,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         segmentBlacklist: [],
         paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
+        clientRoutingEscalationAttempts: 2,
         clientRoutingPathCoherence: true,
       },
     });
@@ -240,6 +241,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         segmentBlacklist: [],
         paramBlacklist: [],
         clientRoutingFullNavigationEscalation: true,
+        clientRoutingEscalationAttempts: 2,
         clientRoutingPathCoherence: true,
       },
     });

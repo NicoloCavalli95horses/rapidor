@@ -85,6 +85,7 @@ const pipeline = new AnalysisPipeline({
     segmentBlacklist: config.analysis.segmentBlacklist,
     paramBlacklist: config.analysis.paramBlacklist,
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
+    clientRoutingEscalationAttempts: config.analysis.clientRoutingEscalationAttempts,
     clientRoutingPathCoherence: config.analysis.clientRoutingPathCoherence,
     overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
     authOverride,

@@ -110,6 +110,7 @@ export function buildExplorer(
       segmentBlacklist: cfg.analysis.segmentBlacklist,
       paramBlacklist: cfg.analysis.paramBlacklist,
       clientRoutingFullNavigationEscalation: cfg.analysis.clientRoutingFullNavigationEscalation,
+      clientRoutingEscalationAttempts: cfg.analysis.clientRoutingEscalationAttempts,
       clientRoutingPathCoherence: cfg.analysis.clientRoutingPathCoherence,
       overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
     },
