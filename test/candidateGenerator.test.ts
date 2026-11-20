@@ -83,7 +83,7 @@ describe('CandidateGenerator', () => {
     const url = `https://${SITE}/users/101/profile`;
     const gen = newGenerator({ graph: graphWith({ a: '101', b: '102' }), url });
 
-    const { items } = gen.findUrlCandidates({ url });
+    const { items } = gen.findUrlCandidates({ url, site: SITE });
 
     assert.deepEqual(items.map((i) => i.candidate.candidateValue), ['102']);
     assert.equal(items[0].segment.value, '101');
@@ -93,7 +93,7 @@ describe('CandidateGenerator', () => {
     const url = `https://${SITE}/app/101`;
     const gen = newGenerator({ graph: graphWith({ a: 'app', b: 'speak', key: 'name' }), url, segmentBlacklist: ['app'] });
 
-    const { items } = gen.findUrlCandidates({ url });
+    const { items } = gen.findUrlCandidates({ url, site: SITE });
 
     // `app` is in the preindex and would otherwise be swapped for its sibling `speak`.
     assert.deepEqual(items, []);
@@ -103,7 +103,7 @@ describe('CandidateGenerator', () => {
     const url = `https://${SITE}/speak/101`;
     const gen = newGenerator({ graph: graphWith({ a: 'speak', b: 'app', key: 'name' }), url, segmentBlacklist: ['app'] });
 
-    const { items } = gen.findUrlCandidates({ url });
+    const { items } = gen.findUrlCandidates({ url, site: SITE });
 
     // the source segment `speak` is allowed, but its only replacement value is blacklisted
     assert.deepEqual(items, []);
@@ -116,17 +116,17 @@ describe('CandidateGenerator', () => {
 
     // the candidate exists and IS proposed without the blacklist — so the assertion below is meaningful
     assert.deepEqual(
-      newGenerator({ graph, url }).findUrlCandidates({ url }).items.map((i) => i.candidate.candidateValue),
+      newGenerator({ graph, url }).findUrlCandidates({ url, site: SITE }).items.map((i) => i.candidate.candidateValue),
       ['12538'],
     );
-    assert.deepEqual(newGenerator({ graph, url, paramBlacklist: ['limit'] }).findUrlCandidates({ url }).items, []);
+    assert.deepEqual(newGenerator({ graph, url, paramBlacklist: ['limit'] }).findUrlCandidates({ url, site: SITE }).items, []);
   });
 
   it('gates the query param by NAME only — a path segment of the same name is still mutated', () => {
     const url = `https://${SITE}/limit/50`;
     const gen = newGenerator({ graph: graphWith({ a: '50', b: '60' }), url, paramBlacklist: ['limit'] });
 
-    const { items } = gen.findUrlCandidates({ url });
+    const { items } = gen.findUrlCandidates({ url, site: SITE });
 
     assert.deepEqual(items.map((i) => i.candidate.candidateValue), ['60']);
   });
@@ -135,7 +135,7 @@ describe('CandidateGenerator', () => {
     const url = `https://${SITE}/users/101/profile`;
     const gen = newGenerator({ graph: graphWith({ a: '101', b: '102' }), url, maxSegmentMatches: 0 });
 
-    const { items, matches } = gen.findUrlCandidates({ url });
+    const { items, matches } = gen.findUrlCandidates({ url, site: SITE });
 
     assert.deepEqual(items, []);
     assert.equal(matches, 0, 'an over-cap segment is dropped before any match is fetched');
@@ -145,9 +145,9 @@ describe('CandidateGenerator', () => {
     const url = `https://${SITE}/users/101/profile`;
     const gen = newGenerator({ graph: graphWith({ a: '101', b: '102' }), url });
 
-    const before = gen.findUrlCandidates({ url }).items.map((i) => i.candidate.candidateValue);
+    const before = gen.findUrlCandidates({ url, site: SITE }).items.map((i) => i.candidate.candidateValue);
     gen.reset();
-    const after = gen.findUrlCandidates({ url }).items.map((i) => i.candidate.candidateValue);
+    const after = gen.findUrlCandidates({ url, site: SITE }).items.map((i) => i.candidate.candidateValue);
 
     assert.deepEqual(after, before);
     assert.deepEqual(after, ['102']);

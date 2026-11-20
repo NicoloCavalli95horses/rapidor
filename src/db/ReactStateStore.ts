@@ -38,6 +38,9 @@ export class ReactStateStore {
         UNIQUE(url, fingerprint)
       )
     `);
+    // Indexed lookup by site: PreindexedValueStore scopes its value queries with
+    // `state_id IN (SELECT id FROM react_states WHERE site = ?)`, a hot path during candidate generation.
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_react_states_site ON react_states(site)');
     if (clearOnStart) this.db.exec('DELETE FROM react_states');
   }
 

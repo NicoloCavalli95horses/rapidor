@@ -66,21 +66,33 @@ export class PreindexedValueStore {
     replace();
   }
 
-  findByValue(value: string): PreindexMatch[] {
-    const rows = this.db.prepare('SELECT state_id, node_id, path, depth FROM preindexed_values WHERE value = ?').all(value) as
-      { state_id: number; node_id: string; path: string; depth: number }[];
+  /**
+   * Preindexed nodes carrying this exact value, SCOPED to one site. The scope is essential: the DB holds
+   * many sites at once (`db.overwriteExistingDomain` wipes only the domain being re-crawled, never the
+   * others), and preindexed_values has no site column, so an unscoped `value = ?` returns another site's
+   * nodes too — celpipsimulator's `/blog?_rsc=` segment `blog` matched babbel's footer `blog` link and
+   * forged celpipsimulator's `/privacy` from babbel's sibling, a cross-site false positive. We scope via
+   * the state's own site (state_id -> react_states.site, indexed), not a denormalized column, so it is
+   * correct on an existing DB with no migration.
+   */
+  findByValue({ value, site }: { value: string; site: string }): PreindexMatch[] {
+    const rows = this.db.prepare(
+      'SELECT state_id, node_id, path, depth FROM preindexed_values WHERE value = ? AND state_id IN (SELECT id FROM react_states WHERE site = ?)',
+    ).all(value, site) as { state_id: number; node_id: string; path: string; depth: number }[];
     return rows.map((r) => ({ stateId: r.state_id, nodeId: r.node_id, path: JSON.parse(r.path), depth: r.depth }));
   }
 
   /**
-   * How many preindexed nodes carry this exact value (uses idx_preindexed_values_value, so it never
-   * materializes the rows). Lets a caller cheaply tell a user-scoped identifier — which appears a
+   * How many preindexed nodes of THIS SITE carry this exact value (uses idx_preindexed_values_value +
+   * the react_states site index). Lets a caller cheaply tell a user-scoped identifier — which appears a
    * bounded handful of times (an objective/exercise id: tens) — apart from a generic keyword that
    * happens to also be a URL segment (a DOM tag/role/category word like "svg"/"grammar": thousands),
-   * before paying to fetch and diff every match.
+   * before paying to fetch and diff every match. Scoped for the same reason as findByValue.
    */
-  countByValue(value: string): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM preindexed_values WHERE value = ?').get(value) as { n: number }).n;
+  countByValue({ value, site }: { value: string; site: string }): number {
+    return (this.db.prepare(
+      'SELECT COUNT(*) AS n FROM preindexed_values WHERE value = ? AND state_id IN (SELECT id FROM react_states WHERE site = ?)',
+    ).get(value, site) as { n: number }).n;
   }
 
   count(): number {

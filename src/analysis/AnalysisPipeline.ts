@@ -202,7 +202,7 @@ export class AnalysisPipeline {
       // resource) — unsafe and unethical for an authz probe, which must only READ. Non-GET events are
       // skipped here; forgeRequest also refuses them as a hard backstop.
       if (event.method.toUpperCase() !== 'GET') continue;
-      const found = this.candidateGenerator.findUrlCandidates({ url: event.url });
+      const found = this.candidateGenerator.findUrlCandidates({ url: event.url, site });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
       chromeZoneSkipped += found.chromeSkipped;
@@ -227,7 +227,7 @@ export class AnalysisPipeline {
     // replayable offline, so the offline demo skips this whole phase and stays HTTP-only (see
     // AnalysisPipelineOptions.offline and demo/README.md).
     for (const pageUrl of options.offline ? [] : pageUrls) {
-      const found = this.candidateGenerator.findUrlCandidates({ url: pageUrl });
+      const found = this.candidateGenerator.findUrlCandidates({ url: pageUrl, site });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
       chromeZoneSkipped += found.chromeSkipped;

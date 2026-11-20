@@ -90,8 +90,12 @@ export class CandidateGenerator {
     this.zoneDepthCache.clear();
   }
 
-  /** Runs the preindex -> matchFinder steps for one URL (an http_event's or a crawled page's). */
-  findUrlCandidates({ url }: { url: string }): { segments: number; matches: number; chromeSkipped: number; items: UrlCandidate[] } {
+  /**
+   * Runs the preindex -> matchFinder steps for one URL (an http_event's or a crawled page's). `site` scopes
+   * the preindex lookups to the site under analysis — the DB holds many sites at once, and an unscoped
+   * lookup matches another site's nodes (a cross-site false positive, see PreindexedValueStore.findByValue).
+   */
+  findUrlCandidates({ url, site }: { url: string; site: string }): { segments: number; matches: number; chromeSkipped: number; items: UrlCandidate[] } {
     const { preindexStore, maxSegmentMatches, segmentBlacklist, paramBlacklist } = this.deps;
     let segments = 0;
     let matches = 0;
@@ -124,8 +128,8 @@ export class CandidateGenerator {
       // shares the word) is what made candidate generation explode. Identifiers appear a bounded
       // handful of times, well under this cap, so this skips only the noise. countByValue never
       // materializes the rows, so an over-cap segment costs a single COUNT, not a huge fetch.
-      if (preindexStore.countByValue(segment.value) > maxSegmentMatches) continue;
-      for (const match of preindexStore.findByValue(segment.value)) {
+      if (preindexStore.countByValue({ value: segment.value, site }) > maxSegmentMatches) continue;
+      for (const match of preindexStore.findByValue({ value: segment.value, site })) {
         matches++;
         const graph = this.getGraph(match.stateId);
         if (!graph) continue;
