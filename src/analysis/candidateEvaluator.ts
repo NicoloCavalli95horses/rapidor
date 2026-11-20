@@ -7,10 +7,10 @@ import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { reactContentKey } from './reactFingerprint';
 import { findCandidates } from './matchFinder';
 import { type SegmentCandidate } from './segments';
-import { forgeRequestCached } from './requestForge';
+import { forgeRequestCached, type ResponseLike } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
@@ -198,6 +198,116 @@ export class CandidateEvaluator {
     return authz;
   }
 
+  /**
+   * The HTTP-only content guards for a genuine HTTP finding's forged response, run before it is recorded.
+   * Returns true to DROP the candidate (logging why), false to keep it. Synchronous, and the only state it
+   * touches is adding the forged response's content key to recordedForgedBodyKeys on a keep — so, with no
+   * await between this call and the record, that check-and-add stays atomic under concurrent evaluation.
+   * Never run for a client-routing finding: it carries no server-response evidence to key on.
+   */
+  private httpContentGuardReject({ forged, original, context }: {
+    forged: ResponseLike; original: ResponseLike; context: string;
+  }): boolean {
+    // Server REJECTED/errored (4xx/5xx, notably 401/403 "access denied"): the resource was never reached,
+    // so never a leak. Fires when the ORIGINAL also errored (two similar error bodies would look like a
+    // match) and keeps an expired-token run honest (every forge 401/403 → nothing flagged, no stale 200).
+    if (forged.status >= 400) {
+      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response status ${forged.status}: access denied / error, not a leak) — ${context}`);
+      return true;
+    }
+    // No actual data (`{}`, `[]`, or an all-empty wrapper like {"data":{"data":[],"total":0}}): leaked nothing.
+    if (isEmptyJsonResponse({ body: forged.body })) {
+      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response carries no data: empty object/array) — ${context}`);
+      return true;
+    }
+    // Error envelope despite 200 (`{"error":true}`, a top-level `error` string/object, `success:false`,
+    // `status:"error"`): reached nothing even with real-looking fields beside the flag (apps like Mondly).
+    if (isErrorEnvelopeResponse({ body: forged.body })) {
+      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response is an error envelope despite 200) — ${context}`);
+      return true;
+    }
+    const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
+    // The reference event's OWN response is excluded from the history check: a forge returning the
+    // original's body is the "server ignored the value" case, not "accessible at some OTHER url".
+    const referenceKey = canonicalResponseKey({ status: original.status, body: original.body });
+    if (forgedKey !== undefined) {
+      // (1) History: the forged data is a response the crawler already collected at a DIFFERENT url —
+      // the user can already reach it, so not a leak.
+      if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${context}`);
+        return true;
+      }
+      // (2) Dedup: an earlier candidate this run produced a byte/JSON-identical forged response (the same
+      // leak reached from another sibling) — record it once, drop the duplicate.
+      if (this.recordedForgedBodyKeys.has(forgedKey)) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (duplicate forged response of an already-recorded finding) — ${context}`);
+        return true;
+      }
+      this.recordedForgedBodyKeys.add(forgedKey);
+    }
+    return false;
+  }
+
+  /**
+   * The shared tail of every evaluator once a candidate is CONFIRMED: build the finding id (always from
+   * `method` + the recorded `candidateUrl`, the url that leaked), record it (deduped by the store), log it
+   * once per run, and — only on a newly inserted row — write the reproduction script. Centralises the
+   * record/log/repro contract the three evaluate* paths used to repeat verbatim.
+   */
+  private recordFinding({ site, method, referenceUrl, candidateUrl, candidate, motivation, detectionMethod, responseSimilarity, authz, logMessage, reproduction }: {
+    site: string; method: string; referenceUrl: string; candidateUrl: string;
+    candidate: ReturnType<typeof findCandidates>[number]; motivation: string;
+    detectionMethod: 'http' | 'client-routing'; responseSimilarity: ResponseSimilarity | null;
+    authz: AuthzAssessment; logMessage: string;
+    reproduction: { referenceUrl: string; candidateUrl: string; kind: ReproductionKind };
+  }): void {
+    const id = vulnerabilityId({ candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId, method, url: candidateUrl });
+    const inserted = this.deps.vulnerabilityStore.record({
+      id, site, referenceUrl, candidateUrl, method,
+      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
+      motivation, detectionMethod, responseSimilarity, authzDiff: authz,
+    });
+    this.logConfirmedFinding({ id, inserted, message: logMessage });
+    if (inserted) {
+      this.writeReproduction({
+        id, site, referenceUrl: reproduction.referenceUrl, candidateUrl: reproduction.candidateUrl,
+        motivation, differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
+        kind: reproduction.kind,
+      });
+    }
+  }
+
+  /**
+   * The client-routing fallback for an HTTP candidate the forge did NOT confirm: for a QUERY-PARAM
+   * candidate only, check whether the SPA honours the value client-side anyway (pushState/popstate probe
+   * against event.pageUrl's React tree, with its own content-novelty gate). Returns 'client-routing' when
+   * it confirms, or null to DROP. A path-segment candidate drops here — `url` is the forged API endpoint,
+   * with no sound targetUrl to replay; path segments get the fallback via evaluateClientRoutingPathCandidate.
+   */
+  private async clientRoutingQueryFallback({ event, candidate, segment }: {
+    event: ReturnType<HttpEventStore['listBySite']>[number];
+    candidate: ReturnType<typeof findCandidates>[number];
+    segment: SegmentCandidate;
+  }): Promise<'client-routing' | null> {
+    if (!segment.paramName) return null;
+    const paramName = segment.paramName;
+    const clientCandidateUrl = withParam({ url: event.pageUrl, name: paramName, value: candidate.candidateValue });
+    // highSuspicion: the authz gate already passed, licensing the verifier's stage-3 full-navigation
+    // escalation if the cheap pushState stage is inconclusive.
+    const reason = await this.deps.clientRoutingVerifier.verifyQueryParam({
+      pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, paramName,
+      candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
+    });
+    if (reason) {
+      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${event.pageUrl} ?${paramName}=${candidate.candidateValue}`);
+      return null;
+    }
+    // Content novelty/uniqueness gate (navigates the client route, not the forge url): drop a state the
+    // crawler already collected, or a duplicate of an earlier finding this run.
+    if (!await this.keepClientRoutingByContent({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, context: `${event.pageUrl} ?${paramName}=${candidate.candidateValue}` })) return null;
+    return 'client-routing';
+  }
+
   async evaluateHttpCandidate({ page, site, event, url, candidate, segment }: {
     page?: Page; site: string;   // page is absent in offline/replay mode (forge is cache-only, see below)
     event: ReturnType<HttpEventStore['listBySite']>[number];
@@ -205,7 +315,7 @@ export class CandidateEvaluator {
     candidate: ReturnType<typeof findCandidates>[number];
     segment: SegmentCandidate;
   }): Promise<void> {
-    const { vulnerabilityStore, forgedRequestStore, options } = this.deps;
+    const { forgedRequestStore, options } = this.deps;
 
     // CHEAP FIRST — the pure authz gate before any live forged request (see authzGate). Not authz-
     // relevant → no forge, no client-routing probe, nothing. `differences` below is the diff it computed.
@@ -242,117 +352,31 @@ export class CandidateEvaluator {
 
     let detectionMethod: 'http' | 'client-routing' = 'http';
     if (!similarity.areSimilar || serverIgnoredValue) {
-      // Offline/replay: the client-routing fallback is a live probe and is not available, so a
-      // candidate the forge did not confirm is simply dropped. The demo therefore reports only the
-      // forge-confirmed (pure HTTP) findings — exactly the deterministic subset (see demo/README.md).
+      // Offline/replay: the client-routing fallback is a live probe and is not available, so a candidate
+      // the forge did not confirm is simply dropped (the demo reports only the forge-confirmed HTTP subset).
       if (options.offline) return;
-      // The forged request itself didn't look like it leaked anything (or outright failed) — for a
-      // query-param candidate, check whether the SPA's own client-side routing honors it anyway,
-      // independently of the server response (RAPIDOR's testClientSideQueryParamsUsage fallback).
-      // By the time analysis runs (end of exploration), `page` may well be sitting on a different
-      // state than the one this event was captured from, so it is navigated back to event.pageUrl
-      // first — otherwise the pushState/popstate probe would run against the wrong React tree.
-      // Path-segment candidates aren't retried this way here: `url` is the forged HTTP request's own
-      // URL (an API endpoint), which has no reason to share the page's URL shape, so there is no
-      // sound `targetUrl` to replay via pushState against `event.pageUrl`'s React tree. Path segments
-      // only get the client-routing fallback when they come from the page's own URL in the first
-      // place (the pageUrls loop below, see evaluateClientRoutingPathCandidate).
-      if (!segment.paramName) return;
-      const paramName = segment.paramName;
-      const clientCandidateUrl = withParam({ url: event.pageUrl, name: paramName, value: candidate.candidateValue });
-      // highSuspicion: the authz gate at the top of this method already passed, so a full-navigation
-      // escalation (the verifier's stage 3) is licensed if the cheap pushState stage is inconclusive.
-      const reason = await this.deps.clientRoutingVerifier.verifyQueryParam({
-        pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, paramName,
-        candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
-      });
-      if (reason) {
-        log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${event.pageUrl} ?${paramName}=${candidate.candidateValue}`);
-        return;
-      }
-      detectionMethod = 'client-routing';
-      // Content novelty/uniqueness gate for the client-routing fallback (navigates the client route, not
-      // the forge URL): drop if it renders a state the crawler already collected, or a duplicate of an
-      // earlier finding this run.
-      if (!await this.keepClientRoutingByContent({ pageUrl: event.pageUrl, candidateUrl: clientCandidateUrl, context: `${event.pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
+      // The forge didn't look like a leak — for a QUERY param, see if the SPA honours the value client-side
+      // anyway (clientRoutingQueryFallback). null → drop; otherwise continue as a client-routing finding.
+      const fallback = await this.clientRoutingQueryFallback({ event, candidate, segment });
+      if (fallback === null) return;
+      detectionMethod = fallback;
     }
 
-    // HTTP-only content guards (see canonicalResponseKey). Both key on the forged response's CONTENT,
-    // so they apply only to a genuine HTTP finding — the forged response IS the evidence there; a
-    // client-routing finding carries no server-response evidence and is never deduped this way. A
-    // forged response with no body yields no key, so neither guard can fire and the finding is kept
-    // (same conservative stance as isIdenticalResponse: drop only on positive evidence). Note there is
-    // no await between here and the record below on the HTTP path, so the check-and-add on
-    // recordedForgedBodyKeys is atomic despite concurrent candidate evaluation.
-    if (detectionMethod === 'http') {
-      // A forged request the server REJECTED or errored on (4xx/5xx — notably 401/403 "access denied")
-      // never reached the resource, so it is never a leak. This fires when the ORIGINAL was also an
-      // error (two similar error bodies would otherwise look like a match), and it keeps an expired-token
-      // run honest: every forge comes back 401/403 and nothing is flagged, instead of a stale 200 being
-      // trusted. The client-routing fallback above is independent and already ran for a query param.
-      if (forged.status >= 400) {
-        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response status ${forged.status}: access denied / error, not a leak) — ${event.url} -> ${url}`);
-        return;
-      }
-      // Empty-data guard: a forge that returns no actual data (`{}`, `[]`, or an all-empty wrapper such
-      // as {"data":{"data":[],"total":0}}) leaked nothing, however much it differs from the reference.
-      if (isEmptyJsonResponse({ body: forged.body })) {
-        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response carries no data: empty object/array) — ${event.url} -> ${url}`);
-        return;
-      }
-      // Error-envelope guard: a 200 whose top-level JSON signals an error/denial (`{"error":true}`, a
-      // top-level `error` string/object, `success:false`, `status:"error"`) reached nothing, even when
-      // real-looking fields sit beside the flag. Apps not following HTTP-status best practices (Mondly)
-      // answer 200; the response-similarity ratios alone can't tell a short error body from a short leak.
-      if (isErrorEnvelopeResponse({ body: forged.body })) {
-        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response is an error envelope despite 200) — ${event.url} -> ${url}`);
-        return;
-      }
-      const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
-      // The reference event's own response, EXCLUDED from the history check below: a forge that returns
-      // the original's own body is the "server ignored the swapped value" case (already handled above by
-      // isIdenticalResponse / serverIgnoredValue), not "data accessible at some OTHER URL". Only a match
-      // with a DIFFERENT captured response means already-accessible-elsewhere.
-      const referenceKey = canonicalResponseKey({ status: original.status, body: original.body });
-      if (forgedKey !== undefined) {
-        // (1) History: the forged data is a response the crawler already collected legitimately at a
-        // DIFFERENT URL (http_events) — this user can already reach it, so it is not a leak.
-        if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
-          log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${event.url} -> ${url}`);
-          return;
-        }
-        // (2) Dedup: an earlier candidate this run already produced a byte/JSON-identical forged
-        // response — the same leak reached from a second sibling. Record it once, drop the duplicate.
-        if (this.recordedForgedBodyKeys.has(forgedKey)) {
-          log.debug(`AnalysisPipeline: HTTP candidate not flagged (duplicate forged response of an already-recorded finding) — ${event.url} -> ${url}`);
-          return;
-        }
-        this.recordedForgedBodyKeys.add(forgedKey);
-      }
-    }
+    // HTTP-only content guards (httpContentGuardReject): they key on the forged response's CONTENT, the
+    // evidence for an HTTP finding — a client-routing finding carries none, so it skips them. Synchronous
+    // and the last step before recordFinding (also synchronous), so the dedup check-and-add stays atomic.
+    if (detectionMethod === 'http' && this.httpContentGuardReject({ forged, original, context: `${event.url} -> ${url}` })) return;
 
-    const id = vulnerabilityId({ candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId, method: event.method, url });
-    const inserted = vulnerabilityStore.record({
-      id, site,
-      referenceUrl: event.url, candidateUrl: url, method: event.method,
-      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
-      motivation: describeDiffs(differences),
-      detectionMethod,
-      responseSimilarity: similarity, authzDiff: authz,
+    this.recordFinding({
+      site, method: event.method, referenceUrl: event.url, candidateUrl: url, candidate,
+      motivation: describeDiffs(differences), detectionMethod, responseSimilarity: similarity, authz,
+      logMessage: `AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
+      // The forge url is the reference for an HTTP finding; the client-routing fallback reproduces the
+      // client route from the page url instead (its kind differs too).
+      reproduction: detectionMethod === 'http'
+        ? { referenceUrl: event.url, candidateUrl: url, kind: { type: 'http', method: event.method, headers: event.requestHeaders, postData: event.postData, baselineStatus: event.status ?? 0, baselineHeaders: event.responseHeaders ?? {}, baselineBody: responseBody ?? '', baselineContentType: event.contentType } }
+        : { referenceUrl: event.pageUrl, candidateUrl: url, kind: { type: 'client-routing-query', paramName: segment.paramName!, candidateValue: candidate.candidateValue } },
     });
-    this.logConfirmedFinding({
-      id, inserted,
-      message: `AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
-    });
-    if (inserted) {
-      this.writeReproduction({
-        id, site, motivation: describeDiffs(differences), differences: authz.differences, sensitiveKeys: authz.sensitiveKeys,
-        candidate,
-        ...(detectionMethod === 'http'
-          ? { referenceUrl: event.url, candidateUrl: url, kind: { type: 'http' as const, method: event.method, headers: event.requestHeaders, postData: event.postData, baselineStatus: event.status ?? 0, baselineHeaders: event.responseHeaders ?? {}, baselineBody: responseBody ?? '', baselineContentType: event.contentType } }
-          : { referenceUrl: event.pageUrl, candidateUrl: url, kind: { type: 'client-routing-query' as const, paramName: segment.paramName!, candidateValue: candidate.candidateValue } }),
-      });
-    }
   }
 
   /**
@@ -364,9 +388,6 @@ export class CandidateEvaluator {
     site: string; pageUrl: string; paramName: string; candidateUrl: string;
     candidate: ReturnType<typeof findCandidates>[number];
   }): Promise<void> {
-    const { vulnerabilityStore, options } = this.deps;
-    const { clientRoutingProbe } = options;
-
     // CHEAP FIRST — pure authz gate before the live pushState probe (see authzGate).
     const authz = await this.authzGate({ candidate, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` });
     if (!authz) return;
@@ -382,29 +403,12 @@ export class CandidateEvaluator {
     }
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
 
-    const id = vulnerabilityId({
-      candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId,
-      method: CLIENT_ROUTING_METHOD, url: candidateUrl,
+    this.recordFinding({
+      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate,
+      motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
+      logMessage: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
+      reproduction: { referenceUrl: pageUrl, candidateUrl, kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue } },
     });
-    const inserted = vulnerabilityStore.record({
-      id, site,
-      referenceUrl: pageUrl, candidateUrl, method: CLIENT_ROUTING_METHOD,
-      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
-      motivation: describeDiffs(differences),
-      detectionMethod: 'client-routing',
-      responseSimilarity: null, authzDiff: authz,
-    });
-    this.logConfirmedFinding({
-      id, inserted,
-      message: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
-    });
-    if (inserted) {
-      this.writeReproduction({
-        id, site, referenceUrl: pageUrl, candidateUrl, motivation: describeDiffs(differences),
-        differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
-        kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue },
-      });
-    }
   }
 
   /**
@@ -417,28 +421,15 @@ export class CandidateEvaluator {
     site: string; pageUrl: string; candidateUrl: string;
     candidate: ReturnType<typeof findCandidates>[number];
   }): Promise<void> {
-    const { vulnerabilityStore } = this.deps;
-
     // CHEAP FIRST — the pure authz gate before the live client-routing probe (see authzGate).
     const authz = await this.authzGate({ candidate, context: `${pageUrl} -> ${candidateUrl}` });
     if (!authz) return;
     const differences = authz.differences;
 
-    // highSuspicion: the authz gate just passed, so this candidate's props already point at an
-    // authorization boundary — which is what licenses clientSideConfirmed to escalate to a real
+    // highSuspicion (passed to the probe below): the authz gate just passed, so this candidate's props
+    // point at an authorization boundary — which is what licenses clientSideConfirmed to escalate to a real
     // navigation (stage 3) when the cheap pushState stage is inconclusive (e.g. ejoy's Next.js router
     // ignoring a synthetic popstate for a sibling lesson).
-    // Coherence of the swapped url. `spliceSegment` re-attaches the reference's query, so a one-segment
-    // path swap is INCOHERENT whenever the OLD value also lives elsewhere in the url: ejoy keeps the id in
-    // `?path=` too, so `37 -> 32` yields `/courses/32/314/1030?path=…/live/37/lessons/1030/…` — the new
-    // courseId in the route, the OLD one still in the query. Probing THAT renders a Frankenstein page
-    // (course-32 chrome + course-37 content) that differs from the reference by the course-level chrome,
-    // a false positive the value-masking inert guard can't neutralise (the chrome differs by course NAME,
-    // not by the masked number). The only meaningful probe is the clean path (the SPA infers its params
-    // from it): a sibling lesson (`1030 -> 1031`) is then a real test, an incoherent course swap renders
-    // not-found and is rejected. So when the reference value lingers, probe the query-stripped path; if it
-    // STILL lingers there (the old value sits in another path segment), the candidate can't be made
-    // coherent at all — drop it.
     // Reconcile the whole url to the chosen sibling resource. `spliceSegment` swapped one path segment but
     // re-attached the reference's query, so when the swapped identity is DUPLICATED in the url the query
     // copy is now stale. rewriteCorrelatedQuery rewrites that copy from the SIBLING's own state (ejoy keeps
@@ -467,29 +458,12 @@ export class CandidateEvaluator {
     const confirmedUrl = probeUrl;
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
 
-    const id = vulnerabilityId({
-      candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId,
-      method: CLIENT_ROUTING_METHOD, url: confirmedUrl,
+    this.recordFinding({
+      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl: confirmedUrl, candidate,
+      motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
+      logMessage: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
+      reproduction: { referenceUrl: pageUrl, candidateUrl: confirmedUrl, kind: { type: 'client-routing-path', candidateUrl: confirmedUrl } },
     });
-    const inserted = vulnerabilityStore.record({
-      id, site,
-      referenceUrl: pageUrl, candidateUrl: confirmedUrl, method: CLIENT_ROUTING_METHOD,
-      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
-      motivation: describeDiffs(differences),
-      detectionMethod: 'client-routing',
-      responseSimilarity: null, authzDiff: authz,
-    });
-    this.logConfirmedFinding({
-      id, inserted,
-      message: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
-    });
-    if (inserted) {
-      this.writeReproduction({
-        id, site, referenceUrl: pageUrl, candidateUrl: confirmedUrl, motivation: describeDiffs(differences),
-        differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
-        kind: { type: 'client-routing-path', candidateUrl: confirmedUrl },
-      });
-    }
   }
 
   /**

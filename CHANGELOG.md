@@ -2,6 +2,14 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-20 16:30 — refactor: decompose candidateEvaluator (525 → 499 lines), behavior-preserving
+
+`candidateEvaluator.ts` had crossed the 500-line smell threshold and `evaluateHttpCandidate` was a ~160-line method; the record/log/reproduction tail was duplicated verbatim across all three `evaluate*` paths. Pure structure change — no decision logic touched (the user runs `recheckFindings` separately).
+
+- **Extracted three private helpers**: `httpContentGuardReject` (the HTTP-only content guards — error-status, empty-data, error-envelope, history/dedup — returning keep/drop, still synchronous so the forged-key check-and-add stays atomic before the record), `recordFinding` (the shared id→record→log→reproduction tail, with the id now always built from `method` + the recorded `candidateUrl`), and `clientRoutingQueryFallback` (the query-param client-routing fallback for an unconfirmed HTTP forge). Each `evaluate*` now reads as a short linear pipeline.
+- **Fixed a stale comment**: `evaluateClientRoutingPathCandidate` still carried the ~11-line description of the REMOVED query-strip fallback (superseded by `rewriteCorrelatedQuery` + drop); removed it, kept the accurate reconcile block.
+- **Behavior preserved**: no change to any guard, ordering, recorded field, log message, or reproduction kind — only relocation/de-duplication. `AnalysisPipeline.test.ts` 9/9 green, typecheck clean. A `recheckFindings` on the reference sites is still owed before fully trusting it there (owner-run).
+
 ## 2026-11-20 15:45 — exploration: try a state's clickables in random order (reach page-centre buttons)
 
 On a large app a budget-bounded DFS never leaves the navigation: clickables are captured in DOM/reading order (nav/header first) and each is explored depth-first to exhaustion, so the 45min/depth-2 budget drains on chrome before the page-centre lesson buttons are ever clicked. That is why a fresh busuu crawl captured only 11 top-level URLs and no `.../objective_<uuid>/...` page — so candidate generation had no reference URL to propose the known objective-sibling IDORs from (the objective ids are in the React props but a client-routing path candidate needs a VISITED url carrying the value).
