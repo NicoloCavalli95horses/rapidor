@@ -1,4 +1,7 @@
-Correzioni fatte (tutte typecheck pulito)
+classificator:
+ - da indagare se in ablation classifica chiavi allo "stesso livello" come fa in modalita main
+
+[login fixed] Correzioni fatte (tutte typecheck pulito)
 Pre-check auth ora ri-gioca gli header catturati (niente più falso "expired").
 Protezione data-loss: DEBUG_NO_CRAWLING non wipa più il dominio (main.ts) — il login manuale non distrugge mai i dati.
 Messaggio pre-check corretto: se il token catturato scade, serve ri-crawlare (ri-loggarsi nel browser non aggiorna gli header catturati).

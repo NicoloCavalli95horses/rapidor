@@ -33,7 +33,7 @@ export interface AnalysisPipelineOptions {
   segmentBlacklist: string[]; // path-segment values never mutated: app-shell/section prefixes, not identifiers (see config.analysis.segmentBlacklist)
   paramBlacklist: string[]; // query-param NAMES never mutated: pagination/sorting controls, not object references (see config.analysis.paramBlacklist)
   clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
-  clientRoutingQueryStripFallback: boolean; // retry a rejected high-suspicion path candidate once with its query stripped, for routes that infer params from the path (see config.analysis.clientRoutingQueryStripFallback)
+  clientRoutingPathCoherence: boolean; // retry a rejected high-suspicion path candidate once with its query stripped, for routes that infer params from the path (see config.analysis.clientRoutingPathCoherence)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
   // forged_requests cache (a miss throws instead of forging live), the client-routing phase is
@@ -141,7 +141,7 @@ export class AnalysisPipeline {
         reportsDir: deps.options.reportsDir,
         clientRoutingProbe: deps.options.clientRoutingProbe,
         authOverride: deps.options.authOverride,
-        clientRoutingQueryStripFallback: deps.options.clientRoutingQueryStripFallback,
+        clientRoutingPathCoherence: deps.options.clientRoutingPathCoherence,
       },
     });
     this.recheckRunner = new RecheckRunner({

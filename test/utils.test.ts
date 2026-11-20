@@ -1,17 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stripUrlQuery } from '../src/utils/utils';
+import { urlEmbedsValue } from '../src/utils/utils';
 
-test('stripUrlQuery removes the whole query (the client-routing path fallback input)', () => {
-  // ejoy's incoherent candidate: new lesson id in the path, stale ?path=.../<oldId>/<hash>.json kept
-  assert.equal(
-    stripUrlQuery('https://ejoy-english.com/app/courses/37/314/1031?path=cp%2Fcourse%2Flive%2F37%2Flessons%2F1030%2Fabc.json'),
-    'https://ejoy-english.com/app/courses/37/314/1031',
-  );
-  assert.equal(stripUrlQuery('https://x.test/a/b?x=1&y=2'), 'https://x.test/a/b');
+test('urlEmbedsValue finds a value embedded inside a query param path (the incoherence signal)', () => {
+  // ejoy's incoherent candidate: courseId 37 swapped to 32 in the path, but still present in ?path=
+  const u = 'https://ejoy-english.com/app/courses/32/314/1030?path=cp%2Fcourse%2Flive%2F37%2Flessons%2F1030%2Fc75f.json';
+  assert.equal(urlEmbedsValue(u, '37'), true);   // 37 lingers inside the decoded ?path=
+  assert.equal(urlEmbedsValue(u, '1030'), true);
+  assert.equal(urlEmbedsValue(u, '32'), true);   // the new value is in the path
 });
 
-test('stripUrlQuery is a no-op without a query, and on malformed input', () => {
-  assert.equal(stripUrlQuery('https://x.test/a/b'), 'https://x.test/a/b');
-  assert.equal(stripUrlQuery('not a url'), 'not a url');
+test('urlEmbedsValue is boundary-aware (no substring / hash false matches) and clean on coherent urls', () => {
+  // 37 must NOT match inside 370, 1037, or a hex hash
+  assert.equal(urlEmbedsValue('https://x.test/a/370/b', '37'), false);
+  assert.equal(urlEmbedsValue('https://x.test/a/c75f7750fc1d/b', '37'), false);
+  // a coherent course swap with no lingering old value
+  assert.equal(urlEmbedsValue('https://ejoy-english.com/app/courses/32', '37'), false);
 });

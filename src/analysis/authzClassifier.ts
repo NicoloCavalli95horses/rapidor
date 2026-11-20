@@ -4,10 +4,17 @@ import type { AuthzClassificationStore } from '../db/AuthzClassificationStore';
 
 /**
  * Port of RAPIDOR's extension-only offscreen classifier (react-devtools-extensions/src/offscreen/
- * offscreen.js): the same sentence-embedding model, the same 4 concept sentences verbatim, and the
- * same threshold 0.33 — the real one RAPIDOR enforces (config.js's sensitiveKeyThr is dead code,
- * referenced nowhere). Runs directly in Node here; @huggingface/transformers works the same way
- * server-side, so no browser/offscreen-document plumbing is needed at all.
+ * offscreen.js): the same sentence-embedding model and the same 4 concept sentences verbatim. Runs
+ * directly in Node here; @huggingface/transformers works the same way server-side, so no browser/
+ * offscreen-document plumbing is needed at all.
+ *
+ * THRESHOLD is lowered from RAPIDOR's 0.33 to 0.30 to catch a bare single-word entitlement flag whose
+ * framed form sits just under — ejoy's `lock` (`whether lock` = 0.307), the sole authz signal of its
+ * paid-lesson diff (`lock: false -> true`). That is only safe because the authz gate now scopes the diff
+ * to the SWAPPED RESOURCE's own subtree (CandidateEvaluator.authzGate): the generic nav/identity keys a
+ * lower threshold would otherwise let through (`user`, `feature`, `available`) sit OUTSIDE the swapped
+ * id's object and are filtered before classification. It is applied at READ time (recomputed from the
+ * cached score), so changing it needs no CLASSIFIER_VERSION bump — the persisted scores stay valid.
  */
 const AUTHZ_CONCEPTS = [
   "permissions and access control: user roles, permissions, and access rights determine whether a user can access, use, or is blocked from using a feature or resource",
@@ -16,7 +23,7 @@ const AUTHZ_CONCEPTS = [
   "entitlements and usage limitations: user entitlements, credits, quotas, and usage limits determine whether a feature or resource is available, accessible, locked, unlocked, or blocked",
 ];
 
-const THRESHOLD = 0.33;
+const THRESHOLD = 0.30;
 const MODEL = 'Xenova/all-MiniLM-L6-v2';
 
 type FeatureExtractor = (text: string | string[], opts: { pooling: 'mean'; normalize: boolean }) =>
@@ -68,10 +75,14 @@ export class AuthzClassifier {
     // tests pre-seed to skip loading the model.
     const norm = normalizeKey(key);
     const storeKey = `${CLASSIFIER_VERSION}:${norm}`;
+    // THRESHOLD is applied at READ time (recomputed from the stored score), so lowering/raising it takes
+    // effect on already-cached scores without a CLASSIFIER_VERSION bump — only the SCORE is a function of
+    // the embedding logic, the boolean is live policy.
     const cached = this.cache.get(norm) ?? this.store.get(storeKey);
     if (cached) {
-      this.cache.set(norm, cached);
-      return cached;
+      const result = { score: cached.score, isAuthZRelevant: cached.score >= THRESHOLD };
+      this.cache.set(norm, result);
+      return result;
     }
 
     const extractor = await this.getExtractor();

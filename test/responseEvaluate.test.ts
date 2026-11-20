@@ -1,6 +1,30 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, scopeDiffsToResource } from '../src/analysis/responseEvaluate';
+
+describe('scopeDiffsToResource', () => {
+  const diff = (path: (string | number)[], reference: unknown, current: unknown) =>
+    ({ path, pathStr: path.join('.'), key: path[path.length - 1], reference, current });
+
+  it('keeps only diffs under the swapped value\'s parent (drops a generic key elsewhere in the component)', () => {
+    // ejoy nav FP: swap items.0.id, but it "passed" on the top-level user object -> user must be dropped
+    const diffs = [diff(['items', 0, 'id'], 37, 45), diff(['items', 0, 'header'], 'A', 'B'), diff(['user'], { id: 1 }, null)];
+    const scoped = scopeDiffsToResource({ differences: diffs, swapPath: ['props', 'items', 0, 'id'] });
+    assert.deepEqual(scoped.map((d) => d.pathStr), ['items.0.id', 'items.0.header']);   // user excluded
+  });
+
+  it('keeps an entitlement that is a sibling of the swapped id (ejoy lesson.lock under lesson.id)', () => {
+    const diffs = [diff(['lesson', 'id'], 1030, 1032), diff(['lesson', 'lock'], false, true), diff(['user'], 1, 2)];
+    const scoped = scopeDiffsToResource({ differences: diffs, swapPath: ['props', 'lesson', 'id'] });
+    assert.deepEqual(scoped.map((d) => d.pathStr), ['lesson.id', 'lesson.lock']);   // lock kept, user dropped
+  });
+
+  it('keeps every diff when the swapped id is itself top-level (busuu/lingualeo id)', () => {
+    const diffs = [diff(['id'], 2, 12538), diff(['wordSetType'], 'user', 'system')];
+    const scoped = scopeDiffsToResource({ differences: diffs, swapPath: ['props', 'id'] });
+    assert.equal(scoped.length, 2);   // nothing to scope to -> all kept (lingualeo's 'user' value survives)
+  });
+});
 
 describe('isEmptyJsonResponse', () => {
   it('true for empty object/array and all-empty wrappers (the ejoy search-new FP)', () => {

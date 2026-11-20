@@ -53,16 +53,25 @@ export function sameRoutePath(a: string, b: string): boolean {
   return pathA !== '' && pathA === safePath(b);
 }
 
-/** The URL with its entire query string removed (unchanged on malformed input, or if it had none). */
-export function stripUrlQuery(url: string): string {
+/**
+ * Whether `value` appears as a bounded token ANYWHERE in the url (decoded) — including inside a query
+ * param's own internal path (ejoy's `?path=…/live/37/lessons/…`), not only as a whole segment or whole
+ * param value like `urlCarriesValue`. Used to spot a path swap left INCOHERENT by an unmutated copy of
+ * the old value elsewhere in the url (the Frankenstein-page false positive). Boundary-aware so "37"
+ * never matches "370" or a hex hash; falls back to a plain includes if decoding fails.
+ */
+export function urlEmbedsValue(url: string, value: string): boolean {
+  if (!value) return false;
+  let decoded = url;
+  try { decoded = decodeURIComponent(url); } catch { /* keep the raw url */ }
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   try {
-    const u = new URL(url);
-    u.search = '';
-    return u.href;
+    return new RegExp(`(?<![0-9A-Za-z])${escaped}(?![0-9A-Za-z])`).test(decoded);
   } catch {
-    return url;
+    return decoded.includes(value);
   }
 }
+
 
 /** The URL with one query param set to `value` (unchanged on malformed input). */
 export function withParam({ url, name, value }: { url: string; name: string; value: string }): string {

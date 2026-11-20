@@ -141,6 +141,28 @@ export function compareObj(a: unknown, b: unknown): PropDiff[] {
   return diffs;
 }
 
+/**
+ * Restricts a node's prop diffs to those belonging to the SWAPPED RESOURCE — the subtree rooted at the
+ * swapped value's parent object. `swapPath` is the preindex/match path of the swapped value (relative to
+ * the React node, so it may lead with "props"; a JSON-ablation path has no such prefix). A diff is kept
+ * iff its path lies under `parent(swapPath)`; a top-level swap (parent is the root) keeps every diff.
+ *
+ * This is what stops a whole-component swap (a nav/sidebar/layout sibling) from passing the authz gate on
+ * a GENERIC key that sits elsewhere in the component, far from the swapped id — ejoy's `37 → 45` swaps a
+ * menu item's `items.0.id` yet "passed" on the top-level `user` object. Scoping to `items.0` drops `user`.
+ * A real entitlement is a sibling of (or nested within) the swapped resource and survives: ejoy's
+ * `lesson.lock` under the swapped `lesson.id`, pimsleur's `miniLesson.isFree` under `miniLesson.id`. A
+ * swap whose id is itself top-level (busuu's `id`, lingualeo's `id`) keeps every diff, so nothing is lost.
+ */
+export function scopeDiffsToResource({ differences, swapPath }: {
+  differences: PropDiff[]; swapPath: (string | number)[];
+}): PropDiff[] {
+  const rel = swapPath[0] === 'props' ? swapPath.slice(1) : swapPath;   // compareObj paths are relative to props
+  const prefix = rel.slice(0, -1);                                      // the resource object: the swapped value's parent
+  if (prefix.length === 0) return differences;                         // top-level swap: no resource subtree to scope to
+  return differences.filter((d) => prefix.every((seg, i) => d.path[i] === seg));
+}
+
 /** Human-readable "which props differ and how", for the vulnerabilities table's `motivation` column. */
 export function describeDiffs(differences: PropDiff[]): string {
   if (differences.length === 0) return '(no prop differences)';

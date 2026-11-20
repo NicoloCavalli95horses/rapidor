@@ -9,10 +9,11 @@ import { findCandidates } from './matchFinder';
 import { type SegmentCandidate } from './segments';
 import { forgeRequestCached } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, compareObj, describeDiffs, type PropDiff } from './responseEvaluate';
+import { rewriteCorrelatedQuery } from './correlatedQuery';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
-import { Semaphore, sleep, withParam, stripUrlQuery } from '../utils/utils';
+import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
 
@@ -26,8 +27,8 @@ export interface CandidateEvaluatorOptions {
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
   // see AnalysisPipelineOptions.authOverride — applied to the captured headers before every forge
   authOverride?: AuthOverride;
-  // see config.analysis.clientRoutingQueryStripFallback — path-candidate query-strip retry
-  clientRoutingQueryStripFallback?: boolean;
+  // see config.analysis.clientRoutingPathCoherence — path-candidate query-strip retry
+  clientRoutingPathCoherence?: boolean;
 }
 
 export interface CandidateEvaluatorDeps {
@@ -182,7 +183,13 @@ export class CandidateEvaluator {
   private async authzGate({ candidate, context }: {
     candidate: ReturnType<typeof findCandidates>[number]; context: string;
   }): Promise<AuthzAssessment | null> {
-    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
+    // Scope the diff to the SWAPPED resource's own subtree before classifying: a generic key elsewhere in
+    // a whole-component swap (a nav/sidebar's `user`) must not license the finding — only an entitlement
+    // attached to the swapped id (ejoy's `lesson.lock` under `lesson.id`). See scopeDiffsToResource.
+    const differences = scopeDiffsToResource({
+      differences: compareObj(candidate.referenceProps, candidate.candidateProps),
+      swapPath: candidate.path,
+    });
     const authz = await assessAuthZ({ differences, classifier: this.deps.classifier });
     if (!authz.isAuthzRelevant) {
       log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${context} | ${describeDiffs(differences)}`);
@@ -413,26 +420,43 @@ export class CandidateEvaluator {
     // authorization boundary — which is what licenses clientSideConfirmed to escalate to a real
     // navigation (stage 3) when the cheap pushState stage is inconclusive (e.g. ejoy's Next.js router
     // ignoring a synthetic popstate for a sibling lesson).
-    let confirmedUrl = candidateUrl;
-    let reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion: true });
-    if (reason && this.deps.options.clientRoutingQueryStripFallback) {
-      // Query-strip fallback: the candidate kept the reference's query (spliceSegment re-attaches it), so
-      // swapping only the id yields an INCOHERENT url for a route that infers its params from the PATH
-      // (ejoy's lesson /courses/37/314/<id> with a stale ?path=.../<oldId>/<hash>.json pointing at the
-      // ORIGINAL lesson). Retry once against the clean path — the SPA then infers the params from it.
-      // Only for high-suspicion candidates (authz already fired), and only when there is a query to drop.
-      const stripped = stripUrlQuery(candidateUrl);
-      if (stripped !== candidateUrl) {
-        const r2 = await this.probeClientRoutingPath({ pageUrl, candidateUrl: stripped, candidate, highSuspicion: true });
-        if (!r2) { confirmedUrl = stripped; reason = null; }
+    // Coherence of the swapped url. `spliceSegment` re-attaches the reference's query, so a one-segment
+    // path swap is INCOHERENT whenever the OLD value also lives elsewhere in the url: ejoy keeps the id in
+    // `?path=` too, so `37 -> 32` yields `/courses/32/314/1030?path=…/live/37/lessons/1030/…` — the new
+    // courseId in the route, the OLD one still in the query. Probing THAT renders a Frankenstein page
+    // (course-32 chrome + course-37 content) that differs from the reference by the course-level chrome,
+    // a false positive the value-masking inert guard can't neutralise (the chrome differs by course NAME,
+    // not by the masked number). The only meaningful probe is the clean path (the SPA infers its params
+    // from it): a sibling lesson (`1030 -> 1031`) is then a real test, an incoherent course swap renders
+    // not-found and is rejected. So when the reference value lingers, probe the query-stripped path; if it
+    // STILL lingers there (the old value sits in another path segment), the candidate can't be made
+    // coherent at all — drop it.
+    // Reconcile the whole url to the chosen sibling resource. `spliceSegment` swapped one path segment but
+    // re-attached the reference's query, so when the swapped identity is DUPLICATED in the url the query
+    // copy is now stale. rewriteCorrelatedQuery rewrites that copy from the SIBLING's own state (ejoy keeps
+    // every lesson's content path — hash included — on its sibling node, even paid ones with lock:true), so
+    // `1030 -> 1032` becomes the real paid-lesson url `…/1032?path=…/lessons/1032/<h2>.json` — the leaked-
+    // capability IDOR this detector exists to forge. If the old value STILL lingers (nothing correlated —
+    // ejoy's courseId 37->32, whose ?path= carries a LESSON path absent from the COURSE node), the swap is
+    // incoherent and can't be reconciled from state, so it is DROPPED (we never probe a query-stripped clean
+    // path: that tested a different url than the user reaches and only produced false positives).
+    const refValue = String(candidate.referenceValue);
+    let probeUrl = candidateUrl;
+    if (this.deps.options.clientRoutingPathCoherence) {
+      probeUrl = rewriteCorrelatedQuery({ url: candidateUrl, referenceValue: refValue, referenceProps: candidate.referenceProps, candidateProps: candidate.candidateProps });
+      if (urlEmbedsValue(probeUrl, refValue)) {
+        log.debug(`AnalysisPipeline: candidate rejected (incoherent path swap — reference value ${refValue} still in the url after the correlated rewrite) — ${pageUrl} -> ${candidateUrl}`);
+        return;
       }
     }
+    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl: probeUrl, candidate, highSuspicion: true });
     if (reason) {
-      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${candidateUrl}`);
+      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${probeUrl}`);
       return;
     }
-    // Everything downstream uses `confirmedUrl` (the clean path when the fallback confirmed it), so the
-    // content guard, finding id, record and reproduction all reflect the url that actually leaked.
+    // Everything downstream uses `confirmedUrl` (the clean path when the coherence check stripped the
+    // query), so the content guard, finding id, record and reproduction all reflect the url that leaked.
+    const confirmedUrl = probeUrl;
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
 
     const id = vulnerabilityId({

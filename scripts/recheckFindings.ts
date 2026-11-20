@@ -68,7 +68,7 @@ const pipeline = new AnalysisPipeline({
     segmentBlacklist: config.analysis.segmentBlacklist,
     paramBlacklist: config.analysis.paramBlacklist,
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
-    clientRoutingQueryStripFallback: config.analysis.clientRoutingQueryStripFallback,
+    clientRoutingPathCoherence: config.analysis.clientRoutingPathCoherence,
   },
 });
 
