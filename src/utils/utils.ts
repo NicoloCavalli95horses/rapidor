@@ -83,3 +83,14 @@ export function withParam({ url, name, value }: { url: string; name: string; val
     return url;
   }
 }
+
+
+/** A new array with the same elements in random order (Fisher-Yates). Never mutates the input. */
+export function shuffled<T>(items: readonly T[]): T[] {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}

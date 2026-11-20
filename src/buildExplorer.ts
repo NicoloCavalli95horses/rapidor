@@ -144,7 +144,7 @@ export function buildExplorer(
 
   return new DfsExplorer(
     waiter, executor, capturer, navigator, store, graph,
-    { maxDepth: cfg.maxDepth, maxStates: cfg.maxStates, maxDurationSecs: cfg.maxDurationSecs },
+    { maxDepth: cfg.maxDepth, maxStates: cfg.maxStates, maxDurationSecs: cfg.maxDurationSecs, randomizeClickOrder: cfg.randomizeClickOrder },
     hooks.length > 0 ? new CompositeHooks(hooks) : undefined,
   );
 }

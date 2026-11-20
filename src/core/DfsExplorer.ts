@@ -5,11 +5,13 @@ import type {
 } from './interfaces';
 import type { UIState, Action, ElementDescriptor } from './types';
 import { formatDuration } from './duration';
+import { shuffled } from '../utils/utils';
 
 export interface ExplorationLimits {
   maxDepth: number;
   maxStates: number;   // per tab: guarantees termination even on very rich UIs
   maxDurationSecs: number;  // time budget: shuts down before the Crawlee timeout
+  randomizeClickOrder?: boolean;  // try a state's clickables in random order (see config.randomizeClickOrder)
 }
 
 /** Outcome of attempting one (state, element) pair. */
@@ -124,7 +126,13 @@ export class DfsExplorer {
   private async visit(w: Worker, state: UIState): Promise<void> {
     if (state.depth >= this.limits.maxDepth) return;
 
-    for (const el of state.clickables) {
+    // Capture order is DOM/reading order, so nav/header chrome comes first and a budget-bounded DFS drains
+    // it before reaching the page-centre buttons. Trying the clickables in RANDOM order instead samples the
+    // whole set, giving central lesson buttons an early chance. A per-tab local shuffle of a COPY (never the
+    // shared state.clickables): claimable()/claim() are order-independent, so this needs no cross-tab
+    // coordination and does not affect restore (which replays the recorded path, not this order).
+    const clickables = this.limits.randomizeClickOrder ? shuffled(state.clickables) : state.clickables;
+    for (const el of clickables) {
       if (this.limitReached(w)) return;
       // claim is the synchronous, exclusive gate: skips a pair that is already done or that another
       // tab is attempting right now. A pair missed earlier (but still within budget) is claimable

@@ -100,6 +100,7 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 | `startUrls` | `$START_URLS` (comma- or newline-separated) or `[]` | Several sites explored in one `npm start` run. When empty, only `startUrl` is explored. |
 | `maxDepth` / `maxStates` / `maxDurationSecs` | `3` / `500` / `2700` | Exploration limits. `maxStates` applies to each tab. `maxDurationSecs` is a per-phase budget: the exploration gets it, then the end-of-crawl analysis gets it again (the request handler is sized for both). |
 | `restoreAttempts` | `4` | Times a `(state, element)` pair is retried across later landings before being given up: a state restore can miss when an intermittent interstitial covers the target, and this stops one unlucky reload from pruning a whole branch. |
+| `randomizeClickOrder` | `true` | Try a state's clickables in random order instead of capture (DOM/reading) order. Capture order puts nav/header chrome first and a budget-bounded DFS drains it before reaching the page-centre buttons; randomizing samples the whole set so central controls get an early chance. Per-tab local shuffle (no cross-tab coordination). Makes a crawl non-repeatable. |
 | `concurrency` | `1` | Sites explored in parallel. |
 | `tabsPerSite` | `5` | Tabs exploring the same site together (same browser context: cookies and storage are shared). Work is split automatically and a state is never saved twice. Keep in sync with RAPIDOR's own `maxStateSnapshots`. |
 | `restoreDelayMs` | `150` | Minimum gap between two page reloads of the same site, across all its tabs. |

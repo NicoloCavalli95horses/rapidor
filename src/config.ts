@@ -36,6 +36,12 @@ export interface CrawlConfig {
   startUrl: string;
   startUrls: string[];          // sites to explore in one run (`npm start`); when empty, only startUrl is explored
   maxDepth: number;
+  // Try a state's clickables in RANDOM order instead of capture (DOM/reading) order. Capture order puts
+  // nav/header chrome first, and a DFS with a time budget drains it on those branches before ever reaching
+  // the page-centre buttons (busuu: 45min/depth-2 never leaves the nav). Randomizing samples the whole
+  // clickable set so central lesson buttons get an equal early chance. Per-tab local shuffle — no cross-tab
+  // coordination needed (the synchronous claim() still guarantees exclusivity). Makes a crawl non-repeatable.
+  randomizeClickOrder: boolean;
   maxStates: number;            // cap on the states saved by each tab: guarantees termination
   restoreAttempts: number;      // times a (state,element) pair is retried across landings before being given up as unreachable: absorbs intermittent interstitials without pruning a whole branch (see StateStoreOptions.restoreAttempts)
   maxDurationSecs: number;      // per-PHASE time budget per site: the exploration shuts down on its own after this, and the end-of-crawl analysis is allowed the same budget again (the request handler is sized for both — see main.ts requestHandlerTimeoutSecs)
@@ -179,6 +185,8 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   // START_URLS="https://a.com,https://b.com" (comma and/or newline separated, quoted in .env if on several lines), or fill the array here: replaces startUrl in `npm start`
   startUrls: (process.env.START_URLS || '').split(/[\s,]+/).filter(Boolean),
   maxDepth: process.env.MAX_DEPTH ? Number(process.env.MAX_DEPTH) : 3, // MAX_DEPTH=2 for a quick, shallow debug run
+  // on by default (big sites waste the budget on nav otherwise)
+  randomizeClickOrder: true,
   maxStates: 500,
   // a landing page's interstitial (cookie/"welcome back" sheet) can appear on one reload and not the
   // next, covering the target: retry a missed (state,element) a few times across landings before

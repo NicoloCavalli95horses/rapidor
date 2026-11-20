@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { urlEmbedsValue } from '../src/utils/utils';
+import { urlEmbedsValue, shuffled } from '../src/utils/utils';
 
 test('urlEmbedsValue finds a value embedded inside a query param path (the incoherence signal)', () => {
   // ejoy's incoherent candidate: courseId 37 swapped to 32 in the path, but still present in ?path=
@@ -16,4 +16,21 @@ test('urlEmbedsValue is boundary-aware (no substring / hash false matches) and c
   assert.equal(urlEmbedsValue('https://x.test/a/c75f7750fc1d/b', '37'), false);
   // a coherent course swap with no lingering old value
   assert.equal(urlEmbedsValue('https://ejoy-english.com/app/courses/32', '37'), false);
+});
+
+test('shuffled returns a permutation without mutating the input', () => {
+  const input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const snapshot = input.slice();
+  const out = shuffled(input);
+  assert.deepEqual(input, snapshot);                         // input untouched
+  assert.equal(out.length, input.length);
+  assert.deepEqual([...out].sort((a, b) => a - b), snapshot); // same multiset
+  // over several shuffles of a 10-element array, at least one must reorder (P(all identical) ~ 0)
+  const anyReordered = Array.from({ length: 20 }, () => shuffled(input)).some((s) => s.some((v, i) => v !== input[i]));
+  assert.ok(anyReordered);
+});
+
+test('shuffled handles empty and single-element arrays', () => {
+  assert.deepEqual(shuffled([]), []);
+  assert.deepEqual(shuffled([42]), [42]);
 });
