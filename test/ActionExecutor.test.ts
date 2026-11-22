@@ -162,6 +162,42 @@ describe('ActionExecutor', () => {
     assert.equal(await download.failure(), 'canceled');
   });
 
+  // The OS launching mailto:/tel:/… cannot be observed from the page, so we assert the browser-side
+  // guard cancelled the anchor's default action (what would otherwise hand the URL to the OS).
+  it('cancels clicks on external-app protocol links (mailto/tel/sms/webcal/zoommtg)', async () => {
+    for (const href of ['mailto:user@example.com', 'tel:+33123456789', 'sms:+33123456789',
+      'webcal://example.com/c.ics', 'zoommtg://zoom.us/join?confno=1']) {
+      const page = await browser.open({ '/': `<a href="${href}" style="display:block;width:200px;height:40px">Link</a>` });
+      // bubble-phase listener runs after the capture-phase guard: records whether default was cancelled
+      await page.evaluate(() => {
+        (window as any).prevented = null;
+        document.querySelector('a')!.addEventListener('click', (e) => { (window as any).prevented = e.defaultPrevented; });
+      });
+      const rect = await page.evaluate(() => {
+        const r = document.querySelector('a')!.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+      const t: ElementDescriptor = { id: 'x', selector: 'a', tag: 'a', rect, fixed: false, text: 'Link', href };
+      assert.equal(await executor().execute(page, click(t)), true);
+      assert.equal(await page.evaluate(() => (window as any).prevented), true, `${href} should be cancelled`);
+    }
+  });
+
+  it('does not cancel clicks on ordinary in-page links', async () => {
+    const page = await browser.open({ '/': '<a href="#section" style="display:block;width:200px;height:40px">Ancora</a>' });
+    await page.evaluate(() => {
+      (window as any).prevented = null;
+      document.querySelector('a')!.addEventListener('click', (e) => { (window as any).prevented = e.defaultPrevented; });
+    });
+    const rect = await page.evaluate(() => {
+      const r = document.querySelector('a')!.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+    const t: ElementDescriptor = { id: 'x', selector: 'a', tag: 'a', rect, fixed: false, text: 'Ancora', href: '#section' };
+    assert.equal(await executor().execute(page, click(t)), true);
+    assert.equal(await page.evaluate(() => (window as any).prevented), false);
+  });
+
   it('closes new tabs', async () => {
     const page = await browser.open({ '/': '<a href="/x" target="_blank">Tab</a>', '/x': 'x' });
     assert.equal(await executor().execute(page, click(await target(page, 'Tab'))), true);

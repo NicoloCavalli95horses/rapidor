@@ -129,6 +129,20 @@ describe('ClickableExtractor', () => {
     assert.deepEqual(found, ['Salva']);
   });
 
+  it('discards links to external-app protocol handlers (mailto/tel/sms/webcal/zoommtg)', async () => {
+    const found = await texts(`
+      <a href="mailto:user@example.com">Email</a>
+      <a href="tel:+33123456789">Call</a>
+      <a href="sms:+33123456789">SMS</a>
+      <a href="webcal://example.com/cal.ics">Calendar</a>
+      <a href="zoommtg://zoom.us/join?confno=1">Zoom</a>
+      <a href="customapp://do/something">Deep link</a>
+      <a href="/page">Interno</a>
+      <a href="https://example.com/x">Esterno http</a>
+      <a href="#section">Ancora</a>`);
+    assert.deepEqual(found, ['Interno', 'Esterno http', 'Ancora']);
+  });
+
   it('tells apart elements with the same tag, rectangle and text using a suffix', async () => {
     // outside the viewport there is no hit-test: two overlapping buttons are both kept
     const page = await browser.withHtml(`

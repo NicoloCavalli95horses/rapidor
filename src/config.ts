@@ -1,6 +1,7 @@
 import 'dotenv/config'; // loads .env into process.env before any field below reads it
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_ALLOWED_LINK_SCHEMES } from './utils/utils.js';
 
 // dotenv does not expand variables: resolve a leading ~, $HOME or ${HOME} ourselves
 function expandHome({ value }: { value: string }): string {
@@ -64,6 +65,7 @@ export interface CrawlConfig {
   locale: string;               // language requested from sites: keeps texts and blocklist consistent
   blocklist: string[];          // texts not to click (e.g. logout)
   ignoreClickablesWithin: string[];  // CSS selectors: never treat anything inside these as clickable (e.g. nav/header/footer chrome)
+  allowedLinkSchemes: string[];      // href schemes clickable in-browser; any other (mailto:, tel:, sms:, webcal:, zoommtg:, …) is dropped so the OS never launches an external app
   dismissOverlays: boolean;     // close blocking modals (Escape / close control) before capturing, so an interstitial does not cost a depth level
   db: {
     path: string;                    // SQLite file, shared across the whole run (every site, every tab)
@@ -220,6 +222,9 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
   blocklist: ['logout', 'log out', 'sign out', 'quit', 'delete'],
   // skip clickables inside site chrome so exploration focuses on the main content; set to [] to explore everything
   ignoreClickablesWithin: ['nav', 'footer'],
+  // allowlist of href schemes that stay in the browser; links to any other scheme (mailto:, tel:, sms:,
+  // webcal:, zoommtg:, app deep-links) are both discarded as clickables and blocked at click time
+  allowedLinkSchemes: DEFAULT_ALLOWED_LINK_SCHEMES,
   // close blocking modals (Escape, then an explicit close control) before capturing a state
   dismissOverlays: true,
   // single SQLite file every store

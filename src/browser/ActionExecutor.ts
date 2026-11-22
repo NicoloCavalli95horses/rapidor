@@ -6,6 +6,8 @@ import type { Action } from '../core/types';
 import { evaluateInPage } from './evaluateInPage';
 import { locateTarget } from './inPage/locateTarget';
 import { hideBlockingOverlay } from './inPage/hideBlockingOverlay';
+import { blockExternalProtocols } from './inPage/blockExternalProtocols';
+import { DEFAULT_ALLOWED_LINK_SCHEMES } from '../utils/utils';
 
 export class ActionExecutor implements IActionExecutor {
   private guardedPages = new WeakSet<Page>();
@@ -17,6 +19,8 @@ export class ActionExecutor implements IActionExecutor {
     // optional: shares StateCapturer's own OverlayDismisser (same instance, no separate state needed).
     // Without one, a target newly covered by an unrelated interstitial just fails to locate, as before.
     private dismisser?: IOverlayDismisser,
+    // href schemes allowed in-browser; a click on any other (mailto:/tel:/…) is cancelled in-page
+    private allowedLinkSchemes: string[] = DEFAULT_ALLOWED_LINK_SCHEMES,
   ) {}
 
   /** Never throws: any problem becomes false and the engine moves on. */
@@ -117,7 +121,22 @@ export class ActionExecutor implements IActionExecutor {
       });
 
       await this.blockExternalNavigation(page);
+      await this.blockExternalProtocolHandlers(page);
     }
+  }
+
+  /**
+   * Cancels clicks on mailto:/tel:/sms:/webcal:/zoommtg:/app-deep-link anchors, so the OS never
+   * launches an external app mid-exploration. addInitScript covers every future navigation (restores
+   * reload the page), and a one-off evaluate covers the document already loaded. The guard is
+   * idempotent, so running both is safe.
+   */
+  private async blockExternalProtocolHandlers(page: Page): Promise<void> {
+    const arg = { allowedSchemes: this.allowedLinkSchemes };
+    // same serialization trick as evaluateInPage (keepNames inserts __name, absent in the browser)
+    const source = `(() => { const __name = (f) => f; (${blockExternalProtocols.toString()})(${JSON.stringify(arg)}); })();`;
+    await page.addInitScript({ content: source });
+    await page.evaluate(source).catch(() => {});   // no document yet (about:blank): the init script will cover it
   }
 
   /**

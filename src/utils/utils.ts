@@ -10,6 +10,30 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** URL schemes a clickable's href may use. Anything else is an external-app handler. */
+export const DEFAULT_ALLOWED_LINK_SCHEMES = ['http', 'https', 'javascript', 'about'];
+
+/**
+ * The lowercased scheme of an href, or null when it has none: relative links, `#anchor`, `/path`,
+ * `?q`, and protocol-relative `//host` all return null (they stay inside the browser).
+ */
+export function linkScheme(href: string): string | null {
+  const m = /^\s*([a-z][a-z0-9+.-]*):/i.exec(href);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * True when href hands off to an external app instead of navigating in-browser: its scheme is set
+ * and outside the allowlist (mailto:, tel:, sms:, webcal:, zoommtg:, custom app deep-links, …).
+ * Such clickables are dropped so the OS never launches another process mid-exploration.
+ */
+export function isExternalAppLink({ href, allowedSchemes = DEFAULT_ALLOWED_LINK_SCHEMES }:
+  { href: string | undefined | null; allowedSchemes?: string[] }): boolean {
+  if (!href) return false;
+  const scheme = linkScheme(href);
+  return scheme !== null && !allowedSchemes.includes(scheme);
+}
+
 /** Port of RAPIDOR's utils.js runWithConcurrency: bounded-concurrency task pool. */
 export async function runWithConcurrency<T>({ tasks, limit }: { tasks: (() => Promise<T>)[]; limit: number }): Promise<T[]> {
   const results = new Array<T>(tasks.length);

@@ -86,13 +86,13 @@ export function buildExplorer(
   const graph = new StateGraph(site, crawlEdges);
 
   // 2. modules that depend on the leaves
-  const extractor = new ClickableExtractor(selectorBuilder, cfg.blocklist, cfg.ignoreClickablesWithin);
+  const extractor = new ClickableExtractor(selectorBuilder, cfg.blocklist, cfg.ignoreClickablesWithin, cfg.allowedLinkSchemes);
   // shared between the capturer (dismiss before observing a state) and the executor (dismiss and
   // retry a click that a stray interstitial made unreachable) — see ActionExecutor.click's own
   // comment for why the executor needs this too, not just the capturer.
   const dismisser = cfg.dismissOverlays ? new OverlayDismisser() : undefined;
   const capturer = new StateCapturer(extractor, textExtractor, fingerprinter, dismisser);
-  const executor = new ActionExecutor(new URL(rootUrl).origin, cfg.actionTimeoutMs, cfg.rectGridPx, dismisser);
+  const executor = new ActionExecutor(new URL(rootUrl).origin, cfg.actionTimeoutMs, cfg.rectGridPx, dismisser, cfg.allowedLinkSchemes);
   const navigator = new StateNavigator(rootUrl, executor, waiter, new RequestThrottle(cfg.restoreDelayMs));
 
   // 3. the algorithm receives everything ready-made

@@ -4,6 +4,7 @@ import type { ElementDescriptor } from '../core/types';
 import type { SelectorBuilder } from './SelectorBuilder';
 import { collectCandidates, type RawElement } from './browser/collectCandidates';
 import { evaluateInPage } from '../browser/evaluateInPage';
+import { DEFAULT_ALLOWED_LINK_SCHEMES, isExternalAppLink } from '../utils/utils';
 
 export class ClickableExtractor implements IClickableExtractor {
   private blocklist: string[];
@@ -12,6 +13,9 @@ export class ClickableExtractor implements IClickableExtractor {
     private selectorBuilder: SelectorBuilder,
     blocklist: string[],
     private ignoreWithin: string[] = [],   // CSS selectors: skip clickables inside these containers
+    // href schemes allowed in-browser: a clickable linking to any other (mailto:/tel:/sms:/…) is
+    // dropped here so the crawler never clicks it and the OS never launches an external app
+    private allowedLinkSchemes: string[] = DEFAULT_ALLOWED_LINK_SCHEMES,
     private maxTextLength = 80,
   ) {
     this.blocklist = blocklist.map((b) => b.toLowerCase());
@@ -39,6 +43,8 @@ export class ClickableExtractor implements IClickableExtractor {
   }
 
   private isBlocked(raw: RawElement): boolean {
+    // external-app links (mailto:, tel:, sms:, webcal:, zoommtg:, …) are never clicked
+    if (isExternalAppLink({ href: raw.href, allowedSchemes: this.allowedLinkSchemes })) return true;
     const haystack = [raw.text, raw.ariaLabel, raw.href]
       .filter(Boolean).join(' ').toLowerCase();
     return this.blocklist.some((b) => haystack.includes(b));

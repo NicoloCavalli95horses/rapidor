@@ -2,7 +2,13 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
-## 2026-11-20 18:20 — fix: scope the preindex lookup to the site under analysis (cross-site contamination)
+## 2026-11-22 15:30 — safety: block external protocol handlers (mailto:/tel:/sms:/webcal:/zoommtg:/…)
+
+Clicking an `example@gmail.com`-style link (or any `mailto:`/`tel:`/`sms:`/`webcal:`/`zoommtg:`/app-deep-link) made Chromium hand the URL to the OS, launching an external app and pulling the crawler out of the page. These links carry no paid resource to probe, so they are pure noise and risk.
+
+- **Why:** keep the crawler inside the page under exploration; never spawn external processes.
+- **What changed:** new `allowedLinkSchemes` allowlist (default `http, https, javascript, about`). Two layers: (1) `ClickableExtractor` drops any clickable whose `href` uses a non-allowlisted scheme, so it is never offered; (2) a capture-phase in-page guard (`blockExternalProtocols`, installed by `ActionExecutor` via `addInitScript` + a one-off evaluate) `preventDefault`s clicks on such anchors, covering cases that slip past extraction (wrapper clicks, dynamically-set hrefs). Shared `linkScheme`/`isExternalAppLink` helpers in `utils`.
+- **Effect:** external-app handoffs no longer happen during exploration. New tests in `ClickableExtractor`, `ActionExecutor`, `utils`; full suite green. No change to geometry, fingerprints, or the HTTP/analysis path.
 
 **Severity: high — cross-site contamination that invalidated multi-site analyses.** `preindexed_values` has no `site` column, and `findByValue`/`countByValue` filtered only `WHERE value = ?`. But the DB holds many sites at once (`db.overwriteExistingDomain` wipes only the domain being re-crawled, never the others), so a value lookup returned EVERY site's nodes. Analysing celpipsimulator, its `/blog?_rsc=` segment `blog` matched **babbel's** footer `blog` link (the value `blog` was indexed by 4 sites: arabicroad 2, lingualeo 40, babbel 14, celpip 10) and forged celpipsimulator's `/privacy` from babbel's sibling — a cross-site false positive whose very motivation showed babbel URLs (`about.babbel.com`, "Inside Babbel").
 

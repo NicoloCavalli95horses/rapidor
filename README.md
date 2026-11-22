@@ -115,6 +115,7 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 | `locale` | `en-US` | Language requested from sites. |
 | `screenshots` | `false` | Saves a PNG of each state. Useful only for visually inspecting results. |
 | `blocklist` | `logout, log out, sign out, quit, delete` | Substrings (case-insensitive) of text, `aria-label`, or `href` of elements that should never be clicked. |
+| `allowedLinkSchemes` | `http, https, javascript, about` | Allowlist of `href` URL schemes that stay inside the browser. A link to any other scheme (`mailto:`, `tel:`, `sms:`, `webcal:`, `zoommtg:`, custom app deep-links) is both dropped as a clickable and cancelled at click time, so the OS never launches an external app mid-exploration. Schemeless links (`/path`, `#anchor`, `?q`) are always kept. |
 | `db.path` | `storage/crawler.db` | Shared SQLite file for the whole run — every table the crawler writes. |
 | `db.clearOnStart` | `true` | Wipes `crawl_states`/`crawl_edges`/`http_events`/`react_states`/`preindexed_values`/`vulnerabilities`/`analysis_stats`/`ablation_vulnerabilities`/`ablation_stats`/`forged_requests` once at the start of the run. |
 | `db.clearClassifierCache` | `false` | Wipes `authz_classifications` too. Off by default: a classification is a pure function of the key string, independent of site or run, so it is worth keeping forever. |
