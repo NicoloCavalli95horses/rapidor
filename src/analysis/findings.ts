@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { findCandidates } from './matchFinder';
 import type { SegmentCandidate } from './segments';
+import { tokenizeParamName } from '../utils/utils';
 
 /**
  * Domain vocabulary shared by everything that produces or re-examines a finding: the pseudo-method
@@ -35,18 +36,63 @@ export function vulnerabilityId({ candidateValue, nodeId, method, url }: {
  * by such a token compare equal. `_rsc` is Next.js's React-Server-Components request token (changes
  * every navigation): not an object reference, so carrying it never crosses an authz boundary, but
  * leaving it in inflated the history filter, the finding dedup (promova flagged the same IDOR ~20
- * extra times, one per token) and the ablation's candidate dedup. A module const like preindex.ts's
- * PREINDEXED_KEYS — a framework fact, not a per-run setting. Canonicalization only: the FORGED request
- * still keeps the original's params, so an RSC request stays an RSC request and its response comparable.
+ * extra times, one per token) and the ablation's candidate dedup. Its value is a hash, so it is matched
+ * by NAME; cache-buster TIMESTAMPS are matched by VALUE instead (see isVolatileParam) — far more robust
+ * than a name list, since sites spell them differently (`_`, `ts`, `t`, promova's `tft`, …) and a fresh
+ * value per XHR made the same endpoint look like thousands of distinct URLs (duolingo: 58k "unique" GET
+ * URLs collapse to ~79 once stripped). A module const like preindex.ts's PREINDEXED_KEYS — a framework
+ * fact, not a per-run setting. Canonicalization only: the FORGED request still keeps the original's
+ * params, so an RSC request stays an RSC request and its response comparable.
  */
-const VOLATILE_PARAMS = new Set(['_rsc']);
+const VOLATILE_PARAM_NAMES = new Set(['_rsc']);
+
+/**
+ * An all-digits value that is an epoch timestamp — 10 digits in the seconds window or 13 in the
+ * milliseconds window, both spanning ~2001–2033. A bare integer of exactly that length AND inside that
+ * recent-epoch range is a cache-buster timestamp, never a resource id: DB ids are short, snowflake ids
+ * are 18–19 digits, and no reference-corpus id falls in the window (verified across every site's query
+ * values — the only hits are `_`/`ts`/`t`/`tft` cache-busters). Keeps canonicalization robust to
+ * whatever a site names its cache-buster, where a fixed name list would miss it.
+ */
+function isEpochTimestamp(value: string): boolean {
+  if (!/^\d+$/.test(value)) return false;
+  const n = Number(value);
+  if (value.length === 13) return n >= 1e12 && n < 2e12;   // epoch milliseconds
+  if (value.length === 10) return n >= 1e9 && n < 2e9;     // epoch seconds
+  return false;
+}
+
+// Identifier-like name tokens. A param whose name carries one of these names a RESOURCE, so its value
+// is never treated as a volatile timestamp even when it happens to look like one (`id=1795251407832`
+// is a real id, not a cache-buster) — the key disambiguates the value. A genuine cache-buster is never
+// named with these words, so this costs no robustness (verified: the corpus's only epoch-valued params
+// are `_`/`ts`/`t`/`tft`, none identifier-like).
+const IDENTIFIER_NAME_TOKENS = new Set([
+  'id', 'uid', 'uuid', 'guid', 'key', 'ref', 'token',
+  'user', 'account', 'owner', 'customer', 'member', 'profile', 'sub',
+]);
+
+/** True when the param NAME looks like a resource identifier (protects its value from volatile-stripping). */
+function isIdentifierParam(name: string): boolean {
+  return tokenizeParamName(name).some((t) => IDENTIFIER_NAME_TOKENS.has(t));
+}
+
+/**
+ * A query param that identifies no resource: a known volatile NAME, or a timestamp-shaped VALUE whose
+ * NAME is not identifier-like (so a real `id` that happens to resemble an epoch is kept).
+ */
+function isVolatileParam({ name, value }: { name: string; value: string }): boolean {
+  if (VOLATILE_PARAM_NAMES.has(name.toLowerCase())) return true;
+  return isEpochTimestamp(value) && !isIdentifierParam(name);
+}
 
 export function normalizeUrl(raw: string): string {
   try {
     const url = new URL(raw);
     const path = decodeURIComponent(url.pathname).replace(/\/+$/, '') || '/';
-    for (const p of VOLATILE_PARAMS) url.searchParams.delete(p);
-    const params = [...url.searchParams.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const params = [...url.searchParams.entries()]
+      .filter(([name, value]) => !isVolatileParam({ name, value }))
+      .sort(([a], [b]) => a.localeCompare(b));
     const search = params.map(([key, value]) => `${key}=${decodeURIComponent(value)}`).join('&');
     return `${url.origin}${path}${search ? `?${search}` : ''}`;
   } catch {

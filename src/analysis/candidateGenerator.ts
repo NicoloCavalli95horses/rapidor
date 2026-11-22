@@ -4,21 +4,11 @@ import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import { findCandidates } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
 import { nodeChromeZone, zoneWalkDepthFor } from './domZone';
+import { tokenizeParamName } from '../utils/utils';
 
-/**
- * Split a query-param NAME into lowercase tokens across camelCase, snake_case, kebab and letter/digit
- * boundaries, so `maxLevel` / `max_level` / `MaxLevel` all yield `['max','level']`. Used to blacklist a
- * param whose NAME merely CONTAINS a pagination/bound word (`maxLevel`, `minScore`, `pageSize`), not only
- * one that equals it exactly.
- */
-export function tokenizeParamName(name: string): string[] {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')                                        // camelCase boundary
-    .split(/[^a-zA-Z0-9]+/)                                                         // snake / kebab / other separators
-    .flatMap((s) => s.split(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/))       // letter/digit boundary
-    .map((s) => s.toLowerCase())
-    .filter(Boolean);
-}
+// tokenizeParamName now lives in utils (shared with findings' identifier guard); re-exported so
+// existing importers (candidateGenerator.test.ts, and the param-name blacklist below) keep working.
+export { tokenizeParamName };
 
 /**
  * A param name is blacklisted when its full lowercased name is in the list OR any of its tokens is — so

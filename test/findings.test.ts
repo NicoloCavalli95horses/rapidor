@@ -38,6 +38,34 @@ describe('findings: normalizeUrl (the history-filter canonical form)', () => {
     assert.equal(normalizeUrl('https://app.test/p/79?_rsc=abc'), 'https://app.test/p/79');
     assert.equal(normalizeUrl('https://app.test/x?id=5&_rsc=abc'), 'https://app.test/x?id=5');
   });
+
+  it('strips any param whose VALUE is an epoch timestamp, whatever its name (robust cache-buster filter)', () => {
+    // A fresh timestamp per request made the same endpoint look like thousands of distinct URLs
+    // (duolingo's `_`/`ts`), inflating the history filter and candidate generation. Detection is by
+    // value shape, not name, so it also catches cache-busters a name list would miss (promova's `tft`).
+    assert.equal(normalizeUrl('https://app.test/cfg?_=1795251407'), normalizeUrl('https://app.test/cfg?_=1795251999'));
+    assert.equal(normalizeUrl('https://app.test/cfg?tft=1795251407832'), 'https://app.test/cfg');        // 13-digit ms, odd name
+    assert.equal(normalizeUrl('https://app.test/25/web.json?user=9&ts=1795251407&foo=bar'),
+      'https://app.test/25/web.json?foo=bar&user=9');                                                     // ts stripped, real params kept
+  });
+
+  it('keeps a short integer value that is NOT a timestamp (a real id/flag), however the param is named', () => {
+    // `_=1` has a cache-buster NAME but a non-epoch value: it is kept, because only timestamp-shaped
+    // values are volatile. A 10/13-digit id outside the recent-epoch window is kept too.
+    assert.equal(normalizeUrl('https://app.test/x?_=1&id=5'), 'https://app.test/x?_=1&id=5');
+    assert.equal(normalizeUrl('https://app.test/x?id=9999999999999'), 'https://app.test/x?id=9999999999999'); // 13 digits, out of ms epoch range
+  });
+
+  it('keeps an identifier param whose value happens to look like an epoch (the KEY disambiguates)', () => {
+    // A real id can coincide with the epoch window; its name proves it is a resource, so it is kept —
+    // unlike an anonymous cache-buster carrying the same shape.
+    for (const name of ['id', 'userId', 'user_id', 'accountId', 'uuid', 'refId', 'session_token']) {
+      assert.equal(normalizeUrl(`https://app.test/x?${name}=1795251407832`),
+        `https://app.test/x?${name}=1795251407832`, `${name} must be kept`);
+    }
+    // same timestamp-shaped value under a cache-buster name IS stripped
+    assert.equal(normalizeUrl('https://app.test/x?_=1795251407832'), 'https://app.test/x');
+  });
 });
 
 describe('findings: vulnerabilityId', () => {

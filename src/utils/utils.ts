@@ -10,6 +10,20 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Split a param/field NAME into lowercase tokens across camelCase, snake_case, kebab and letter/digit
+ * boundaries, so `maxLevel` / `max_level` / `MaxLevel` all yield `['max','level']`. Shared by the
+ * param-name blacklist (candidateGenerator) and the identifier guard in URL canonicalization (findings).
+ */
+export function tokenizeParamName(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')                                        // camelCase boundary
+    .split(/[^a-zA-Z0-9]+/)                                                         // snake / kebab / other separators
+    .flatMap((s) => s.split(/(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/))       // letter/digit boundary
+    .map((s) => s.toLowerCase())
+    .filter(Boolean);
+}
+
 /** URL schemes a clickable's href may use. Anything else is an external-app handler. */
 export const DEFAULT_ALLOWED_LINK_SCHEMES = ['http', 'https', 'javascript', 'about'];
 

@@ -267,6 +267,11 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
       'limit', 'offset', 'page', 'per_page', 'perpage', 'page_size', 'pagesize',
       'size', 'count', 'skip', 'take', 'sort', 'order', 'order_by', 'orderby',
       'depth', 'max', 'min',
+      // Timezone params select the response's REPRESENTATION (how times are rendered), not WHOSE
+      // resource it is — like a locale/pagination param, swapping one returns the same resource and
+      // no content guard can reject the difference. duolingo's `tzoffset=1` sat on ~every endpoint and
+      // forged thousands of nonsense offsets. Non-id; no reference-site TP uses one.
+      'tzoffset', 'tz', 'timezone', 'utcoffset', 'timezoneoffset',
     ],
     // strict real-navigation escalation for high-suspicion candidates the cheap pushState probe missed.
     clientRoutingFullNavigationEscalation: true,

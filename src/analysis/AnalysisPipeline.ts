@@ -196,12 +196,25 @@ export class AnalysisPipeline {
     let candidatesFound = 0;
     let chromeZoneSkipped = 0;   // matches dropped because their node sits in nav/footer chrome (domZone)
 
+    // Candidate generation depends only on the URL, so events sharing a canonical URL produce an
+    // identical candidate set that the `seen` filter below would collapse anyway. Generating once per
+    // CANONICAL GET URL (keeping the first event as the forge representative — the same one `seen`
+    // would have kept) makes generation behavior-identical but avoids re-running the whole preindex
+    // lookup for every duplicate. Decisive on telemetry-heavy SPAs that re-fire the same endpoints on
+    // every restore: duolingo's 58k GET events collapse to ~1.3k canonical URLs, so the forge count
+    // no longer blows past maxGeneratedRequests on noise alone (needs the `_` cache-buster in
+    // VOLATILE_PARAMS to canonicalize, see findings.ts).
+    const uniqueGets: typeof events = [];
+    const seenEventUrls = new Set<string>();
     for (const event of events) {
-      // Only GET is ever forged. Replaying a captured POST/PUT/PATCH/DELETE with a swapped id would
-      // re-trigger a state change on the target site (record progress, mutate/delete another user's
-      // resource) — unsafe and unethical for an authz probe, which must only READ. Non-GET events are
-      // skipped here; forgeRequest also refuses them as a hard backstop.
       if (event.method.toUpperCase() !== 'GET') continue;
+      const canonical = normalizeUrl(event.url);
+      if (seenEventUrls.has(canonical)) continue;
+      seenEventUrls.add(canonical);
+      uniqueGets.push(event);
+    }
+
+    for (const event of uniqueGets) {
       const found = this.candidateGenerator.findUrlCandidates({ url: event.url, site });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
