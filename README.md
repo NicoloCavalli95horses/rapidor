@@ -215,9 +215,12 @@ Crawlee's own bookkeeping (request queue, key-value store) stays separate, under
 ```bash
 npm run stats                              # per-site crawl + IDOR stats, cross-site averages, flagged vulnerabilities
 npm run stats -- --db storage/other-run.db # or any other SQLite file in that shape
+npm run paper-stats                        # paper-support numbers: per-app table + cross-app mean/median/mode + Fig. 4 matrix, and CSVs under reports/
 ```
 
 `npm run compare-ablation` (same `--db` flag) compares these against the [ablation study](docs/analysis.md#ablation-study-http-json-only)'s own tables, when `analysis.ablationMode` was on for that run.
+
+`npm run paper-stats` reads `analysis_stats` + `vulnerabilities` and prints one row per application (the split counts — unique HTTP events, HTTP forges vs client-routing probes, findings per detection class, clickables per state mean/median, exploration/compute/wait/analysis times) plus a cross-application mean/median/mode for every metric, and the identifier-position × value-type matrix. It writes `reports/paper_per_app.csv` and `reports/paper_id_location.csv` for the plots. The split columns are populated by runs of the current engine; to backfill a site captured earlier without re-crawling, re-run `npx tsx scripts/runAnalysisFromDb.ts <START_URL>` (the Fig. 4 matrix is derived from the finding URLs, so it works on older findings too).
 
 ## Reproducible demo (offline, deterministic)
 

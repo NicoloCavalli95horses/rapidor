@@ -47,6 +47,18 @@ export class CrawlStateStore {
     return row.n;
   }
 
+  /**
+   * Number of clickable elements captured in each state of `site` (one entry per state). Fed to the
+   * per-app mean/median the paper reports on UI complexity — computed from the stored `clickables`
+   * JSON array via SQLite's json_array_length, so no row is materialized.
+   */
+  clickableCountsBySite(site: string): number[] {
+    const rows = this.db.prepare(
+      'SELECT json_array_length(clickables) AS n FROM crawl_states WHERE site = ?',
+    ).all(site) as { n: number }[];
+    return rows.map((r) => r.n);
+  }
+
   /** All states for a site, for inspection (tests, future tooling): parsed back into a StateRecord. */
   listBySite(site: string): (StateRecord & { hasScreenshot: boolean })[] {
     const rows = this.db.prepare('SELECT * FROM crawl_states WHERE site = ? ORDER BY id ASC').all(site) as {

@@ -15,9 +15,11 @@ function newStore(name: string, clearOnStart = false): AnalysisStatsStore {
 }
 
 const row = (extra: Partial<AnalysisStatsRow> = {}): AnalysisStatsRow => ({
-  site: 'a.test', httpEvents: 10, segmentsExtracted: 5, reactStates: 3,
-  matchesFound: 2, candidatesFound: 4, requestsGenerated: 4, vulnerabilitiesFlagged: 1,
-  explorationMs: 12_345, analysisMs: 678,
+  site: 'a.test', httpEvents: 10, httpEventsUnique: 8, segmentsExtracted: 5, reactStates: 3,
+  matchesFound: 2, candidatesFound: 4, requestsGenerated: 4, httpForged: 3, clientProbes: 1,
+  vulnerabilitiesFlagged: 1, vulnsHttp: 1, vulnsClient: 0,
+  clickablesPerStateMean: 7.5, clickablesPerStateMedian: 7,
+  explorationMs: 12_345, analysisMs: 678, infeasible: false,
   ...extra,
 });
 
@@ -33,6 +35,17 @@ describe('AnalysisStatsStore', () => {
     store.record(row());
     store.record(row({ httpEvents: 20, vulnerabilitiesFlagged: 2 }));
     assert.deepEqual(store.all(), [row({ httpEvents: 20, vulnerabilitiesFlagged: 2 })]);
+  });
+
+  it('a re-analysis (explorationMs 0) keeps the stored exploration time, updating the rest', () => {
+    const store = newStore('e.db');
+    store.record(row({ explorationMs: 999_000, analysisMs: 100 }));
+    // runAnalysisFromDb re-records with explorationMs:0 (it never explores): the crawl time must survive
+    store.record(row({ explorationMs: 0, analysisMs: 250, vulnerabilitiesFlagged: 3 }));
+    const [r] = store.all();
+    assert.equal(r.explorationMs, 999_000, 'exploration time must be preserved across a re-analysis');
+    assert.equal(r.analysisMs, 250, 'analysis time is still updated');
+    assert.equal(r.vulnerabilitiesFlagged, 3);
   });
 
   it('keeps rows for different sites separate, ordered by site', () => {

@@ -88,12 +88,12 @@ describe('findings: describeExtractedSegment', () => {
   const candidate = { referenceValue: '101', candidateValue: '102' } as Parameters<typeof describeExtractedSegment>[0]['candidate'];
 
   it('names a query param candidate by its key', () => {
-    const segment = { value: '101', parts: [''], index: 1, paramName: 'id' };
+    const segment = { value: '101', parts: [''], index: 1, paramName: 'id', location: 'query' as const };
     assert.equal(describeExtractedSegment({ segment, candidate }), 'query param "id": 101 -> 102');
   });
 
   it('calls a path candidate a path segment', () => {
-    const segment = { value: '101', parts: [''], index: 1 };
+    const segment = { value: '101', parts: [''], index: 1, location: 'path' as const };
     assert.equal(describeExtractedSegment({ segment, candidate }), 'path segment: 101 -> 102');
   });
 });

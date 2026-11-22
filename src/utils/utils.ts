@@ -10,6 +10,36 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Arithmetic mean, or 0 for an empty input. */
+export function mean(values: number[]): number {
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+}
+
+/** Median (average of the two middle values for an even count); 0 for an empty input. */
+export function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * The most frequent value; ties broken by the smallest value, so the result is deterministic. Useful
+ * across the 17-app set where a modal count (e.g. findings per app) is more telling than the mean.
+ * Returns 0 for an empty input.
+ */
+export function mode(values: number[]): number {
+  if (!values.length) return 0;
+  const counts = new Map<number, number>();
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best = values[0];
+  let bestCount = 0;
+  for (const [v, c] of counts) {
+    if (c > bestCount || (c === bestCount && v < best)) { best = v; bestCount = c; }
+  }
+  return best;
+}
+
 /**
  * Split a param/field NAME into lowercase tokens across camelCase, snake_case, kebab and letter/digit
  * boundaries, so `maxLevel` / `max_level` / `MaxLevel` all yield `['max','level']`. Shared by the

@@ -8,6 +8,7 @@
     "typecheck": "tsc",
     "test": "node --import tsx --test test/*.test.ts",
     "stats": "tsx scripts/stats.ts",
+    "paper-stats": "tsx scripts/paperStats.ts",
     "compare-ablation": "tsx scripts/compareAblation.ts",
     "build-demo": "tsx scripts/buildDemo.ts",
     "run-demo": "tsx scripts/runDemo.ts"

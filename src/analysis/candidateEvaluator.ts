@@ -254,9 +254,9 @@ export class CandidateEvaluator {
    * once per run, and — only on a newly inserted row — write the reproduction script. Centralises the
    * record/log/repro contract the three evaluate* paths used to repeat verbatim.
    */
-  private recordFinding({ site, method, referenceUrl, candidateUrl, candidate, motivation, detectionMethod, responseSimilarity, authz, logMessage, reproduction }: {
+  private recordFinding({ site, method, referenceUrl, candidateUrl, candidate, segment, motivation, detectionMethod, responseSimilarity, authz, logMessage, reproduction }: {
     site: string; method: string; referenceUrl: string; candidateUrl: string;
-    candidate: ReturnType<typeof findCandidates>[number]; motivation: string;
+    candidate: ReturnType<typeof findCandidates>[number]; segment: SegmentCandidate; motivation: string;
     detectionMethod: 'http' | 'client-routing'; responseSimilarity: ResponseSimilarity | null;
     authz: AuthzAssessment; logMessage: string;
     reproduction: { referenceUrl: string; candidateUrl: string; kind: ReproductionKind };
@@ -266,6 +266,9 @@ export class CandidateEvaluator {
       id, site, referenceUrl, candidateUrl, method,
       referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
       motivation, detectionMethod, responseSimilarity, authzDiff: authz,
+      // mutated-value position for the paper's Fig. 4 (path index from the right, or a query param)
+      segmentLocation: segment.location,
+      segmentIndex: segment.location === 'path' ? (segment.indexFromRight ?? null) : null,
     });
     this.logConfirmedFinding({ id, inserted, message: logMessage });
     if (inserted) {
@@ -368,7 +371,7 @@ export class CandidateEvaluator {
     if (detectionMethod === 'http' && this.httpContentGuardReject({ forged, original, context: `${event.url} -> ${url}` })) return;
 
     this.recordFinding({
-      site, method: event.method, referenceUrl: event.url, candidateUrl: url, candidate,
+      site, method: event.method, referenceUrl: event.url, candidateUrl: url, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod, responseSimilarity: similarity, authz,
       logMessage: `AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
       // The forge url is the reference for an HTTP finding; the client-routing fallback reproduces the
@@ -384,9 +387,9 @@ export class CandidateEvaluator {
    * HTTP request): there is no server response to forge/compare, so this goes straight to the
    * live pushState+popstate probe, mirroring the client-routing tail of evaluateHttpCandidate.
    */
-  async evaluateClientRoutingCandidate({ site, pageUrl, paramName, candidateUrl, candidate }: {
+  async evaluateClientRoutingCandidate({ site, pageUrl, paramName, candidateUrl, candidate, segment }: {
     site: string; pageUrl: string; paramName: string; candidateUrl: string;
-    candidate: ReturnType<typeof findCandidates>[number];
+    candidate: ReturnType<typeof findCandidates>[number]; segment: SegmentCandidate;
   }): Promise<void> {
     // CHEAP FIRST — pure authz gate before the live pushState probe (see authzGate).
     const authz = await this.authzGate({ candidate, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` });
@@ -404,7 +407,7 @@ export class CandidateEvaluator {
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
 
     this.recordFinding({
-      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate,
+      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
       logMessage: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
       reproduction: { referenceUrl: pageUrl, candidateUrl, kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue } },
@@ -417,9 +420,9 @@ export class CandidateEvaluator {
    * path shape, so there is nothing to forge/compare server-side): goes straight to
    * checkClientSideRoutingForPath, the path equivalent of the pushState+popstate probe above.
    */
-  async evaluateClientRoutingPathCandidate({ site, pageUrl, candidateUrl, candidate }: {
+  async evaluateClientRoutingPathCandidate({ site, pageUrl, candidateUrl, candidate, segment }: {
     site: string; pageUrl: string; candidateUrl: string;
-    candidate: ReturnType<typeof findCandidates>[number];
+    candidate: ReturnType<typeof findCandidates>[number]; segment: SegmentCandidate;
   }): Promise<void> {
     // CHEAP FIRST — the pure authz gate before the live client-routing probe (see authzGate).
     const authz = await this.authzGate({ candidate, context: `${pageUrl} -> ${candidateUrl}` });
@@ -459,7 +462,7 @@ export class CandidateEvaluator {
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
 
     this.recordFinding({
-      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl: confirmedUrl, candidate,
+      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl: confirmedUrl, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
       logMessage: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
       reproduction: { referenceUrl: pageUrl, candidateUrl: confirmedUrl, kind: { type: 'client-routing-path', candidateUrl: confirmedUrl } },

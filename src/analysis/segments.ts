@@ -11,6 +11,11 @@ export interface SegmentCandidate {
   index: number;
   query?: string;     // original search string ("" or "?a=1"), re-attached after splicing a path candidate
   paramName?: string; // set only for query-param candidates: the key, needed by the client-routing fallback
+  // Where the value sits in the URI, recorded on a finding for the paper's identifier-position figure
+  // (Fig. 4). `indexFromRight` counts path segments from the right after stripping the extension
+  // (`/api/lesson/42`: `42`=0, `lesson`=1); it is undefined for a query param (location 'query').
+  location: 'path' | 'query';
+  indexFromRight?: number;
 }
 
 /** Path-segment candidates (all of them) followed by query-param candidates. */
@@ -50,7 +55,8 @@ function getPropertyAt({ urlObj, segments, idx, hasTrailingSlash, query }: {
   const prefix = `${urlObj.origin}/${baseBefore}`;
   const suffix = (ext + baseAfter) + (hasTrailingSlash ? '/' : '');
 
-  return { parts: [prefix, suffix], value, index: 1, query };
+  // index from the right among path segments (last = 0): the paper's Fig. 4 position signal
+  return { parts: [prefix, suffix], value, index: 1, query, location: 'path', indexFromRight: after.length };
 }
 
 function getQueryCandidates({ searchParams, fullPath, valuesToExclude = [] }: {
@@ -59,7 +65,7 @@ function getQueryCandidates({ searchParams, fullPath, valuesToExclude = [] }: {
   const result: SegmentCandidate[] = [];
   for (const [key, value] of searchParams) {
     if (['true', 'false', ...valuesToExclude].includes(value)) continue;
-    result.push({ parts: [`${fullPath}?${key}=`], value, index: 1, paramName: key });
+    result.push({ parts: [`${fullPath}?${key}=`], value, index: 1, paramName: key, location: 'query' });
   }
   return result;
 }

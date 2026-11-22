@@ -8,7 +8,7 @@ import type { VulnerabilityStore, StoredFinding } from '../db/VulnerabilityStore
 import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { spliceSegment, candidateUrlFor } from './segments';
-import { runWithConcurrency } from '../utils/utils';
+import { runWithConcurrency, mean, median } from '../utils/utils';
 import type { AuthzClassifier } from './authzClassifier';
 import { PagePool } from './PagePool';
 import { CandidateGenerator } from './candidateGenerator';
@@ -195,6 +195,8 @@ export class AnalysisPipeline {
     let matchesFound = 0;
     let candidatesFound = 0;
     let chromeZoneSkipped = 0;   // matches dropped because their node sits in nav/footer chrome (domZone)
+    let httpForged = 0;          // HTTP GET forge tasks dispatched (paper split of requests_generated)
+    let clientProbes = 0;        // client-routing probe tasks dispatched
 
     // Candidate generation depends only on the URL, so events sharing a canonical URL produce an
     // identical candidate set that the `seen` filter below would collapse anyway. Generating once per
@@ -231,6 +233,7 @@ export class AnalysisPipeline {
         const key = `http|${event.method}|${normalizeUrl(url)}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        httpForged++;
         tasks.push(() => this.candidateEvaluator.evaluateHttpCandidate({ page, site, event, url, candidate, segment }));
       }
     }
@@ -254,7 +257,8 @@ export class AnalysisPipeline {
           const key = `client|${pageUrl}|${paramName}|${candidate.candidateValue}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          tasks.push(() => this.candidateEvaluator.evaluateClientRoutingCandidate({ site, pageUrl, paramName, candidateUrl: candidateUrl.href, candidate }));
+          clientProbes++;
+          tasks.push(() => this.candidateEvaluator.evaluateClientRoutingCandidate({ site, pageUrl, paramName, candidateUrl: candidateUrl.href, candidate, segment }));
         } else {
           // path segment of the page's own route (e.g. busuu's objective_<uuid>): no matching
           // http_event exists for it, so the only probe available is the page's own client-side
@@ -264,10 +268,20 @@ export class AnalysisPipeline {
           const key = `client|${pageUrl}|path|${candidateUrl}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          tasks.push(() => this.candidateEvaluator.evaluateClientRoutingPathCandidate({ site, pageUrl, candidateUrl, candidate }));
+          clientProbes++;
+          tasks.push(() => this.candidateEvaluator.evaluateClientRoutingPathCandidate({ site, pageUrl, candidateUrl, candidate, segment }));
         }
       }
     }
+
+    // Paper-support per-app aggregates, computed once (used by both the infeasible and the normal
+    // record below). `httpEventsUnique` collapses re-fired endpoints by canonical URL; the clickables
+    // mean/median summarize the app's GUI complexity from the captured states.
+    const httpEventsUnique = new Set(events.map((e) => `${e.method} ${normalizeUrl(e.url)}`)).size;
+    const clickableCounts = crawlStateStore.clickableCountsBySite(site);
+    const clickablesPerStateMean = mean(clickableCounts);
+    const clickablesPerStateMedian = median(clickableCounts);
+    const reactStates = reactStateStore.countBySite(site);
 
     // Per-site forge budget: candidate generation produced more distinct forges than we will fire at a
     // live site (see config.analysis.maxGeneratedRequests). Abandon the site as infeasible — the
@@ -277,8 +291,10 @@ export class AnalysisPipeline {
     if (tasks.length > options.maxGeneratedRequests) {
       log.warning(`AnalysisPipeline: ${site} ABANDONED as infeasible — ${tasks.length} candidate requests exceed the ${options.maxGeneratedRequests} budget; nothing dispatched`);
       statsStore.record({
-        site, httpEvents: events.length, segmentsExtracted, reactStates: reactStateStore.countBySite(site),
-        matchesFound, candidatesFound, requestsGenerated: tasks.length, vulnerabilitiesFlagged: 0,
+        site, httpEvents: events.length, httpEventsUnique, segmentsExtracted, reactStates,
+        matchesFound, candidatesFound, requestsGenerated: tasks.length, httpForged, clientProbes,
+        vulnerabilitiesFlagged: 0, vulnsHttp: 0, vulnsClient: 0,
+        clickablesPerStateMean, clickablesPerStateMedian,
         explorationMs, analysisMs: Date.now() - analysisStartedAt, infeasible: true,
       });
       return;
@@ -320,15 +336,23 @@ export class AnalysisPipeline {
     const flagged = vulnerabilityStore.count(site);
     log.info(`AnalysisPipeline: ${site} — ${flagged} vulnerabilit${flagged === 1 ? 'y' : 'ies'} flagged (${this.candidateEvaluator.confirmedCount} confirmed this run), exploration ${formatDuration(explorationMs)}, analysis ${formatDuration(analysisMs)}`);
 
+    const vulnsByMethod = vulnerabilityStore.countByMethod(site);
     statsStore.record({
       site,
       httpEvents: events.length,
+      httpEventsUnique,
       segmentsExtracted,
-      reactStates: reactStateStore.countBySite(site),
+      reactStates,
       matchesFound,
       candidatesFound,
       requestsGenerated: tasks.length,
-      vulnerabilitiesFlagged: vulnerabilityStore.count(site),
+      httpForged,
+      clientProbes,
+      vulnerabilitiesFlagged: flagged,
+      vulnsHttp: vulnsByMethod.http,
+      vulnsClient: vulnsByMethod.clientRouting,
+      clickablesPerStateMean,
+      clickablesPerStateMedian,
       explorationMs,
       analysisMs,
       infeasible: false,
