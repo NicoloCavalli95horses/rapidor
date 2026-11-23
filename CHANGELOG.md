@@ -2,6 +2,32 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-23 19:10 — fix: recover longer paid resources — asymmetric response-length check
+
+busuu re-derived only 8 of its paid-lesson HTTP findings when ~14 are real. The 6 missing ones
+(`objective_ja_complete_a1_29/34_a/35_a/36/38_a`, `objective_8b3be45f`) pass the authz gate against the
+active lesson `5f` and forge a 200 with real content, but were dropped by the response-similarity gate.
+
+- **Why:** `getServerResponseSimilarity`'s body-length arm used a SYMMETRIC band (`checkIntSimilarity`,
+  ratio in `[0.45, 2.22]`). The reference is the single observed "active" lesson `5f` (a *writing* lesson,
+  27 KB); longer paid lessons of the same shape (identical 200 + `application/json` + 7 top-level keys) ran
+  2.25–2.64× its length and tripped the upper cap — a 4% length difference flipped the verdict (`22560674`
+  at 2.16× kept, `8b3be45f` at 2.25× dropped). A paid resource legitimately carries MORE content than the
+  reference, so a larger body is not evidence against a leak; only a much SMALLER body (stub/denial) is.
+- **What changed:** new `isLengthNotTruncated` in `responseEvaluate.ts` (keeps the lower bound — candidate
+  ≥ `0.45×` the reference — and drops the upper one); `getServerResponseSimilarity.bodyLength` now uses it.
+  Shape stays symmetric (`checkIntSimilarity` on the top-level key count) — a different-shaped response is a
+  different resource. Shared by BOTH the main pipeline and the ablation (the two analysis modules keep the
+  same tools; the ablation only differs in not using React states).
+- **Effect / regressions:** offline demo HTTP findings — busuu **8 → 14** (the +6 are exactly the longer
+  Group-A lessons, no spurious additions; the 2 Cluster-B siblings `06c5a9cd`/`2f34a6a8` stay out — they
+  fail the authz gate, a separate matter). The 4 reference sites are **unchanged**: promova 16 → 16 (same
+  set — the rule is strictly more permissive, so no finding can be lost), lingualeo/ejoy/pimsleur 0 → 0
+  (their TPs are client-routing = DOM comparison, untouched by construction). `responseEvaluate` 31/31
+  (+1 `isLengthNotTruncated` suite, +1 larger-body case), ablation 9/9, AnalysisPipeline 12/12, typecheck
+  clean. Run `recheckFindings` on the 4 live sites to confirm no stored finding is lost (guaranteed by the
+  monotonic relaxation, but it is the official gate).
+
 ## 2026-11-23 14:30 — fix: lingualeo refclmark HTTP FPs — tracking-param filter
 
 A depth-4 lingualeo crawl flagged 19 findings, only 9 TP (the `wordTranslate` client-routing training siblings). The other 10 were all the SAME request: the CRM buy-page data blob `/_next/data/…/en/buy/nt_ton_prem_web_2690n.json?…&refclmark=2&campaignId=…`, HTTP-detected, swapping `refclmark` from `2` to wordset ids.
@@ -67,31 +93,3 @@ Duolingo's analysis was abandoned as `infeasible` — candidate generation produ
   - `AnalysisPipeline` generates candidates **once per canonical GET URL** (dedup before the generation loop) instead of once per raw event — behaviour-identical to the existing forge-dedup (first-wins), but it no longer re-runs the whole preindex lookup for every duplicate (duolingo: 58k → 79 generations).
   - `tzoffset`/`timezone`/`tz`/`utcoffset` added to `analysis.paramBlacklist` (representation params, not object references).
 - **Effect:** duolingo 110k → 458 forges (feasible). No reference site uses any stripped/blacklisted param (`_`/`ts`/`tzoffset` absent on busuu/pimsleur/lingualeo/babbel), and the event-dedup is behaviour-preserving, so the dispatched set for the reference sites is unchanged. Decision-logic (guards, response comparison) untouched. New unit tests in findings/utils; full analysis + ablation suites green (60 tests). Live `recheckFindings`/`runAnalysisFromDb` regression skipped per the user (re-crawl pending).
-
-## 2026-11-22 15:30 — safety: block external protocol handlers (mailto:/tel:/sms:/webcal:/zoommtg:/…)
-
-Clicking an `example@gmail.com`-style link (or any `mailto:`/`tel:`/`sms:`/`webcal:`/`zoommtg:`/app-deep-link) made Chromium hand the URL to the OS, launching an external app and pulling the crawler out of the page. These links carry no paid resource to probe, so they are pure noise and risk.
-
-- **Why:** keep the crawler inside the page under exploration; never spawn external processes.
-- **What changed:** new `allowedLinkSchemes` allowlist (default `http, https, javascript, about`). Two layers: (1) `ClickableExtractor` drops any clickable whose `href` uses a non-allowlisted scheme, so it is never offered; (2) a capture-phase in-page guard (`blockExternalProtocols`, installed by `ActionExecutor` via `addInitScript` + a one-off evaluate) `preventDefault`s clicks on such anchors, covering cases that slip past extraction (wrapper clicks, dynamically-set hrefs). Shared `linkScheme`/`isExternalAppLink` helpers in `utils`.
-- **Effect:** external-app handoffs no longer happen during exploration. New tests in `ClickableExtractor`, `ActionExecutor`, `utils`; full suite green. No change to geometry, fingerprints, or the HTTP/analysis path.
-
-**Severity: high — cross-site contamination that invalidated multi-site analyses.** `preindexed_values` has no `site` column, and `findByValue`/`countByValue` filtered only `WHERE value = ?`. But the DB holds many sites at once (`db.overwriteExistingDomain` wipes only the domain being re-crawled, never the others), so a value lookup returned EVERY site's nodes. Analysing celpipsimulator, its `/blog?_rsc=` segment `blog` matched **babbel's** footer `blog` link (the value `blog` was indexed by 4 sites: arabicroad 2, lingualeo 40, babbel 14, celpip 10) and forged celpipsimulator's `/privacy` from babbel's sibling — a cross-site false positive whose very motivation showed babbel URLs (`about.babbel.com`, "Inside Babbel").
-
-- **Both lookups are now site-scoped** (`PreindexedValueStore.findByValue`/`countByValue` take `{ value, site }`): `WHERE value = ? AND state_id IN (SELECT id FROM react_states WHERE site = ?)`. Via the state's own site (state_id → react_states.site), so it is correct on an existing DB with no migration/backfill. New `idx_react_states_site` indexes the subquery (hot path during candidate generation). `candidateGenerator.findUrlCandidates` now takes `site`; `AnalysisPipeline` passes it at both call sites.
-- **Effect**: verified on the live DB — `findByValue({ value:'blog', site:'www.celpipsimulator.com' })` returns celpip's 10 rows, not the 66 across 4 sites; babbel's footer no longer leaks in, so the celpip FP is gone. Only ever REMOVES wrong-site candidates; a site's own candidates are unchanged.
-- **Caveat**: any finding in a shared DB produced before this fix may be cross-contaminated — re-run `runAnalysisFromDb` per site (the capture data is fine; only candidate generation was wrong). A finding whose motivation references another site's data was this bug.
-- Tests: `PreindexedValueStore.test.ts` rewritten site-aware + a dedicated cross-site isolation case; `candidateGenerator.test.ts` updated. 19/19 in the two files, typecheck clean.
-
-## 2026-11-20 17:15 — design: explore ONE deep target page; retry the stage-3 client-routing escalation
-
-Two coupled changes, both driven by how noisy these language-learning SPAs are to crawl neutrally.
-
-**Design shift — a single, manually-chosen target page explored deeply, not a wide shallow sweep.** A neutral seed wastes the 45-min budget wandering chrome/sections and never reaches the deep lesson/exercise flow where the IDORs live (busuu's `objective_<uuid>` sits ~3 clicks below the timeline). New defaults encode the workflow:
-- `maxDepth` **3 → 4** (headroom for a lesson→start→exercise flow, with margin for an intermediate step).
-- `ignoreClickablesWithin` default **`['nav','footer']`** (was `[]`): keep the crawler on the target page by not clicking navigation/footer chrome. **`header` is deliberately NOT included** — busuu renders its lesson cards (the real targets) inside a `<header>`, so ignoring it would make them unreachable (the same header-is-content trap as the domZone filter). This is what the earlier busuu run hit: `header` was still blacklisted, the lesson cards were never clicked, and the crawl stayed on one URL.
-- Combines with `randomizeClickOrder` (already on) so the deep exploration samples the whole clickable set.
-
-**Stage-3 client-routing retry** (`config.analysis.clientRoutingEscalationAttempts`, default **2**). The strict stage-3 full-navigation escalation (`confirmByFullNavigation`) — the costly real-load confirmation that decides for ejoy-class Next.js routes — was **single-shot**, while the cheap pushState probe already retried 3×. A single real load of a fetch-gated route (ejoy's lessons fetch their content by id over XHR) can snapshot an *incomplete* render and read as a false NEGATIVE, flipping which paid siblings surface run-to-run (ejoy's 4 locked lessons 1032/1033/1034/1035: 2 found per run, but a different 2). Now retried on a **flaky** reject only — capture failed / inert / not-found; an ACCEPT (null) or a DETERMINISTIC redirect-away ends immediately (re-navigating can't change those). Split `confirmByFullNavigation` into a retry loop + `confirmByFullNavigationOnce`; the redirect-away reason is now a shared `REDIRECT_AWAY_PREFIX` constant. **Can only ever recover a finding, never lose one** (a genuine inert/not-found still rejects on the last attempt). Cost is bounded: the retry fires only on a high-suspicion candidate that reached stage 3 and got a negative — a small set — and the knob can be lowered to 1 on a huge site. Threaded through `AnalysisPipelineOptions` / `ClientRoutingVerifierOptions` / the three scripts.
-
-Decision-logic change (owner-run `recheckFindings` on the 4 reference sites owed). Typecheck clean; `clientRouting` + `AnalysisPipeline` tests green.

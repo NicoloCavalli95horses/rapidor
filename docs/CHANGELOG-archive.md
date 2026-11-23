@@ -2,6 +2,34 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-22 15:30 — safety: block external protocol handlers (mailto:/tel:/sms:/webcal:/zoommtg:/…)
+
+Clicking an `example@gmail.com`-style link (or any `mailto:`/`tel:`/`sms:`/`webcal:`/`zoommtg:`/app-deep-link) made Chromium hand the URL to the OS, launching an external app and pulling the crawler out of the page. These links carry no paid resource to probe, so they are pure noise and risk.
+
+- **Why:** keep the crawler inside the page under exploration; never spawn external processes.
+- **What changed:** new `allowedLinkSchemes` allowlist (default `http, https, javascript, about`). Two layers: (1) `ClickableExtractor` drops any clickable whose `href` uses a non-allowlisted scheme, so it is never offered; (2) a capture-phase in-page guard (`blockExternalProtocols`, installed by `ActionExecutor` via `addInitScript` + a one-off evaluate) `preventDefault`s clicks on such anchors, covering cases that slip past extraction (wrapper clicks, dynamically-set hrefs). Shared `linkScheme`/`isExternalAppLink` helpers in `utils`.
+- **Effect:** external-app handoffs no longer happen during exploration. New tests in `ClickableExtractor`, `ActionExecutor`, `utils`; full suite green. No change to geometry, fingerprints, or the HTTP/analysis path.
+
+**Severity: high — cross-site contamination that invalidated multi-site analyses.** `preindexed_values` has no `site` column, and `findByValue`/`countByValue` filtered only `WHERE value = ?`. But the DB holds many sites at once (`db.overwriteExistingDomain` wipes only the domain being re-crawled, never the others), so a value lookup returned EVERY site's nodes. Analysing celpipsimulator, its `/blog?_rsc=` segment `blog` matched **babbel's** footer `blog` link (the value `blog` was indexed by 4 sites: arabicroad 2, lingualeo 40, babbel 14, celpip 10) and forged celpipsimulator's `/privacy` from babbel's sibling — a cross-site false positive whose very motivation showed babbel URLs (`about.babbel.com`, "Inside Babbel").
+
+- **Both lookups are now site-scoped** (`PreindexedValueStore.findByValue`/`countByValue` take `{ value, site }`): `WHERE value = ? AND state_id IN (SELECT id FROM react_states WHERE site = ?)`. Via the state's own site (state_id → react_states.site), so it is correct on an existing DB with no migration/backfill. New `idx_react_states_site` indexes the subquery (hot path during candidate generation). `candidateGenerator.findUrlCandidates` now takes `site`; `AnalysisPipeline` passes it at both call sites.
+- **Effect**: verified on the live DB — `findByValue({ value:'blog', site:'www.celpipsimulator.com' })` returns celpip's 10 rows, not the 66 across 4 sites; babbel's footer no longer leaks in, so the celpip FP is gone. Only ever REMOVES wrong-site candidates; a site's own candidates are unchanged.
+- **Caveat**: any finding in a shared DB produced before this fix may be cross-contaminated — re-run `runAnalysisFromDb` per site (the capture data is fine; only candidate generation was wrong). A finding whose motivation references another site's data was this bug.
+- Tests: `PreindexedValueStore.test.ts` rewritten site-aware + a dedicated cross-site isolation case; `candidateGenerator.test.ts` updated. 19/19 in the two files, typecheck clean.
+
+## 2026-11-20 17:15 — design: explore ONE deep target page; retry the stage-3 client-routing escalation
+
+Two coupled changes, both driven by how noisy these language-learning SPAs are to crawl neutrally.
+
+**Design shift — a single, manually-chosen target page explored deeply, not a wide shallow sweep.** A neutral seed wastes the 45-min budget wandering chrome/sections and never reaches the deep lesson/exercise flow where the IDORs live (busuu's `objective_<uuid>` sits ~3 clicks below the timeline). New defaults encode the workflow:
+- `maxDepth` **3 → 4** (headroom for a lesson→start→exercise flow, with margin for an intermediate step).
+- `ignoreClickablesWithin` default **`['nav','footer']`** (was `[]`): keep the crawler on the target page by not clicking navigation/footer chrome. **`header` is deliberately NOT included** — busuu renders its lesson cards (the real targets) inside a `<header>`, so ignoring it would make them unreachable (the same header-is-content trap as the domZone filter). This is what the earlier busuu run hit: `header` was still blacklisted, the lesson cards were never clicked, and the crawl stayed on one URL.
+- Combines with `randomizeClickOrder` (already on) so the deep exploration samples the whole clickable set.
+
+**Stage-3 client-routing retry** (`config.analysis.clientRoutingEscalationAttempts`, default **2**). The strict stage-3 full-navigation escalation (`confirmByFullNavigation`) — the costly real-load confirmation that decides for ejoy-class Next.js routes — was **single-shot**, while the cheap pushState probe already retried 3×. A single real load of a fetch-gated route (ejoy's lessons fetch their content by id over XHR) can snapshot an *incomplete* render and read as a false NEGATIVE, flipping which paid siblings surface run-to-run (ejoy's 4 locked lessons 1032/1033/1034/1035: 2 found per run, but a different 2). Now retried on a **flaky** reject only — capture failed / inert / not-found; an ACCEPT (null) or a DETERMINISTIC redirect-away ends immediately (re-navigating can't change those). Split `confirmByFullNavigation` into a retry loop + `confirmByFullNavigationOnce`; the redirect-away reason is now a shared `REDIRECT_AWAY_PREFIX` constant. **Can only ever recover a finding, never lose one** (a genuine inert/not-found still rejects on the last attempt). Cost is bounded: the retry fires only on a high-suspicion candidate that reached stage 3 and got a negative — a small set — and the knob can be lowered to 1 on a huge site. Threaded through `AnalysisPipelineOptions` / `ClientRoutingVerifierOptions` / the three scripts.
+
+Decision-logic change (owner-run `recheckFindings` on the 4 reference sites owed). Typecheck clean; `clientRouting` + `AnalysisPipeline` tests green.
+
 
 ## 2026-11-20 16:30 — refactor: decompose candidateEvaluator (525 → 499 lines), behavior-preserving
 

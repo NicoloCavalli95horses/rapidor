@@ -16,6 +16,22 @@ export function checkIntSimilarity(a: number, b: number, thr = RESPONSE_SIMILARI
 }
 
 /**
+ * Body-length arm of response similarity — ASYMMETRIC on purpose. A forged body LARGER than the
+ * reference is NOT evidence against a leak: a paid / higher-privilege resource legitimately returns
+ * MORE content than the reference event's (busuu's longer paid lessons ran ~2.2-2.6x the reference
+ * "writing" lesson's length; the symmetric cap in `checkIntSimilarity` dropped them even though status,
+ * content-type and top-level shape all matched). Only a body much SMALLER — a stub, a denial, a
+ * truncated error — argues the swap reached nothing. So keep the lower bound (candidate at least `thr`
+ * of the reference) and drop the upper one. Shape stays symmetric (checkIntSimilarity on the key count):
+ * a different-shaped response is a different resource. Zero handling mirrors checkIntSimilarity.
+ */
+export function isLengthNotTruncated(refLen: number, candLen: number, thr = RESPONSE_SIMILARITY_THRESHOLD): boolean {
+  if (refLen === 0) return candLen === 0;
+  if (!Number.isFinite(refLen) || !Number.isFinite(candLen)) return false;
+  return candLen / refLen >= thr;
+}
+
+/**
  * Deviation from RAPIDOR, deliberate: responseEvaluator.js's areFieldsEqual compares `headers` with
  * `!==`, i.e. object identity — two freshly-built header objects are never `===`, so that check is
  * either always-false (fetch-originated traffic, breaking detection) or a string compare that only
@@ -65,8 +81,10 @@ export function getServerResponseSimilarity(reference: ResponseLike, candidate: 
 
   const refLen = bodyLengthOf(reference);
   const candLen = bodyLengthOf(candidate);
-  // missing on either side: inconclusive, not a mismatch (nothing to compare against)
-  const isBodyLengthSimilar = refLen === undefined || candLen === undefined || checkIntSimilarity(refLen, candLen);
+  // missing on either side: inconclusive, not a mismatch (nothing to compare against). Present on both:
+  // ASYMMETRIC (isLengthNotTruncated) — a LARGER forged body is fine (a paid resource carries more
+  // content); only a much SMALLER one (a stub/denial) argues the swap reached nothing.
+  const isBodyLengthSimilar = refLen === undefined || candLen === undefined || isLengthNotTruncated(refLen, candLen);
 
   // body shape needs the actual text (to parse as JSON): also inconclusive -> similar when absent
   const refKeys = reference.body ? topLevelKeyCount(reference.body) : undefined;

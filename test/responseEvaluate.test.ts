@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, isErrorEnvelopeResponse, scopeDiffsToResource, excludeSwapDiff } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, isLengthNotTruncated, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, isErrorEnvelopeResponse, scopeDiffsToResource, excludeSwapDiff } from '../src/analysis/responseEvaluate';
 
 describe('scopeDiffsToResource', () => {
   const diff = (path: (string | number)[], reference: unknown, current: unknown) =>
@@ -105,6 +105,24 @@ describe('checkIntSimilarity', () => {
   });
 });
 
+describe('isLengthNotTruncated (asymmetric body-length check)', () => {
+  it('accepts an equal or much LARGER body (a paid resource legitimately carries more content)', () => {
+    assert.equal(isLengthNotTruncated(100, 100), true);
+    assert.equal(isLengthNotTruncated(100, 300), true);    // 3x bigger: no upper bound
+    assert.equal(isLengthNotTruncated(100, 10000), true);
+  });
+  it('rejects a body much SMALLER than the reference (a stub / denial / truncation)', () => {
+    assert.equal(isLengthNotTruncated(100, 44), false);    // ratio 0.44 < 0.45
+    assert.equal(isLengthNotTruncated(100, 45), true);     // ratio 0.45 at the floor
+    assert.equal(isLengthNotTruncated(100, 0), false);
+  });
+  it('mirrors checkIntSimilarity zero/non-finite handling', () => {
+    assert.equal(isLengthNotTruncated(0, 0), true);
+    assert.equal(isLengthNotTruncated(0, 5), false);
+    assert.equal(isLengthNotTruncated(Number.NaN, 5), false);
+  });
+});
+
 describe('getServerResponseSimilarity', () => {
   const reference = { status: 200, headers: {}, body: '{"data":"lorem ipsum"}', contentType: 'application/json' };
 
@@ -127,13 +145,25 @@ describe('getServerResponseSimilarity', () => {
     assert.equal(getServerResponseSimilarity(reference, candidate).areSimilar, false);
   });
 
+  it('is similar when the candidate body is much LARGER but same shape (a longer paid resource)', () => {
+    const bigger = { status: 200, headers: {}, body: `{"data":"${'x'.repeat(500)}"}`, contentType: 'application/json' };
+    const result = getServerResponseSimilarity(reference, bigger);   // reference ~22 bytes, bigger ~515
+    assert.equal(result.bodyLength.isSimilar, true);   // no upper bound: more content is fine
+    assert.equal(result.bodyShape.candKeys, 1);        // same top-level shape
+    assert.equal(result.areSimilar, true);
+  });
+
   it('falls back to the content-length header when the body text is unavailable (e.g. a cancelled stream)', () => {
     const ref = { status: 200, headers: { 'content-length': '20' }, body: '', contentType: 'application/json' };
     const closeCandidate = { status: 200, headers: {}, body: '{"data":"premium!!!"}', contentType: 'application/json' };
     assert.equal(getServerResponseSimilarity(ref, closeCandidate).bodyLength.isSimilar, true);
 
-    const farCandidate = { status: 200, headers: {}, body: '{"a":"this is a much much much longer response body"}', contentType: 'application/json' };
-    assert.equal(getServerResponseSimilarity(ref, farCandidate).bodyLength.isSimilar, false);
+    // ASYMMETRIC: a much SMALLER body (a stub/denial) is still rejected by the lower bound...
+    const truncated = { status: 200, headers: {}, body: '{}', contentType: 'application/json' };
+    assert.equal(getServerResponseSimilarity(ref, truncated).bodyLength.isSimilar, false);
+    // ...but a much LARGER body is NOT (a paid resource carries more content).
+    const larger = { status: 200, headers: {}, body: '{"a":"this is a much much much longer response body"}', contentType: 'application/json' };
+    assert.equal(getServerResponseSimilarity(ref, larger).bodyLength.isSimilar, true);
   });
 
   it('treats a missing body (no text, no content-length) as inconclusive for length/shape, not a mismatch', () => {
