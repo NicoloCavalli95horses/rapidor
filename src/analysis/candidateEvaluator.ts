@@ -10,7 +10,7 @@ import { type SegmentCandidate } from './segments';
 import { forgeRequestCached, type ResponseLike } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, excludeSwapDiff, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
@@ -303,12 +303,14 @@ export class CandidateEvaluator {
       differences: compareObj(candidate.referenceProps, candidate.candidateProps),
       swapPath: candidate.path,
     });
-    const authz = await assessAuthZ({ differences, classifier: this.deps.classifier });
+    // Classify WITHOUT the swapped identifier's own diff (excludeSwapDiff), but keep the full diff on the
+    // returned assessment so the recorded motivation still shows what was swapped.
+    const authz = await assessAuthZ({ differences: excludeSwapDiff({ differences, swapPath: candidate.path }), classifier: this.deps.classifier });
     if (!authz.isAuthzRelevant) {
       log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${context} | ${describeDiffs(differences)}`);
       return null;
     }
-    return authz;
+    return { ...authz, differences };
   }
 
   /**

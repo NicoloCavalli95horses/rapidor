@@ -163,6 +163,19 @@ export function scopeDiffsToResource({ differences, swapPath }: {
   return differences.filter((d) => prefix.every((seg, i) => d.path[i] === seg));
 }
 
+/**
+ * Drops the diff AT the swap path — the identifier being swapped. It differs by construction, so it can
+ * never be its own entitlement evidence: duolingo's `href: "account" -> "privacy"` passed the gate only
+ * because the swapped VALUE read like an authz term. The signal must come from ANOTHER property
+ * (`lesson.lock` beside `lesson.id`). Verified offline on every stored finding: only that FP lost its keys.
+ */
+export function excludeSwapDiff({ differences, swapPath }: {
+  differences: PropDiff[]; swapPath: (string | number)[];
+}): PropDiff[] {
+  const rel = swapPath[0] === 'props' ? swapPath.slice(1) : swapPath;   // compareObj paths are relative to props
+  return differences.filter((d) => d.path.length !== rel.length || d.path.some((seg, i) => String(seg) !== String(rel[i])));
+}
+
 /** Human-readable "which props differ and how", for the vulnerabilities table's `motivation` column. */
 export function describeDiffs(differences: PropDiff[]): string {
   if (differences.length === 0) return '(no prop differences)';

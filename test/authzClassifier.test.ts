@@ -21,6 +21,17 @@ function newClassifier(): AuthzClassifier {
 // Loads a real embedding model (cached under node_modules/@huggingface/transformers/.cache after
 // the first run); slower than the rest of the suite, same tradeoff RAPIDOR's own offscreen
 // classifier already accepted.
+// No model needed: NON_AUTHZ_TERMS short-circuits before the cache/model, even over a high cached score.
+describe('AuthzClassifier: non-authz terms', () => {
+  it('never classifies a term containing the word "privacy" as authz-relevant', async () => {
+    const classifier = newClassifier();
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('privacy', { score: 1, isAuthZRelevant: true });
+    for (const term of ['privacy', 'Privacy', 'Privacy settings', 'settings-privacy', 'privacyPolicy']) {
+      assert.equal((await classifier.classify(term)).isAuthZRelevant, false, term);
+    }
+  });
+});
+
 describe('AuthzClassifier', { timeout: 120_000 }, () => {
   it('classifies an authorization-relevant key above the threshold', async () => {
     const result = await newClassifier().classify('premium');

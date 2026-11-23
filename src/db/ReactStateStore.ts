@@ -119,6 +119,13 @@ export class ReactStateStore {
     return rows.map((r) => r.fingerprint);
   }
 
+  /** Node count of every graph captured at `url` for `site` (the auth gate's "login page is much smaller" check). */
+  nodeCountsForUrl({ site, url }: { site: string; url: string }): number[] {
+    const rows = this.db.prepare(`SELECT (SELECT count(*) FROM json_each(graph, '$.nodes')) AS n FROM react_states WHERE site = ? AND url = ?`)
+      .all(site, url) as { n: number }[];
+    return rows.map((r) => r.n);
+  }
+
   /**
    * Streams every captured React graph for a site one row at a time (never materialising them all at
    * once — a site can hold a few hundred, each a non-trivial component tree). Used to build the

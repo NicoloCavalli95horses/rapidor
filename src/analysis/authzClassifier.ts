@@ -74,6 +74,9 @@ export class AuthzClassifier {
     // per-process (one logic version), so it stays keyed by the normalized form — which is also what
     // tests pre-seed to skip loading the model.
     const norm = normalizeKey(key);
+    // Live policy, like THRESHOLD: a term whose any WORD is in NON_AUTHZ_TERMS is never authz-relevant,
+    // without touching the persisted score (so no CLASSIFIER_VERSION bump) and without loading the model.
+    if (norm.split(' ').some((w) => NON_AUTHZ_TERMS.has(w))) return { score: 0, isAuthZRelevant: false };
     const storeKey = `${CLASSIFIER_VERSION}:${norm}`;
     // THRESHOLD is applied at READ time (recomputed from the stored score), so lowering/raising it takes
     // effect on already-cached scores without a CLASSIFIER_VERSION bump — only the SCORE is a function of
@@ -98,6 +101,15 @@ export class AuthzClassifier {
     return result;
   }
 }
+
+/**
+ * Words that read like access control to the embedding model but never mark a PAID / higher-privilege
+ * resource, the only entitlement RAPIDOR looks for. `privacy` (privacy policy, privacy settings) is the
+ * user's own data-protection page: duolingo's `/settings/account -> /settings/privacy` and its footer
+ * "Privacy" link both passed the gate on it. Matched per normalized word, so `Privacy settings`,
+ * `settings-privacy`, `privacyPolicy` are all covered. A semantic fact like PREINDEXED_KEYS, not a knob.
+ */
+const NON_AUTHZ_TERMS = new Set(['privacy']);
 
 // Bump whenever classify's normalization or embedding input changes, to invalidate the persisted
 // authz_classifications rows a previous version wrote. v2: camelCase/snake split + "whether" framing.

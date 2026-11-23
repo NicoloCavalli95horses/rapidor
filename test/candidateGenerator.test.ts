@@ -6,7 +6,26 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { PreindexedValueStore } from '../src/db/PreindexedValueStore';
 import { ReactStateStore, type RapidorGraph } from '../src/db/ReactStateStore';
-import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted, isLocaleParam } from '../src/analysis/candidateGenerator';
+import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted, isLocaleParam, sameIdShape } from '../src/analysis/candidateGenerator';
+
+describe('sameIdShape (an identifier slot keeps its type)', () => {
+  it("treats a React number 1 and a string '1' alike (both numeric, compared as strings)", () => {
+    assert.equal(sameIdShape({ original: '1', replacement: String(1) }), true);
+    assert.equal(sameIdShape({ original: '73', replacement: String(76) }), true);
+  });
+
+  it('rejects numeric <-> non-numeric swaps (duolingo relative_domains=1 -> privacy, promova 73 -> profile)', () => {
+    assert.equal(sameIdShape({ original: '1', replacement: 'privacy' }), false);
+    assert.equal(sameIdShape({ original: '73', replacement: 'profile' }), false);
+    assert.equal(sameIdShape({ original: 'account', replacement: '42' }), false);
+  });
+
+  it('keeps word <-> word swaps (slugs, prefixed ids) and ignores surrounding whitespace', () => {
+    assert.equal(sameIdShape({ original: 'deriva-genetica', replacement: 'albrecht-durer' }), true);
+    assert.equal(sameIdShape({ original: 'objective_a1b2', replacement: 'objective_c3d4' }), true);
+    assert.equal(sameIdShape({ original: ' 12 ', replacement: '13' }), true);
+  });
+});
 
 describe('paramNameBlacklisted (tokenized)', () => {
   const blacklist = ['limit', 'offset', 'page', 'size', 'max', 'min', 'order'];

@@ -8,7 +8,7 @@ import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
-import { paramNameBlacklisted, isLocaleParam } from './candidateGenerator';
+import { paramNameBlacklisted, isLocaleParam, sameIdShape } from './candidateGenerator';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
 import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse, isErrorEnvelopeResponse } from './responseEvaluate';
@@ -194,6 +194,8 @@ export class AblationPipeline {
             // Blacklist applies in BOTH directions (as in the main pipeline): also skip a candidate whose
             // REPLACEMENT value is a blacklisted path-segment root (mutating an id INTO `/app` etc.).
             if (!segment.paramName && options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
+            // same type-shape rule as the main pipeline (see candidateGenerator.sameIdShape)
+            if (!sameIdShape({ original: segment.value, replacement: String(candidate.candidateValue) })) continue;
             candidatesFound++;
             // keeps the event's other query params (see candidateUrlFor's doc comment)
             const url = candidateUrlFor({ url: event.url, segment, value: candidate.candidateValue });

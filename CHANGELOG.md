@@ -2,6 +2,15 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-23 — fix: authz gate ignores the swapped identifier + same-type id swaps + `privacy` is never authz (duolingo)
+
+duolingo flagged 2 FPs, both swaps onto a "Privacy" link. Neither was caused by missing history (live DOM: neither link is inside nav/footer, and `/privacy` was already crawled), so a nav/footer harvest would not have helped.
+
+- **Why:** (1) `/settings/account -> /settings/privacy`: the ONLY sensitive key was the swapped href VALUE `privacy` — the identifier being swapped acted as its own entitlement evidence. (2) `help/faq?relative_domains=1 -> privacy`: the value `1` matched by token inside a lesson button's href (`/lesson/unit/1/level/1`), whose "sibling" in the same Link component is the footer `/privacy` link — a numeric slot swapped for a word.
+- **What changed:** `excludeSwapDiff` drops the swap-path diff before `assessAuthZ` (motivation keeps the full diff); `sameIdShape` skips numeric <-> non-numeric swaps at generation (main + ablation; string form, so React `1` and `'1'` are both numeric); `NON_AUTHZ_TERMS = {privacy}` in the classifier, matched per normalized word at read time (no `CLASSIFIER_VERSION` bump).
+- **Auth gate false EXPIRED (same batch):** `runAnalysisFromDb` kept aborting on duolingo even right after `refreshAuth`, because the gate required an EXACT fingerprint match and duolingo `/learn` had 220 captures with 220 distinct fingerprints (live, logged in: 562 nodes, no redirect, no login form). A mismatch is no longer expiry: EXPIRED now needs positive evidence — left the entry route, a password field, or a tree < 0.5× the smallest captured one (`ReactStateStore.nodeCountsForUrl`). Verified live both ways: logged in → FRESH; empty profile → EXPIRED (redirected to `/`). `authFreshness.test.ts` rewritten, 7/7.
+- **Effect:** live duolingo re-analysis 2 → 0 findings, 569 → 354 requests, 3m06s → 49s; the `relative_domains` candidate is no longer generated, the `settings/privacy` one no longer passes the gate. Offline check on every stored finding: no TP of pimsleur (4), lingualeo (19), promova (25) affected; 2 odd mondly rows (`4 -> leoSprint/savannah`, lingualeo values — likely pre-site-scoping residue) would also drop. Tests: +6 unit (sameIdShape incl. `'1'`/`1`, excludeSwapDiff, privacy deny); pipeline/ablation 21/21.
+
 ## 2026-11-23 — fix: stage-2 redirect-away guard + negative sibling-group inference + route-level probe dedup (clozemaster)
 
 clozemaster produced 101 client-routing FPs in 65 min of analysis: every paid wikipedia story bounces to `/pro`, and nothing noticed.
@@ -78,12 +87,3 @@ Decision-logic change (owner-run `recheckFindings` on the 4 reference sites owed
 - **Extracted three private helpers**: `httpContentGuardReject` (the HTTP-only content guards — error-status, empty-data, error-envelope, history/dedup — returning keep/drop, still synchronous so the forged-key check-and-add stays atomic before the record), `recordFinding` (the shared id→record→log→reproduction tail, with the id now always built from `method` + the recorded `candidateUrl`), and `clientRoutingQueryFallback` (the query-param client-routing fallback for an unconfirmed HTTP forge). Each `evaluate*` now reads as a short linear pipeline.
 - **Fixed a stale comment**: `evaluateClientRoutingPathCandidate` still carried the ~11-line description of the REMOVED query-strip fallback (superseded by `rewriteCorrelatedQuery` + drop); removed it, kept the accurate reconcile block.
 - **Behavior preserved**: no change to any guard, ordering, recorded field, log message, or reproduction kind — only relocation/de-duplication. `AnalysisPipeline.test.ts` 9/9 green, typecheck clean. A `recheckFindings` on the reference sites is still owed before fully trusting it there (owner-run).
-
-## 2026-11-20 15:45 — exploration: try a state's clickables in random order (reach page-centre buttons)
-
-On a large app a budget-bounded DFS never leaves the navigation: clickables are captured in DOM/reading order (nav/header first) and each is explored depth-first to exhaustion, so the 45min/depth-2 budget drains on chrome before the page-centre lesson buttons are ever clicked. That is why a fresh busuu crawl captured only 11 top-level URLs and no `.../objective_<uuid>/...` page — so candidate generation had no reference URL to propose the known objective-sibling IDORs from (the objective ids are in the React props but a client-routing path candidate needs a VISITED url carrying the value).
-
-- **`config.randomizeClickOrder`** (default on): `DfsExplorer.visit` now iterates a per-tab random shuffle (`shuffled`, Fisher-Yates in utils) of the state's clickables instead of their capture order, so central buttons get an equal early chance within the budget.
-- **No engine/multitab change needed** — the selection is already decentralized: a tab shuffles a COPY of `state.clickables` locally, and the synchronous `claim()` still guarantees per-`(state,element)` exclusivity between tabs. `claimable()`/restore are order-independent (restore replays the recorded `state.path`, not the try order), and element identity (tag+rect+text) does not depend on order. Threaded through `ExplorationLimits` → `buildExplorer`.
-- Trade-off: a crawl is no longer repeatable run-to-run. (The disk config hardcodes it `true`; the comment still mentions a `RANDOMIZE_CLICKS` env override that was removed — harmless.) Complementary, already-present lever: `ignoreClickablesWithin` (default `[]`) can skip nav/footer chrome outright — but keep `<header>` OUT of it (busuu renders lesson content there).
-- Tests: `shuffled` (permutation, no-mutate, edge cases) in `test/utils.test.ts`.

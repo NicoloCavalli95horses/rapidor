@@ -3,6 +3,15 @@
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
 
+## 2026-11-20 15:45 — exploration: try a state's clickables in random order (reach page-centre buttons)
+
+On a large app a budget-bounded DFS never leaves the navigation: clickables are captured in DOM/reading order (nav/header first) and each is explored depth-first to exhaustion, so the 45min/depth-2 budget drains on chrome before the page-centre lesson buttons are ever clicked. That is why a fresh busuu crawl captured only 11 top-level URLs and no `.../objective_<uuid>/...` page — so candidate generation had no reference URL to propose the known objective-sibling IDORs from (the objective ids are in the React props but a client-routing path candidate needs a VISITED url carrying the value).
+
+- **`config.randomizeClickOrder`** (default on): `DfsExplorer.visit` now iterates a per-tab random shuffle (`shuffled`, Fisher-Yates in utils) of the state's clickables instead of their capture order, so central buttons get an equal early chance within the budget.
+- **No engine/multitab change needed** — the selection is already decentralized: a tab shuffles a COPY of `state.clickables` locally, and the synchronous `claim()` still guarantees per-`(state,element)` exclusivity between tabs. `claimable()`/restore are order-independent (restore replays the recorded `state.path`, not the try order), and element identity (tag+rect+text) does not depend on order. Threaded through `ExplorationLimits` → `buildExplorer`.
+- Trade-off: a crawl is no longer repeatable run-to-run. (The disk config hardcodes it `true`; the comment still mentions a `RANDOMIZE_CLICKS` env override that was removed — harmless.) Complementary, already-present lever: `ignoreClickablesWithin` (default `[]`) can skip nav/footer chrome outright — but keep `<header>` OUT of it (busuu renders lesson content there).
+- Tests: `shuffled` (permutation, no-mutate, edge cases) in `test/utils.test.ts`.
+
 ## 2026-11-20 15:10 — analysis: skip preindex matches inside navigation/footer DOM chrome (domZone)
 
 The newer browser extension serializes each React node's nearest DOM element (`node.dom`) plus its `parent`, so candidate generation can now tell a value that came from the site's nav/footer furniture (never a user-scoped id) from a real resource id. A match whose React node sits inside a chrome zone is skipped — its candidates were pure noise.

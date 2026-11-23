@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, isErrorEnvelopeResponse, scopeDiffsToResource } from '../src/analysis/responseEvaluate';
+import { checkIntSimilarity, getServerResponseSimilarity, compareObj, isIdenticalResponse, isEmptyJsonResponse, isErrorEnvelopeResponse, scopeDiffsToResource, excludeSwapDiff } from '../src/analysis/responseEvaluate';
 
 describe('scopeDiffsToResource', () => {
   const diff = (path: (string | number)[], reference: unknown, current: unknown) =>
@@ -23,6 +23,21 @@ describe('scopeDiffsToResource', () => {
     const diffs = [diff(['id'], 2, 12538), diff(['wordSetType'], 'user', 'system')];
     const scoped = scopeDiffsToResource({ differences: diffs, swapPath: ['props', 'id'] });
     assert.equal(scoped.length, 2);   // nothing to scope to -> all kept (lingualeo's 'user' value survives)
+  });
+});
+
+describe('excludeSwapDiff', () => {
+  // duolingo: the swapped href value read like an authz term ("privacy") and was the only signal
+  it('drops the diff at the swapped identifier, keeping every other diff', () => {
+    const differences = compareObj({ href: 'account', children: 'Preferences' }, { href: 'privacy', children: 'Privacy settings' });
+    const kept = excludeSwapDiff({ differences, swapPath: ['href'] });
+    assert.deepEqual(kept.map((d) => d.pathStr), ['children']);
+  });
+
+  it('strips a leading props segment and matches nested paths (ejoy: lesson.id swapped, lesson.lock kept)', () => {
+    const differences = compareObj({ lesson: { id: 1030, lock: false } }, { lesson: { id: 1032, lock: true } });
+    const kept = excludeSwapDiff({ differences, swapPath: ['props', 'lesson', 'id'] });
+    assert.deepEqual(kept.map((d) => d.pathStr), ['lesson.lock']);
   });
 });
 

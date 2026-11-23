@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
-import { sleep } from '../utils/utils';
+import { sleep, sameRoutePath, safePath } from '../utils/utils';
 
 /**
  * Entry-point auth-freshness gate for a re-analysis run (t2) over data captured earlier (t1). The forge
@@ -42,12 +42,22 @@ export async function checkEntryPointFresh({ page, reactStateStore, site, entryU
   }
   const live = graph?.fingerprint;
   if (!live) return { fresh: true, reason: 'app did not mount a readable React state (cannot gate — proceeding)', seedCount: seed.size };
+  if (seed.has(live)) return { fresh: true, liveFingerprint: live, seedCount: seed.size, reason: 'entry-point fingerprint matches a captured authenticated state' };
 
-  const fresh = seed.has(live);
-  return {
-    fresh, liveFingerprint: live, seedCount: seed.size,
-    reason: fresh
-      ? 'entry-point fingerprint matches a captured authenticated state'
-      : 'entry-point fingerprint differs from every captured state (likely redirected to login)',
-  };
+  // No exact match is NOT evidence of expiry: a dynamic entry page re-renders a new structure every time
+  // (duolingo /learn: 220 captures, 220 distinct fingerprints, while logged in). Require POSITIVE evidence.
+  const common = { fresh: false, liveFingerprint: live, seedCount: seed.size };
+  if (!sameRoutePath(page.url(), entryUrl)) return { ...common, reason: `redirected away from the entry route to ${safePath(page.url())} (login)` };
+  if (await page.evaluate(() => !!document.querySelector('input[type="password"]')).catch(() => false)) {
+    return { ...common, reason: 'entry point renders a password field (login form)' };
+  }
+  const liveNodes = Object.keys(graph?.nodes ?? {}).length;
+  const minSeedNodes = Math.min(...reactStateStore.nodeCountsForUrl({ site, url: entryUrl }));
+  if (Number.isFinite(minSeedNodes) && liveNodes < MIN_NODE_RATIO * minSeedNodes) {
+    return { ...common, reason: `entry point renders ${liveNodes} React nodes, under ${MIN_NODE_RATIO}x the smallest captured state (${minSeedNodes}) — a login/landing page` };
+  }
+  return { fresh: true, liveFingerprint: live, seedCount: seed.size, reason: `new structural variant of the entry point (${liveNodes} nodes, smallest capture ${minSeedNodes}), still on route with no login form — proceeding` };
 }
+
+/** A live entry tree smaller than this fraction of the smallest captured one is a login/landing page. */
+const MIN_NODE_RATIO = 0.5;

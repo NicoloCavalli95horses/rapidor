@@ -42,6 +42,19 @@ export function isLocaleParam({ name }: { name: string }): boolean {
   return LOCALE_PARAM.test(name.trim());
 }
 
+/**
+ * An identifier slot keeps its TYPE: a numeric URL value is only ever swapped for another numeric one,
+ * a non-numeric one for a non-numeric one. A cross-type swap means the "sibling" is a different kind of
+ * link sharing the component (duolingo's lesson button `/lesson/unit/1/level/1` and the footer `/privacy`
+ * link: `relative_domains=1 -> privacy`). Compared on the STRING form: the URL token is always a string
+ * and candidateValue is `String(raw)`, so a React `1` and a `'1'` are both numeric. Digits only — signs,
+ * decimals and hex are not id shapes here.
+ */
+export function sameIdShape({ original, replacement }: { original: string; replacement: string }): boolean {
+  const numeric = (v: string) => /^\d+$/.test(v.trim());
+  return numeric(original) === numeric(replacement);
+}
+
 /** One proposed swap: the extracted segment and a sibling-component replacement value for it. */
 export interface UrlCandidate {
   segment: SegmentCandidate;
@@ -139,6 +152,8 @@ export class CandidateGenerator {
           // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
           // from the other side.
           if (segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
+          // the slot keeps its type (numeric <-> non-numeric is a different kind of link, see sameIdShape)
+          if (!sameIdShape({ original: segment.value, replacement: String(candidate.candidateValue) })) continue;
           items.push({ segment, candidate });
         }
       }
