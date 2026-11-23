@@ -12,7 +12,7 @@ import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
 import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, excludeSwapDiff, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
 import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
-import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
+import { CLIENT_ROUTING_METHOD, vulnerabilityId, normalizeUrl, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 import { redirectAwayTarget, type ClientRoutingVerifier } from './clientRoutingVerifier';
@@ -78,13 +78,11 @@ export class CandidateEvaluator {
   // and never includes anything the forge itself produced.
   private responseHistoryKeys = new Set<string>();
 
-  // CLIENT-ROUTING content guards, the React analog of the HTTP pair above (reactContentKey):
-  // `collectedReactKeys` holds the content key of every React state the crawler already captured (the
-  // novelty corpus, primed per run); `recordedReactKeys` holds the keys of client-routing findings
-  // already recorded THIS run (the uniqueness/dedup set, reset per run). A client-routing candidate
-  // whose rendered state is in the first is already-accessible; one in the second is a duplicate.
+  // CLIENT-ROUTING already-accessible corpus (reactContentKey): the content key of every React state the
+  // crawler already captured, primed per run. A client-routing candidate whose rendered state is in here
+  // renders a page the user already reaches by normal browsing — not a leak. (Cross-candidate dedup is NOT
+  // here any more: it is done on the leaked route in vulnerabilityId — see keepClientRoutingByContent.)
   private collectedReactKeys = new Set<string>();
-  private recordedReactKeys = new Set<string>();
 
   // CLIENT-ROUTING SIBLING-GROUP confirmation (see .claude/rules/analysis.md). A client-routing probe is
   // flaky on a fetch-gated route (ejoy's locked lessons load their content by id over XHR; a single real
@@ -115,7 +113,6 @@ export class CandidateEvaluator {
   reset(): void {
     this.loggedFindingIds.clear();
     this.recordedForgedBodyKeys.clear();
-    this.recordedReactKeys.clear();
     this.clientGroupConfirmed.clear();
     this.clientGroupPending.clear();
     this.clientGroupRedirects.clear();
@@ -140,13 +137,16 @@ export class CandidateEvaluator {
   }
 
   /**
-   * Content-uniqueness/novelty gate for a client-routing finding (the client-side analog of the HTTP
-   * path's canonicalResponseKey guards): captures the candidate route's live React state and requires it
-   * to be NEW (not a page the crawler already collected) and UNIQUE (no earlier finding this run rendered
-   * the same content). Returns true to KEEP, false to DROP. A missing key (no extension / unreadable
-   * graph) KEEPS the finding — drop only on positive evidence. (The capture is async, so the check-and-add
-   * on recordedReactKeys is not atomic across candidates: a rare concurrent duplicate may slip through,
-   * never a wrongful drop.)
+   * ALREADY-ACCESSIBLE gate for a client-routing finding: captures the candidate route's live React state
+   * and drops it when that state is one the crawler ALREADY collected (a page the user reaches by normal
+   * browsing at a different url — e.g. `/terms/press-center` rendering the crawled `/press-center`).
+   * Returns true to KEEP, false to DROP. A missing key (no extension / unreadable graph) KEEPS the finding —
+   * drop only on positive evidence.
+   *
+   * The cross-candidate DUPLICATE check that used to live here was removed: it keyed on the live
+   * reactContentKey, which renders a near-identical paywall shell for every LOCKED sibling (ejoy's 1033 vs
+   * 1035), so distinct paid lessons hashed equal and all but one were wrongly dropped. Cross-candidate dedup
+   * now happens deterministically on the leaked ROUTE, in `vulnerabilityId` (clientRoute) — see its doc.
    */
   private async keepClientRoutingByContent({ pageUrl, candidateUrl, context }: {
     pageUrl: string; candidateUrl: string; context: string;
@@ -157,11 +157,6 @@ export class CandidateEvaluator {
       log.debug(`AnalysisPipeline: client-routing candidate not flagged (renders a React state the crawler already collected — already-accessible) — ${context}`);
       return false;
     }
-    if (this.recordedReactKeys.has(key)) {
-      log.debug(`AnalysisPipeline: client-routing candidate not flagged (duplicate rendered content of an already-recorded finding) — ${context}`);
-      return false;
-    }
-    this.recordedReactKeys.add(key);
     return true;
   }
 
@@ -376,14 +371,16 @@ export class CandidateEvaluator {
     authz: AuthzAssessment; logMessage: string;
     reproduction: { referenceUrl: string; candidateUrl: string; kind: ReproductionKind };
   }): void {
-    // Semantic dedup key (see vulnerabilityId's own doc): origin+method as the LAYER the leak was
-    // observed at, (stateId, refNodeId, candNodeId, path) as the sibling-pair swap identity. Falls back
-    // to the raw candidateUrl if URL parsing throws — never expected, callers all round-trip via `new URL`.
+    // Semantic dedup key (see vulnerabilityId's own doc): HTTP keys on origin+method (the LAYER) +
+    // the sibling-pair swap identity (stateId, refNodeId, candNodeId, path); CLIENT-ROUTING keys on the
+    // leaked ROUTE (the canonical reconciled candidateUrl), so the same lesson reached from two reference
+    // pages collapses to one. Falls back to the raw candidateUrl if URL parsing throws — never expected.
     let origin: string;
     try { origin = new URL(candidateUrl).origin; } catch { origin = candidateUrl; }
     const id = vulnerabilityId({
       site, origin, method,
       stateId: candidate.stateId, referenceNodeId: candidate.referenceNodeId, candidateNodeId: candidate.candidateNodeId, path: candidate.path,
+      clientRoute: method === CLIENT_ROUTING_METHOD ? normalizeUrl(candidateUrl) : undefined,
     });
     const inserted = this.deps.vulnerabilityStore.record({
       id, site, referenceUrl, candidateUrl, method,

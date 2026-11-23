@@ -24,6 +24,21 @@ export async function checkEntryPointFresh({ page, reactStateStore, site, entryU
   page: Page; reactStateStore: ReactStateStore; site: string; entryUrl: string; maxWaitMs?: number;
 }): Promise<{ fresh: boolean; reason: string; liveFingerprint?: string; seedCount: number }> {
   const seed = new Set(reactStateStore.fingerprintsForUrl({ site, url: entryUrl }));
+
+  // FIRST, independent of any seed: a CROSS-ORIGIN redirect means the app bounced the entry point to a
+  // login/SSO host (ejoy's `/app/courses/...` -> `sso.ejoyspace.com/?continue=...`). That is unambiguous
+  // evidence of an unauthenticated session — positive evidence, so it gates even when there is no seed
+  // fingerprint to compare (the entry URL often has none, as ejoy's unit page does). Wait for the redirect
+  // to settle first (a client-side bounce fires after `load`). A same-origin path change is NOT caught
+  // here — too weak without a seed — only a different origin.
+  await page.waitForLoadState('networkidle', { timeout: maxWaitMs }).catch(() => {});
+  try {
+    const liveOrigin = new URL(page.url()).origin;
+    if (liveOrigin !== new URL(entryUrl).origin) {
+      return { fresh: false, seedCount: seed.size, reason: `entry point redirected to a different origin (${new URL(page.url()).host}) — login/SSO, session not authenticated` };
+    }
+  } catch { /* unparseable url (never expected): fall through to the seed-based checks */ }
+
   if (seed.size === 0) return { fresh: true, reason: 'no seed fingerprint for the entry URL (cannot gate — proceeding)', seedCount: 0 };
 
   const hasApi = await page.evaluate(

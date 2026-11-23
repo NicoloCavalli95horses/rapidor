@@ -146,7 +146,14 @@ export class ClientRoutingVerifier {
         // Extension absent (no __RAPIDOR__ API) → bail at once, no polling: the guard is simply inactive.
         const hasApi = await page.evaluate(() => typeof (window as unknown as { __RAPIDOR__getLatestState?: unknown }).__RAPIDOR__getLatestState === 'function').catch(() => false);
         if (!hasApi) return undefined;
-        await page.waitForLoadState('networkidle', { timeout: maxWaitMs }).catch(() => {});
+        // Wait for the route's own fetch-gated content to actually land before hashing — the SAME settle
+        // captureRouteByNavigation uses (networkidle at 3x the window, then a fixed settle). Without it the
+        // poll below returns on the SHELL, whose identifier set is the course's whole lesson LIST — identical
+        // across sibling lessons — so two distinct paid lessons (ejoy 1033 vs 1035) hash to the same
+        // reactContentKey and one is wrongly dropped as a "duplicate". The lesson-specific leaves (its own
+        // word/context ids) only distinguish them once the XHR has resolved.
+        await page.waitForLoadState('networkidle', { timeout: maxWaitMs * 3 }).catch(() => {});
+        await sleep(maxWaitMs);
         // Poll the extension's MAIN-world API until the app has mounted and emitted a non-empty graph.
         let graph: RapidorGraph | undefined;
         for (let i = 0; i < 20 && !(graph?.nodes && Object.keys(graph.nodes).length > 0); i++) {

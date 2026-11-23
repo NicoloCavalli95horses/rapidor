@@ -33,11 +33,21 @@ export const CLIENT_ROUTING_METHOD = 'CLIENT';
  * `path` (the field inside the swapped node's props, e.g. `["lesson","id"]`) is included because the
  * same sibling pair could theoretically be matched from two different preindex values at two different
  * fields — keeping them distinct avoids collapsing semantically different swaps.
+ *
+ * CLIENT-ROUTING findings key on `clientRoute` instead: their identity IS the leaked route (the reconciled
+ * `candidateUrl` after rewriteCorrelatedQuery), not the React node pair. The same leaked lesson reached
+ * from two different reference pages (ejoy's `/courses/37/314/1032` proposed from both the 1030 page and
+ * the 1031 page) rewrites to ONE route and must collapse to one finding — while sibling lessons keep their
+ * own routes. Deterministic, unlike the live reactContentKey, which renders a near-identical paywall shell
+ * for every locked sibling and so cannot tell them apart.
  */
-export function vulnerabilityId({ site, origin, method, stateId, referenceNodeId, candidateNodeId, path }: {
+export function vulnerabilityId({ site, origin, method, stateId, referenceNodeId, candidateNodeId, path, clientRoute }: {
   site: string; origin: string; method: string; stateId: number;
-  referenceNodeId: string; candidateNodeId: string; path: (string | number)[];
+  referenceNodeId: string; candidateNodeId: string; path: (string | number)[]; clientRoute?: string;
 }): string {
+  if (method === CLIENT_ROUTING_METHOD && clientRoute !== undefined) {
+    return createHash('sha256').update(`site::${site}:client-route::${clientRoute}`).digest('hex');
+  }
   return createHash('sha256').update(`site::${site}:origin::${origin}:method::${method}:state::${stateId}:ref::${referenceNodeId}:cand::${candidateNodeId}:path::${path.join('.')}`).digest('hex');
 }
 

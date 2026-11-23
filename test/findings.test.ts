@@ -94,6 +94,18 @@ describe('findings: vulnerabilityId', () => {
     assert.equal(vulnerabilityId(base), vulnerabilityId({ ...base }));
   });
 
+  // Client-routing findings key on the leaked ROUTE, not the React node pair: the same lesson reached
+  // from two different reference pages (different stateId/refNode) collapses to one, while sibling lessons
+  // stay distinct. This is what gets ejoy to 4/4 (the reactContentKey dedup collapsed distinct paid siblings).
+  it('keys a client-routing finding on its route, collapsing reference-page variants but not sibling routes', () => {
+    const clientBase = { ...base, method: CLIENT_ROUTING_METHOD };
+    const route1032 = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1032', stateId: 1, referenceNodeId: 'n-1030' });
+    const route1032again = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1032', stateId: 2, referenceNodeId: 'n-1031', candidateNodeId: 'other' });
+    const route1033 = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1033', stateId: 1, referenceNodeId: 'n-1030' });
+    assert.equal(route1032, route1032again);     // same leaked route from a different reference page → one finding
+    assert.notEqual(route1032, route1033);        // a different sibling lesson → distinct finding
+  });
+
   // The DISTINCTIONS the semantic key preserves: an api-backend leak (different origin) and a
   // client-routing leak (different method) stay distinct from a page-SSR leak — the auditor sees one
   // row per layer, not one merged.
