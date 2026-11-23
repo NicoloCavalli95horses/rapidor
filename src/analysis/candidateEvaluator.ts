@@ -84,6 +84,20 @@ export class CandidateEvaluator {
   private collectedReactKeys = new Set<string>();
   private recordedReactKeys = new Set<string>();
 
+  // CLIENT-ROUTING SIBLING-GROUP confirmation (see .claude/rules/analysis.md). A client-routing probe is
+  // flaky on a fetch-gated route (ejoy's locked lessons load their content by id over XHR; a single real
+  // load can snapshot an incomplete render and read as a false NEGATIVE), so which paid siblings surface
+  // flips run-to-run. But siblings of one reference node that share the swap PATH and the authz-relevant
+  // keys are structurally identical resources behind the same route: if the probe genuinely confirms ONE
+  // (a real, distinct, not-found-passing render), the others are a logical consequence. `clientGroupConfirmed`
+  // holds the key of every group a sibling genuinely confirmed; `clientGroupPending` holds the record
+  // thunks of siblings the per-candidate probe REJECTED, replayed once their group is confirmed. Both reset
+  // per run. SAFETY: this only ever ADDS siblings to an ALREADY-confirmed group — it can never confirm a
+  // group with zero genuine accepts, so it recovers the flaky-lost siblings of a real finding without
+  // manufacturing a finding where the detector found nothing.
+  private clientGroupConfirmed = new Set<string>();
+  private clientGroupPending = new Map<string, Array<() => void>>();
+
   constructor(private deps: CandidateEvaluatorDeps) {}
 
   /** Starts a fresh run: drops the per-run log/dedup state and re-sizes the forge concurrency bound. */
@@ -91,6 +105,8 @@ export class CandidateEvaluator {
     this.loggedFindingIds.clear();
     this.recordedForgedBodyKeys.clear();
     this.recordedReactKeys.clear();
+    this.clientGroupConfirmed.clear();
+    this.clientGroupPending.clear();
     this.forgeSemaphore = new Semaphore(this.deps.options.maxConcurrentRequests);
   }
 
@@ -133,6 +149,55 @@ export class CandidateEvaluator {
     }
     this.recordedReactKeys.add(key);
     return true;
+  }
+
+  /**
+   * Sibling-group key for a client-routing candidate: the reference component INSTANCE (stateId + node)
+   * on a given page, the swapped field (`path`) and the authz-relevant keys. Every sibling swap that one
+   * reference node produces shares it; a different authz signature forms a different group, so unrelated
+   * entitlements never cross-confirm. See the clientGroup* fields.
+   */
+  private clientGroupKey({ pageUrl, candidate, authz }: {
+    pageUrl: string; candidate: ReturnType<typeof findCandidates>[number]; authz: AuthzAssessment;
+  }): string {
+    return [pageUrl, candidate.stateId, candidate.referenceNodeId, JSON.stringify(candidate.path), [...authz.sensitiveKeys].sort().join(',')].join('\u0000');
+  }
+
+  /**
+   * A client-routing sibling the per-candidate probe REJECTED: not recorded now, but stashed under its
+   * group. If any sibling of the group is later genuinely confirmed, the group flush records it — the
+   * reject was most likely a flaky render, not a real negative. `record` captures the recordFinding call.
+   */
+  private stashClientSibling({ groupKey, record }: { groupKey: string; record: () => void }): void {
+    const list = this.clientGroupPending.get(groupKey) ?? [];
+    list.push(record);
+    this.clientGroupPending.set(groupKey, list);
+  }
+
+  /** Marks a client-routing group confirmed by a genuine accept and immediately replays its pending siblings. */
+  private confirmClientGroup({ groupKey }: { groupKey: string }): void {
+    this.clientGroupConfirmed.add(groupKey);
+    this.flushClientGroup({ groupKey });
+  }
+
+  /** Records every still-pending sibling of a (now confirmed) client-routing group, once (the list is consumed). */
+  private flushClientGroup({ groupKey }: { groupKey: string }): void {
+    const list = this.clientGroupPending.get(groupKey);
+    if (!list) return;
+    this.clientGroupPending.delete(groupKey);
+    for (const record of list) record();
+  }
+
+  /**
+   * End-of-run backstop for client-routing sibling groups: records any still-pending sibling whose group
+   * was confirmed. confirmClientGroup already flushes eagerly, so this only catches the race where a
+   * sibling's probe rejected (and stashed it) AFTER its group's confirming flush had already run. Called
+   * once by AnalysisPipeline after every candidate task settles, before the final finding count.
+   */
+  finalizeClientGroups(): void {
+    for (const groupKey of [...this.clientGroupPending.keys()]) {
+      if (this.clientGroupConfirmed.has(groupKey)) this.flushClientGroup({ groupKey });
+    }
   }
 
   /**
@@ -261,7 +326,15 @@ export class CandidateEvaluator {
     authz: AuthzAssessment; logMessage: string;
     reproduction: { referenceUrl: string; candidateUrl: string; kind: ReproductionKind };
   }): void {
-    const id = vulnerabilityId({ candidateValue: candidate.candidateValue, nodeId: candidate.candidateNodeId, method, url: candidateUrl });
+    // Semantic dedup key (see vulnerabilityId's own doc): origin+method as the LAYER the leak was
+    // observed at, (stateId, refNodeId, candNodeId, path) as the sibling-pair swap identity. Falls back
+    // to the raw candidateUrl if URL parsing throws — never expected, callers all round-trip via `new URL`.
+    let origin: string;
+    try { origin = new URL(candidateUrl).origin; } catch { origin = candidateUrl; }
+    const id = vulnerabilityId({
+      site, origin, method,
+      stateId: candidate.stateId, referenceNodeId: candidate.referenceNodeId, candidateNodeId: candidate.candidateNodeId, path: candidate.path,
+    });
     const inserted = this.deps.vulnerabilityStore.record({
       id, site, referenceUrl, candidateUrl, method,
       referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
@@ -396,22 +469,31 @@ export class CandidateEvaluator {
     if (!authz) return;
     const differences = authz.differences;
 
+    // The record action for THIS sibling, reused whether it is confirmed on its own probe or recovered
+    // from a confirmed sibling of its group (see the clientGroup* fields).
+    const record = () => this.recordFinding({
+      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate, segment,
+      motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
+      logMessage: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
+      reproduction: { referenceUrl: pageUrl, candidateUrl, kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue } },
+    });
+    const groupKey = this.clientGroupKey({ pageUrl, candidate, authz });
+    // A sibling of an ALREADY-confirmed group: record it without re-probing (see evaluateClientRoutingPathCandidate).
+    if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
+
     const reason = await this.deps.clientRoutingVerifier.verifyQueryParam({
       pageUrl, candidateUrl, paramName,
       candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
     });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
+      this.stashClientSibling({ groupKey, record });
       return;
     }
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
 
-    this.recordFinding({
-      site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate, segment,
-      motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
-      logMessage: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
-      reproduction: { referenceUrl: pageUrl, candidateUrl, kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue } },
-    });
+    record();
+    this.confirmClientGroup({ groupKey });
   }
 
   /**
@@ -451,22 +533,34 @@ export class CandidateEvaluator {
         return;
       }
     }
-    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl: probeUrl, candidate, highSuspicion: true });
-    if (reason) {
-      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${probeUrl}`);
-      return;
-    }
     // Everything downstream uses `confirmedUrl` (the clean path when the coherence check stripped the
     // query), so the content guard, finding id, record and reproduction all reflect the url that leaked.
     const confirmedUrl = probeUrl;
-    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
-
-    this.recordFinding({
+    // The record action for THIS sibling, reused whether it is confirmed on its own probe or recovered
+    // from a confirmed sibling of its group (see the clientGroup* fields).
+    const record = () => this.recordFinding({
       site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl: confirmedUrl, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
       logMessage: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
       reproduction: { referenceUrl: pageUrl, candidateUrl: confirmedUrl, kind: { type: 'client-routing-path', candidateUrl: confirmedUrl } },
     });
+    const groupKey = this.clientGroupKey({ pageUrl, candidate, authz });
+    // A sibling of an ALREADY-confirmed group: record it without re-probing. The group's confirming
+    // sibling already proved the route honours the swap client-side; a fresh flaky probe here would only
+    // risk losing this structurally-identical sibling (the content guards are skipped for the same reason).
+    if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
+
+    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl: probeUrl, candidate, highSuspicion: true });
+    if (reason) {
+      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${probeUrl}`);
+      // Maybe a flaky render, not a real negative: stash under the group and recover it if a sibling confirms.
+      this.stashClientSibling({ groupKey, record });
+      return;
+    }
+    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
+
+    record();
+    this.confirmClientGroup({ groupKey });
   }
 
   /**

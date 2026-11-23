@@ -332,6 +332,12 @@ export class AnalysisPipeline {
       }
     }
 
+    // Client-routing sibling-group backstop: record any flaky-rejected sibling whose group a genuine
+    // accept confirmed (see CandidateEvaluator's clientGroup* fields). Must run AFTER every candidate
+    // task settled and BEFORE the count below, so recovered siblings are included. No-op offline (no
+    // client-routing tasks) and when no group was confirmed.
+    this.candidateEvaluator.finalizeClientGroups();
+
     const analysisMs = Date.now() - analysisStartedAt;
     const flagged = vulnerabilityStore.count(site);
     log.info(`AnalysisPipeline: ${site} — ${flagged} vulnerabilit${flagged === 1 ? 'y' : 'ies'} flagged (${this.candidateEvaluator.confirmedCount} confirmed this run), exploration ${formatDuration(explorationMs)}, analysis ${formatDuration(analysisMs)}`);

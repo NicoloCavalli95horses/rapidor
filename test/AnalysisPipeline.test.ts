@@ -115,6 +115,46 @@ describe('AnalysisPipeline: client-side-only query params', () => {
     assert.equal(findings, 1);
   });
 
+  // Sibling-group confirmation: four sibling instances of one component (reference 101 + premium
+  // siblings 102/103/104). The SPA (the `html` fixture) KNOWS only 101 and 102, so 102 renders a real
+  // distinct profile (a genuine accept) while 103/104 render the app's empty not-found page — which the
+  // per-candidate not-found guard would reject in isolation. Because 102 genuinely confirms the group
+  // (same reference node, swap path and authz-relevant `premium` key), 103/104 are recovered as a
+  // logical consequence instead of lost: all three siblings are flagged. This is the flakiness fix —
+  // confirming ONE paid sibling confirms them all (ejoy's locked lessons). See candidateEvaluator's
+  // clientGroup* fields.
+  it('recovers flaky-rejected siblings once one sibling of the group is genuinely confirmed', async () => {
+    const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+
+    const page = await newPage();
+    await installParamUsageTracking(page);
+    await page.route(`${APP_ORIGIN}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+    const pageUrl = `${APP_ORIGIN}/?id=101`;
+    await page.goto(pageUrl);
+
+    // Four siblings of component 1: the reference (101) and three premium siblings; only 102 is a
+    // resource the fixture actually renders, so 103/104's probes come back as the (empty) not-found page.
+    const graph: RapidorGraph = {
+      fingerprint: 'f1',
+      nodes: {
+        'node-1': { id: 'node-1', componentId: 1, props: { id: '101', premium: false } },
+        'node-2': { id: 'node-2', componentId: 1, props: { id: '102', premium: true } },
+        'node-3': { id: 'node-3', componentId: 1, props: { id: '103', premium: true } },
+        'node-4': { id: 'node-4', componentId: 1, props: { id: '104', premium: true } },
+      },
+      componentIndex: { '1': ['node-1', 'node-2', 'node-3', 'node-4'] },
+    };
+    const stateId = reactStateStore.record({ site: 'app.test', url: pageUrl, graph })!;
+    preindexStore.reindex({ stateId, graph });
+
+    await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+
+    // All three premium siblings are flagged: 102 on its own probe, 103/104 recovered from the group.
+    assert.equal(vulnerabilityStore.count('app.test'), 3);
+  });
+
   // The reference id renders a real profile; every other id — the candidate and the garbage
   // calibration value alike — renders the app's not-found page, which ECHOES the id it was given
   // ("Profile 102 not found"). The route reacts (DOM mutates) and differs from the reference (so the

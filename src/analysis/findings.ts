@@ -14,11 +14,31 @@ import { tokenizeParamName } from '../utils/utils';
 /** Marks a vulnerability/finding as tested purely client-side: no HTTP verb ever applied. */
 export const CLIENT_ROUTING_METHOD = 'CLIENT';
 
-/** Same dedup id RAPIDOR's responseEvaluator.js computes (sha256 of candidate value + node id + method + url). */
-export function vulnerabilityId({ candidateValue, nodeId, method, url }: {
-  candidateValue: string; nodeId: string; method: string; url: string;
+/**
+ * Semantic dedup id for a finding. The key is the SIBLING PAIR being swapped (stateId + refNodeId +
+ * candNodeId + the swap path inside their props) scoped to the LAYER the leak was observed at
+ * (candidateUrl's origin + method). Two findings with the same key describe the same IDOR on the same
+ * surface — the same pair of React component instances, confirmed via the same layer — so they are
+ * deduped (INSERT OR IGNORE wins to the first arrival).
+ *
+ * Why this key, not RAPIDOR's original `candidateValue + nodeId + method + url`: multiple carrier URLs
+ * can embed the same reference value (promova's step id 73 appears in the page SSR flight, in a
+ * backend API endpoint, and in a second plan's page URL — three carriers, one sibling pair). The old
+ * key diverged on `url`, so the same sibling swap recorded three rows per sibling. Keeping origin+method
+ * in the key preserves the auditor-visible distinction between layers (an API-backend leak is a
+ * different vulnerability than a page-SSR leak which is different from a client-side-routing leak),
+ * while the pair+path triple collapses noise within one layer (different plan carriers, different
+ * cache-buster tokens — those surface the same leak on the same surface).
+ *
+ * `path` (the field inside the swapped node's props, e.g. `["lesson","id"]`) is included because the
+ * same sibling pair could theoretically be matched from two different preindex values at two different
+ * fields — keeping them distinct avoids collapsing semantically different swaps.
+ */
+export function vulnerabilityId({ site, origin, method, stateId, referenceNodeId, candidateNodeId, path }: {
+  site: string; origin: string; method: string; stateId: number;
+  referenceNodeId: string; candidateNodeId: string; path: (string | number)[];
 }): string {
-  return createHash('sha256').update(`current::${candidateValue}:nodeId:${nodeId}http::${method}:${url}`).digest('hex');
+  return createHash('sha256').update(`site::${site}:origin::${origin}:method::${method}:state::${stateId}:ref::${referenceNodeId}:cand::${candidateNodeId}:path::${path.join('.')}`).digest('hex');
 }
 
 /**

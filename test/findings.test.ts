@@ -69,18 +69,40 @@ describe('findings: normalizeUrl (the history-filter canonical form)', () => {
 });
 
 describe('findings: vulnerabilityId', () => {
-  const base = { candidateValue: '102', nodeId: 'node-2', method: 'GET', url: 'https://app.test/users/102' };
+  const base = { site: 'app.test', origin: 'https://app.test', method: 'GET', stateId: 1, referenceNodeId: 'node-1', candidateNodeId: 'node-2', path: ['user', 'id'] };
 
   it('is stable for the same finding', () => {
     assert.equal(vulnerabilityId(base), vulnerabilityId({ ...base }));
   });
 
-  it('changes when any component of the finding changes', () => {
+  it('changes with every component of the semantic key', () => {
     const id = vulnerabilityId(base);
-    assert.notEqual(id, vulnerabilityId({ ...base, candidateValue: '103' }));
-    assert.notEqual(id, vulnerabilityId({ ...base, nodeId: 'node-3' }));
-    assert.notEqual(id, vulnerabilityId({ ...base, method: CLIENT_ROUTING_METHOD }));
-    assert.notEqual(id, vulnerabilityId({ ...base, url: 'https://app.test/users/103' }));
+    assert.notEqual(id, vulnerabilityId({ ...base, site: 'other.test' }));
+    assert.notEqual(id, vulnerabilityId({ ...base, origin: 'https://api.app.test' }));   // different layer
+    assert.notEqual(id, vulnerabilityId({ ...base, method: CLIENT_ROUTING_METHOD }));    // different detection surface
+    assert.notEqual(id, vulnerabilityId({ ...base, stateId: 2 }));
+    assert.notEqual(id, vulnerabilityId({ ...base, referenceNodeId: 'node-3' }));
+    assert.notEqual(id, vulnerabilityId({ ...base, candidateNodeId: 'node-4' }));
+    assert.notEqual(id, vulnerabilityId({ ...base, path: ['user', 'name'] }));
+  });
+
+  // The REDUNDANCY the semantic key was built to collapse: same sibling pair surfaced through
+  // multiple carrier URLs on the same layer (promova's page SSR flight with different plan ids,
+  // different _rsc tokens, …) produces ONE id, not three — because the key no longer mentions the url.
+  it('collapses multiple carrier urls on the same layer (same origin+method, same sibling pair)', () => {
+    // same origin+method+pair, different carrier url shouldn't matter: the id depends on neither.
+    assert.equal(vulnerabilityId(base), vulnerabilityId({ ...base }));
+  });
+
+  // The DISTINCTIONS the semantic key preserves: an api-backend leak (different origin) and a
+  // client-routing leak (different method) stay distinct from a page-SSR leak — the auditor sees one
+  // row per layer, not one merged.
+  it('preserves the api/page/client layer distinction via (origin, method)', () => {
+    const api = vulnerabilityId({ ...base, origin: 'https://api.app.test' });
+    const client = vulnerabilityId({ ...base, method: CLIENT_ROUTING_METHOD });
+    assert.notEqual(vulnerabilityId(base), api);
+    assert.notEqual(vulnerabilityId(base), client);
+    assert.notEqual(api, client);
   });
 });
 
