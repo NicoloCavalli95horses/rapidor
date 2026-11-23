@@ -25,7 +25,13 @@ const INERT_CONTENT_REASON = 'renders the same page as the reference (the swappe
  * Unlike a flaky capture/content reject, retrying it cannot change the outcome, so the escalation retry
  * loop returns it immediately instead of re-navigating.
  */
-const REDIRECT_AWAY_PREFIX = 'full navigation redirected away';
+export const REDIRECT_AWAY_PREFIX = 'full navigation redirected away';
+
+/** The path a redirect-away reject landed on (e.g. `/pro`), or undefined for any other reject reason. */
+export function redirectAwayTarget(reason: string): string | undefined {
+  if (!reason.startsWith(REDIRECT_AWAY_PREFIX)) return undefined;
+  return /\((\S+) != /.exec(reason)?.[1];
+}
 
 /** True if the app answered the candidate's own fetch with a success status: trust it, skip the visual guard. */
 function networkConfirmsCandidate(probeRequests: { status: number }[]): boolean {
@@ -315,6 +321,12 @@ export class ClientRoutingVerifier {
     // No snapshot: cannot decide with this mechanism. On the push pass, fall through to the fallback
     // (INERT); on the nav pass the caller turns INERT into "keep", the pre-guard policy.
     if (!renders) return navigate ? null : INERT;
+    // A real load the app redirected AWAY from the candidate route is positive evidence of no access
+    // (clozemaster bounces every paid story to /pro), never "new content": stage 2 is lenient only on a
+    // FAILED capture, so it gets the same redirect-away guard as stage 1 (stayedOnRoute) and stage 3.
+    if (navigate && renders.candidateFinalUrl && !sameRoutePath(renders.candidateFinalUrl, candidateUrl)) {
+      return `${REDIRECT_AWAY_PREFIX} from the candidate route (${safePath(renders.candidateFinalUrl)} != ${safePath(candidateUrl)})`;
+    }
     return this.judgeRenderedContent({ renders, pageUrl, candidateUrl, candidateValue, referenceValue, corroborated, navigate, settleMs });
   }
 

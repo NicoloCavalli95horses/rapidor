@@ -112,6 +112,7 @@ export function buildExplorer(
       clientRoutingFullNavigationEscalation: cfg.analysis.clientRoutingFullNavigationEscalation,
       clientRoutingEscalationAttempts: cfg.analysis.clientRoutingEscalationAttempts,
       clientRoutingPathCoherence: cfg.analysis.clientRoutingPathCoherence,
+      clientRoutingGroupRejectAfter: cfg.analysis.clientRoutingGroupRejectAfter,
       overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
     },
   });

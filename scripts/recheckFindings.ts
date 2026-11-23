@@ -73,7 +73,9 @@ const pipeline = new AnalysisPipeline({
   },
 });
 
-const findings = vulnerabilityStore.listBySite(SITE);
+// RECHECK_LIMIT=N re-examines only the first N stored findings: a quick look at a large FP class.
+const limit = Number(process.env.RECHECK_LIMIT) || undefined;
+const findings = vulnerabilityStore.listBySite(SITE).slice(0, limit);
 console.log(`Rechecking ${findings.length} stored finding(s) for ${SITE} (nothing is written)`);
 if (findings.length === 0) process.exit(0);
 

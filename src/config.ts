@@ -166,6 +166,11 @@ export interface CrawlConfig {
     // dropped as incoherent (never probed on a query-stripped path — that only false-positived). Kill
     // switch; leave on. See evaluateClientRoutingPathCandidate.
     clientRoutingPathCoherence: boolean;
+    // Negative sibling-group inference: after this many siblings of one group (same reference node, swap
+    // path, authz keys) were rejected by a redirect-away to the SAME target, skip the rest of the group.
+    // A paywall bounce is deterministic and uniform across structurally identical siblings (clozemaster:
+    // 508 paid stories -> /pro). 0 = off (probe every sibling). See CandidateEvaluator.clientGroupRejected.
+    clientRoutingGroupRejectAfter: number;
     // Re-analysis hygiene: before recording a site's findings, delete that site's PREVIOUS rows in
     // `vulnerabilities` (clearSite) so the table always reflects the CURRENT engine's output, not the
     // union of every past run. Needed because VulnerabilityStore.record is INSERT OR IGNORE keyed by a
@@ -278,6 +283,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     // 2 = one retry of the stage-3 escalation on a flaky reject (reduces ejoy's run-to-run sibling flapping).
     clientRoutingEscalationAttempts: 2,
     clientRoutingPathCoherence: true,
+    clientRoutingGroupRejectAfter: 3,
     overwriteFindingsPerSite: true,
     // AUTH_HEADERS=x-auth-token,authorization to override from the shell
     volatileAuthHeaders: process.env.AUTH_HEADERS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? ['authorization'],

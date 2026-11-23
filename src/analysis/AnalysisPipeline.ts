@@ -35,6 +35,7 @@ export interface AnalysisPipelineOptions {
   clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
   clientRoutingEscalationAttempts: number; // total stage-3 attempts (1 = no retry); a retry recovers a flaky false-negative (see config.analysis.clientRoutingEscalationAttempts)
   clientRoutingPathCoherence: boolean; // retry a rejected high-suspicion path candidate once with its query stripped, for routes that infer params from the path (see config.analysis.clientRoutingPathCoherence)
+  clientRoutingGroupRejectAfter?: number; // skip a sibling group after this many same-target redirect-away rejects (default 3, 0 = off; see config.analysis.clientRoutingGroupRejectAfter)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
   // forged_requests cache (a miss throws instead of forging live), the client-routing phase is
@@ -144,6 +145,7 @@ export class AnalysisPipeline {
         clientRoutingProbe: deps.options.clientRoutingProbe,
         authOverride: deps.options.authOverride,
         clientRoutingPathCoherence: deps.options.clientRoutingPathCoherence,
+        clientRoutingGroupRejectAfter: deps.options.clientRoutingGroupRejectAfter,
       },
     });
     this.recheckRunner = new RecheckRunner({
@@ -254,7 +256,10 @@ export class AnalysisPipeline {
           const candidateUrl = new URL(pageUrl);
           candidateUrl.searchParams.set(paramName, candidate.candidateValue);
           if (historyUrls.has(normalizeUrl(candidateUrl.href))) continue;
-          const key = `client|${pageUrl}|${paramName}|${candidate.candidateValue}`;
+          // Keyed by the canonical candidate route, NOT the reference page: the same route proposed from
+          // N sibling pages of one template is one probe, not N (clozemaster: 10 x 508 -> 508). Mirrors the
+          // http key; the reference only supplies a known-good DOM, any page of the template does.
+          const key = `client|query|${normalizeUrl(candidateUrl.href)}`;
           if (seen.has(key)) continue;
           seen.add(key);
           clientProbes++;
@@ -265,7 +270,7 @@ export class AnalysisPipeline {
           // routing (see checkClientSideRoutingForPath).
           const candidateUrl = spliceSegment({ parts: segment.parts, index: segment.index, value: candidate.candidateValue, query: segment.query });
           if (historyUrls.has(normalizeUrl(candidateUrl))) continue;
-          const key = `client|${pageUrl}|path|${candidateUrl}`;
+          const key = `client|path|${normalizeUrl(candidateUrl)}`;   // canonical route, see the query branch
           if (seen.has(key)) continue;
           seen.add(key);
           clientProbes++;
@@ -337,6 +342,8 @@ export class AnalysisPipeline {
     // task settled and BEFORE the count below, so recovered siblings are included. No-op offline (no
     // client-routing tasks) and when no group was confirmed.
     this.candidateEvaluator.finalizeClientGroups();
+    const groupSkipped = this.candidateEvaluator.clientGroupSkipped;
+    if (groupSkipped > 0) log.info(`AnalysisPipeline: ${site} — ${groupSkipped} client-routing probe(s) skipped by negative sibling-group inference`);
 
     const analysisMs = Date.now() - analysisStartedAt;
     const flagged = vulnerabilityStore.count(site);

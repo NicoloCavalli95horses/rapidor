@@ -87,6 +87,7 @@ const pipeline = new AnalysisPipeline({
     clientRoutingFullNavigationEscalation: config.analysis.clientRoutingFullNavigationEscalation,
     clientRoutingEscalationAttempts: config.analysis.clientRoutingEscalationAttempts,
     clientRoutingPathCoherence: config.analysis.clientRoutingPathCoherence,
+    clientRoutingGroupRejectAfter: config.analysis.clientRoutingGroupRejectAfter,
     overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
     authOverride,
   },

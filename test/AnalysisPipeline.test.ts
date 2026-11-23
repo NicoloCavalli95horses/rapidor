@@ -259,7 +259,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
 
 describe('AnalysisPipeline: client-side-only path segments', () => {
   let n = 0;
-  function newPipeline() {
+  function newPipeline(extra: { clientRoutingGroupRejectAfter?: number } = {}) {
     const dbPath = join(root, `path-${n++}.db`);
     const db = new Database(dbPath);
     const httpEventStore = new HttpEventStore({ db, clearOnStart: true });
@@ -283,6 +283,7 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
         clientRoutingFullNavigationEscalation: true,
         clientRoutingEscalationAttempts: 2,
         clientRoutingPathCoherence: true,
+        ...extra,
       },
     });
     return { pipeline, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -402,6 +403,57 @@ describe('AnalysisPipeline: client-side-only path segments', () => {
     window.addEventListener('popstate', render);
     render();
   </script>`;
+
+  // clozemaster, reduced: popstate only ticks a spinner (stage 1 sees a reaction and stays on route, but
+  // renders nothing new → stage 2 real load). On a real load a PAID id (102-106) bounces client-side to
+  // /pro and shows the upsell; an unknown id shows "not found". The upsell differs from both the reference
+  // and the not-found baseline, so only the redirect-away tells it is a paywall, not a leak.
+  const paywallHtml = `<div id="out"></div><div id="spin">0</div><script>
+    const segs = location.pathname.split('/').filter(Boolean);
+    const out = document.getElementById('out');
+    if (segs[0] === 'pro') out.textContent = 'Upgrade to Pro to unlock every story';
+    else if (segs[1] === '101') out.textContent = 'Story 101: the free story text everyone can read';
+    else if (/^10[2-6]$/.test(segs[1])) { history.replaceState({}, '', '/pro'); out.textContent = 'Upgrade to Pro to unlock every story'; }
+    else out.textContent = 'Story ' + segs[1] + ' not found';
+    window.addEventListener('popstate', () => { document.getElementById('spin').textContent = String(Date.now()); });
+  </script>`;
+
+  /** Reference 101 (free) plus `count` premium siblings 102.. of one component. */
+  function paywallGraph(count: number): RapidorGraph {
+    const nodes: RapidorGraph['nodes'] = { 'node-1': { id: 'node-1', componentId: 1, props: { id: '101', premium: false } } };
+    for (let i = 2; i <= count + 1; i++) nodes[`node-${i}`] = { id: `node-${i}`, componentId: 1, props: { id: String(100 + i), premium: true } };
+    return { fingerprint: 'f1', nodes, componentIndex: { '1': Object.keys(nodes) } };
+  }
+
+  async function runPaywall({ count, rejectAfter }: { count: number; rejectAfter: number }) {
+    const ctx = newPipeline({ clientRoutingGroupRejectAfter: rejectAfter });
+    (ctx.classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (ctx.classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+    const page = await newPage();
+    await installParamUsageTracking(page);
+    await page.route(`${APP_ORIGIN}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: paywallHtml }));
+    const pageUrl = `${APP_ORIGIN}/stories/101/read`;
+    await page.goto(pageUrl);
+    const graph = paywallGraph(count);
+    const stateId = ctx.reactStateStore.record({ site: 'app.test', url: pageUrl, graph })!;
+    ctx.preindexStore.reindex({ stateId, graph });
+    await ctx.pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+    const skipped = (ctx.pipeline as unknown as { candidateEvaluator: { clientGroupSkipped: number } }).candidateEvaluator.clientGroupSkipped;
+    return { findings: ctx.vulnerabilityStore.count('app.test'), skipped };
+  }
+
+  it('never flags a sibling whose real load redirects away to a paywall (stage-2 redirect guard)', async () => {
+    const { findings } = await runPaywall({ count: 1, rejectAfter: 0 });
+    assert.equal(findings, 0);
+  });
+
+  // Negative sibling-group inference: 5 paid siblings all bounce to /pro. After 2 same-target redirects the
+  // group is rejected and the remaining 3 are skipped, not probed (sequential pool → deterministic count).
+  it('skips the rest of a sibling group once enough siblings redirected to the same target', async () => {
+    const { findings, skipped } = await runPaywall({ count: 5, rejectAfter: 2 });
+    assert.equal(findings, 0);
+    assert.equal(skipped, 3);
+  });
 
   it('never flags a path candidate the app rejected by silently redirecting elsewhere (client-side, no new request)', async () => {
     const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();

@@ -15,7 +15,7 @@ import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authz
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
-import type { ClientRoutingVerifier } from './clientRoutingVerifier';
+import { redirectAwayTarget, type ClientRoutingVerifier } from './clientRoutingVerifier';
 
 /** Only the knobs this stage reads (see config.analysis for each one's own comment). */
 export interface CandidateEvaluatorOptions {
@@ -29,6 +29,8 @@ export interface CandidateEvaluatorOptions {
   authOverride?: AuthOverride;
   // see config.analysis.clientRoutingPathCoherence — path-candidate query-strip retry
   clientRoutingPathCoherence?: boolean;
+  // see config.analysis.clientRoutingGroupRejectAfter — negative sibling-group inference (default 3, 0 = off)
+  clientRoutingGroupRejectAfter?: number;
 }
 
 export interface CandidateEvaluatorDeps {
@@ -98,6 +100,15 @@ export class CandidateEvaluator {
   private clientGroupConfirmed = new Set<string>();
   private clientGroupPending = new Map<string, Array<() => void>>();
 
+  // NEGATIVE sibling-group inference, the mirror of the confirmation above: once `clientRoutingGroupRejectAfter`
+  // siblings of one group were rejected by a DETERMINISTIC redirect-away to the SAME target (clozemaster
+  // bounces every paid story to /pro), the remaining siblings are skipped instead of probed (508 per group
+  // there). Only redirect-away counts: probe flakiness yields false negatives on inert/capture, never a
+  // redirect. Skipped siblings are still stashed, so a later genuine confirmation recovers them. Reset per run.
+  private clientGroupRedirects = new Map<string, Map<string, number>>();
+  private clientGroupRejected = new Set<string>();
+  private clientGroupSkippedCount = 0;
+
   constructor(private deps: CandidateEvaluatorDeps) {}
 
   /** Starts a fresh run: drops the per-run log/dedup state and re-sizes the forge concurrency bound. */
@@ -107,6 +118,9 @@ export class CandidateEvaluator {
     this.recordedReactKeys.clear();
     this.clientGroupConfirmed.clear();
     this.clientGroupPending.clear();
+    this.clientGroupRedirects.clear();
+    this.clientGroupRejected.clear();
+    this.clientGroupSkippedCount = 0;
     this.forgeSemaphore = new Semaphore(this.deps.options.maxConcurrentRequests);
   }
 
@@ -172,6 +186,40 @@ export class CandidateEvaluator {
     const list = this.clientGroupPending.get(groupKey) ?? [];
     list.push(record);
     this.clientGroupPending.set(groupKey, list);
+  }
+
+  /**
+   * Counts a sibling's reject towards its group's negative inference: only a redirect-away counts, per
+   * target. Reaching `clientRoutingGroupRejectAfter` redirects to one target marks the group rejected.
+   */
+  private noteClientGroupReject({ groupKey, reason }: { groupKey: string; reason: string }): void {
+    const threshold = this.deps.options.clientRoutingGroupRejectAfter ?? 3;
+    const target = redirectAwayTarget(reason);
+    if (threshold <= 0 || !target || this.clientGroupRejected.has(groupKey)) return;
+    const perTarget = this.clientGroupRedirects.get(groupKey) ?? new Map<string, number>();
+    const count = (perTarget.get(target) ?? 0) + 1;
+    perTarget.set(target, count);
+    this.clientGroupRedirects.set(groupKey, perTarget);
+    if (count >= threshold) {
+      this.clientGroupRejected.add(groupKey);
+      log.info(`AnalysisPipeline: client-routing sibling group rejected — ${count} siblings redirected to ${target}; skipping the rest of the group`);
+    }
+  }
+
+  /**
+   * True (and the sibling stashed) when its group was already rejected by negative inference: the caller
+   * skips the probe. Confirmation wins over rejection — an already-confirmed group never reaches here.
+   */
+  private skipRejectedClientGroup({ groupKey, record }: { groupKey: string; record: () => void }): boolean {
+    if (!this.clientGroupRejected.has(groupKey)) return false;
+    this.clientGroupSkippedCount++;
+    this.stashClientSibling({ groupKey, record });
+    return true;
+  }
+
+  /** Client-routing siblings skipped by negative group inference this run (for the end-of-run log). */
+  get clientGroupSkipped(): number {
+    return this.clientGroupSkippedCount;
   }
 
   /** Marks a client-routing group confirmed by a genuine accept and immediately replays its pending siblings. */
@@ -480,6 +528,7 @@ export class CandidateEvaluator {
     const groupKey = this.clientGroupKey({ pageUrl, candidate, authz });
     // A sibling of an ALREADY-confirmed group: record it without re-probing (see evaluateClientRoutingPathCandidate).
     if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
+    if (this.skipRejectedClientGroup({ groupKey, record })) return;
 
     const reason = await this.deps.clientRoutingVerifier.verifyQueryParam({
       pageUrl, candidateUrl, paramName,
@@ -488,6 +537,7 @@ export class CandidateEvaluator {
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
       this.stashClientSibling({ groupKey, record });
+      this.noteClientGroupReject({ groupKey, reason });
       return;
     }
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
@@ -549,12 +599,15 @@ export class CandidateEvaluator {
     // sibling already proved the route honours the swap client-side; a fresh flaky probe here would only
     // risk losing this structurally-identical sibling (the content guards are skipped for the same reason).
     if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
+    // The mirror: a group already rejected by deterministic redirects is skipped (see clientGroupRejected).
+    if (this.skipRejectedClientGroup({ groupKey, record })) return;
 
     const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl: probeUrl, candidate, highSuspicion: true });
     if (reason) {
       log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${probeUrl}`);
       // Maybe a flaky render, not a real negative: stash under the group and recover it if a sibling confirms.
       this.stashClientSibling({ groupKey, record });
+      this.noteClientGroupReject({ groupKey, reason });
       return;
     }
     if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
