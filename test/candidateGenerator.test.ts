@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { PreindexedValueStore } from '../src/db/PreindexedValueStore';
 import { ReactStateStore, type RapidorGraph } from '../src/db/ReactStateStore';
-import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted, isLocaleParam, sameIdShape } from '../src/analysis/candidateGenerator';
+import { CandidateGenerator, tokenizeParamName, paramNameBlacklisted, isLocaleParam, isTrackingParam, sameIdShape } from '../src/analysis/candidateGenerator';
 
 describe('sameIdShape (an identifier slot keeps its type)', () => {
   it("treats a React number 1 and a string '1' alike (both numeric, compared as strings)", () => {
@@ -58,6 +58,21 @@ describe('isLocaleParam (locale / UI-language selectors)', () => {
     for (const name of ['target_language', 'learning_language', 'source_language',
       'course_language', 'to_language', 'language_id', 'languageId', 'lang_level']) {
       assert.equal(isLocaleParam({ name }), false, name);
+    }
+  });
+});
+
+describe('isTrackingParam (marketing / attribution params)', () => {
+  it('matches the tracking family (provenance, not owner — lingualeo refclmark FP)', () => {
+    for (const name of ['refclmark', 'utm_source', 'utm_medium', 'utm_campaign', 'campaignId',
+      'campaign_id', 'gclid', 'fbclid', 'msclkid', 'yclid', 'mc_eid']) {
+      assert.equal(isTrackingParam({ name }), true, name);
+    }
+  });
+  it('KEEPS resource params that merely contain a tracking word mutable (a real TP must survive)', () => {
+    for (const name of ['id', 'price_id', 'objectiveId', 'refId', 'campaign_name',
+      'target_language', 'preference_id']) {
+      assert.equal(isTrackingParam({ name }), false, name);
     }
   });
 });

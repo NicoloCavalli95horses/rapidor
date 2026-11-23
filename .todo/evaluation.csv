@@ -1,18 +1,18 @@
-website,done,has IDOR,detected,findings
-https://arabicroad.com,yes,no,no,0
-https://promova.com/my-plan/appyj8hJ1VFshCjHj,yes,yes,yes,40
-https://celpipsimulator.com,yes,no,no,0
-https://www.clozemaster.com/l/ita-eng/stories,no,no,no,
-https://www.duolingo.com/learn,no,no,no,
-https://ejoy-english.com,no,yes,no,
-https://general.global-exam.com/levels/content,no,no,no,
-https://learn.mangolanguages.com/pathway/from/en-US/to/fr/798/1/1,no,no,no,
-https://app.memrise.comhttps://memrise-stories.replit.app/library,no,no,no,
-https://app.mondly.com/home,no,no,no,
-https://app.getpronounce.com/courses/HZnLJPJ2ut?unit=6AXfdnWxKD,no,no,no,
-https://app.rocketlanguages.com/members/products/186/dashboard,no,no,no,
-https://app.talkpal.ai/dashboard,no,no,no,
-https://learn.pimsleur.com/MiniLearn,no,yes,yes,
-https://www.busuu.com/dashboard/timeline/a1,no,yes,yes,73
-https://my.babbel.com/dashboard/inprogress,no,no,no,
-https://lingualeo.com/en/training,no,yes,yes,
+website,explored,has IDOR,findings,comments
+https://arabicroad.com,x,,0,
+https://promova.com/my-plan/appyj8hJ1VFshCjHj,x,x,25,manually check FP (~20 known TP between HTTP- and client-side IDOR)
+https://www.celpipsimulator.com/dashboard/exams,x,,0,
+https://www.clozemaster.com/l/ita-eng/stories,x,,0,
+https://www.duolingo.com/learn,x,,0,
+https://ejoy-english.com/app/courses/37/314,x,x,4,"ok, stable"
+https://general.global-exam.com/levels/content,,,,no React states found (?)
+https://learn.mangolanguages.com/pathway/from/en-US/to/fr/798/1/1,,,,
+https://app.memrise.comhttps://memrise-stories.replit.app/library,,,,
+https://app.mondly.com/home,,,,
+https://app.getpronounce.com/courses/HZnLJPJ2ut?unit=6AXfdnWxKD,,,,
+https://app.rocketlanguages.com/members/products/186/dashboard,,,,
+https://app.talkpal.ai/dashboard,,,,
+https://learn.pimsleur.com/MiniLearn,x,x,4,"ok, stable"
+https://www.busuu.com/dashboard/timeline/a1,x,x,13,19 TP expected
+https://my.babbel.com/dashboard/inprogress,x,,0,
+https://lingualeo.com/en/training,x,x,9,"to redo analysis only, lingualeo server is down"

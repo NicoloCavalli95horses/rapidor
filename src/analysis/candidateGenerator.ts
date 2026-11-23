@@ -43,6 +43,24 @@ export function isLocaleParam({ name }: { name: string }): boolean {
 }
 
 /**
+ * Marketing / attribution query params (utm_*, click-ids, campaign/ref marks). These carry analytics
+ * provenance — WHERE the visit came from — never WHICH resource is addressed, so the server ignores
+ * them and a swap can only ever surface noise. lingualeo's CRM `/en/buy/…json?…&refclmark=2&campaignId=…`
+ * is the motivating FP: the inert `refclmark` value `2` happened to collide with a wordset id in the
+ * page's React state, so siblings (`12178`, …) got forged; the server returned the same blob, but its
+ * dynamic `elements`/`tags` list reordered between capture and forge, and the positional diff
+ * (`elements.1.type: "user" -> "global"`) tripped the authz gate → 10 HTTP FPs on one request.
+ * Regex, not a blacklist token, so a resource param that merely CONTAINS a tracking word stays mutable.
+ * A semantic param-name fact like LOCALE_PARAM/VOLATILE_PARAMS, not a config knob.
+ */
+export const TRACKING_PARAM = /^(?:utm_[a-z_]+|refclmark|campaign_?id|g?clid|fbclid|msclkid|yclid|dclid|twclid|igshid|gbraid|wbraid|mc_[ce]id)$/i;
+
+/** True when a query-param NAME is a marketing/attribution tracking param (see TRACKING_PARAM). */
+export function isTrackingParam({ name }: { name: string }): boolean {
+  return TRACKING_PARAM.test(name.trim());
+}
+
+/**
  * An identifier slot keeps its TYPE: a numeric URL value is only ever swapped for another numeric one,
  * a non-numeric one for a non-numeric one. A cross-type swap means the "sibling" is a different kind of
  * link sharing the component (duolingo's lesson button `/lesson/unit/1/level/1` and the footer `/privacy`
@@ -119,6 +137,11 @@ export class CandidateGenerator {
       // swap returns the same resource in another language, a guaranteed non-finding. Regex, not a token,
       // so `target_language`/`learning_language` (the studied resource, maybe paid) stay mutable.
       if (segment.paramName && isLocaleParam({ name: segment.paramName })) continue;
+      // A marketing/attribution param (utm_*, refclmark, campaignId, click-ids) names the visit's
+      // PROVENANCE, not a resource: the server ignores it, so a swap only surfaces response noise
+      // (lingualeo's `refclmark` collided with a wordset id → 10 HTTP FPs on the /en/buy blob). Regex,
+      // not a token, so a resource param that merely contains a tracking word stays mutable.
+      if (segment.paramName && isTrackingParam({ name: segment.paramName })) continue;
       // App-shell / section prefixes ("app", "speak", ...) are route roots, not user-scoped ids:
       // mutating one only switches the app's section, which renders a different DOM and so masquerades
       // as a client-routing finding. Skip them wholesale (config.analysis.segmentBlacklist). Query

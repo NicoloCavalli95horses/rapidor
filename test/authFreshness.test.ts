@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkEntryPointFresh } from '../src/analysis/authFreshness';
 import type { ReactStateStore } from '../src/db/ReactStateStore';
-import { useBrowser } from './helpers/browser';
+import { useBrowser, APP_ORIGIN } from './helpers/browser';
 
 const browser = useBrowser();
 
@@ -10,11 +10,17 @@ const browser = useBrowser();
 const fakeStore = (fingerprints: string[], nodeCounts: number[] = [100]) =>
   ({ fingerprintsForUrl: () => fingerprints, nodeCountsForUrl: () => nodeCounts } as unknown as ReactStateStore);
 
-// A page whose injected extension API reports the given live fingerprint over a graph of `nodes` nodes.
-const pageWith = ({ fp, nodes = 100, extraHtml = '' }: { fp: string; nodes?: number; extraHtml?: string }) => browser.withHtml(
+// Injects the extension API reporting `fp` over a graph of `nodes` nodes (plus any `extraHtml`).
+const extScript = ({ fp, nodes = 100, extraHtml = '' }: { fp: string; nodes?: number; extraHtml?: string }) =>
   `${extraHtml}<script>const nodes = {}; for (let i = 0; i < ${nodes}; i++) nodes['n' + i] = { id: 'n' + i };
-   window.__RAPIDOR__getLatestState = () => ({ fingerprint: ${JSON.stringify(fp)}, nodes });</script>`,
-);
+   window.__RAPIDOR__getLatestState = () => ({ fingerprint: ${JSON.stringify(fp)}, nodes });</script>`;
+
+// A page on about:blank (origin matches an about:blank entryUrl — used for the same-origin cases).
+const pageWith = (opts: { fp: string; nodes?: number; extraHtml?: string }) => browser.withHtml(extScript(opts));
+
+// A page SERVED on APP_ORIGIN, so page.url() is a real same-origin URL — for the same-origin redirect case.
+const servedPage = (path: string, opts: { fp: string; nodes?: number; extraHtml?: string }) =>
+  browser.open({ [path]: extScript(opts) }, path);
 
 test('gate: FRESH when the live entry-point fingerprint matches a captured one', async () => {
   const page = await pageWith({ fp: 'FP_AUTHED' });
@@ -31,9 +37,19 @@ test('gate: FRESH on a new structural variant that stays on the entry route with
   assert.match(r.reason, /new structural variant/);
 });
 
+// ejoy: the entry URL has no seed fingerprint, and a cold load bounces to sso.ejoyspace.com/?continue=…
+test('gate: EXPIRED on a cross-origin redirect even with no seed fingerprint (SSO bounce)', async () => {
+  const page = await pageWith({ fp: 'FP_SSO' });   // page sits on about:blank; entryUrl is a different origin
+  const r = await checkEntryPointFresh({ page, reactStateStore: fakeStore([]), site: 'x', entryUrl: 'https://ejoy-english.com/app/courses/37/314', maxWaitMs: 200 });
+  assert.equal(r.fresh, false);
+  assert.match(r.reason, /different origin/);
+});
+
 test('gate: EXPIRED when the app redirected away from the entry route (login redirect)', async () => {
-  const page = await pageWith({ fp: 'FP_LANDING' });
-  const entryUrl = 'https://app.test/dashboard';   // the entry route; the page actually sits elsewhere (about:blank)
+  // Served SAME-ORIGIN as the entry route (both on APP_ORIGIN) but at a different path: the app bounced
+  // /dashboard -> /landing. Must be same-origin, else the cross-origin check short-circuits first.
+  const page = await servedPage('/landing', { fp: 'FP_LANDING' });
+  const entryUrl = `${APP_ORIGIN}/dashboard`;   // the entry route; the app redirected to /landing (same origin)
   const r = await checkEntryPointFresh({ page, reactStateStore: fakeStore(['FP_AUTHED']), site: 'x', entryUrl, maxWaitMs: 200 });
   assert.equal(r.fresh, false);
   assert.match(r.reason, /redirected away/);

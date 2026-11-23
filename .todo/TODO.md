@@ -1,3 +1,9 @@
+To do
+- [done] salvare a db anche i tempi di exploration e analysis e ablation
+- [done] salvare a db avg. number of clickable per page
+- [done] indagare perche duolinguo genera cosi tante forged requests: colpa di dati volatili come timestamps. Ora sono esclusi dalla analisi
+- [done] il crawler quando clicca un link a una email non deve aprire una nuova tab per la email
+
 classificator:
  - da indagare se in ablation classifica chiavi allo "stesso livello" come fa in modalita main
 

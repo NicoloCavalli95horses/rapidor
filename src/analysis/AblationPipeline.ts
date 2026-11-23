@@ -8,7 +8,7 @@ import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import { extractSegments, candidateUrlFor } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
-import { paramNameBlacklisted, isLocaleParam, sameIdShape } from './candidateGenerator';
+import { paramNameBlacklisted, isLocaleParam, isTrackingParam, sameIdShape } from './candidateGenerator';
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
 import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse, isErrorEnvelopeResponse } from './responseEvaluate';
@@ -179,6 +179,9 @@ export class AblationPipeline {
         // Locale / UI-language params select the response's language, not its owner (see isLocaleParam):
         // shared with the main pipeline so the ablation differs from it ONLY in using JSON siblings.
         if (segment.paramName && isLocaleParam({ name: segment.paramName })) continue;
+        // Marketing/attribution params (utm_*, refclmark, campaignId, click-ids) name the visit's
+        // provenance, not a resource — shared with the main pipeline (see isTrackingParam).
+        if (segment.paramName && isTrackingParam({ name: segment.paramName })) continue;
         if (!segment.paramName && options.segmentBlacklist.includes(segment.value.toLowerCase())) continue;
         const hits = preindex.get(segment.value) ?? [];
         // Two maxSegmentMatches guards (JSON analogs of the main pipeline's, see the carriersByValue
