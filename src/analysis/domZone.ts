@@ -4,7 +4,7 @@ type GraphNode = NonNullable<RapidorGraph['nodes']>[string];
 
 /**
  * DOM "chrome zone" inference over a captured React graph, using the per-node serialized DOM element the
- * newer browser extension adds (`node.dom`: the nearest DOM element, children stripped). A URL value that
+ * newer browser extension adds (`node.dom`: the nearest DOM element's outerHTML). A URL value that
  * comes from inside the site's navigation/footer furniture is never a user-scoped resource id, so the
  * match it produced is noise — this lets candidate generation skip it.
  *
@@ -75,9 +75,22 @@ export function nodeChromeZone({ graph, nodeId, maxDepth }: {
     seen.add(cur);
     const node: GraphNode | undefined = nodes[cur];
     if (!node) break;
-    const zone = domChromeZone({ dom: node.dom });
+    const zone = node.chromeZone !== undefined ? node.chromeZone : domChromeZone({ dom: node.dom });
     if (zone) return zone;
     cur = node.parent;
   }
   return null;
+}
+
+/**
+ * Replaces every node's `dom` with its precomputed `chromeZone` label (same verdict as reading `dom`).
+ * `dom` is the element's FULL outerHTML, so it repeats each subtree at every ancestor: ~60% of a graph
+ * (rocketlanguages: 13 of 23 MB per state, 259 states -> heap OOM when candidate generation cached them all).
+ */
+export function slimGraphForGeneration(graph: RapidorGraph): RapidorGraph {
+  for (const node of Object.values(graph.nodes ?? {})) {
+    node.chromeZone = domChromeZone({ dom: node.dom });
+    delete node.dom;
+  }
+  return graph;
 }

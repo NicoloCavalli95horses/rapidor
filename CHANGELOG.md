@@ -2,6 +2,15 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 20:30 — fix: analysis heap OOM on large React graphs (rocketlanguages)
+
+rocketlanguages' end-of-crawl analysis died with `JavaScript heap out of memory`: 259 states of ~23 MB of graph JSON each (5.4 GB, 10x any other site), and `CandidateGenerator` kept every parsed graph for the whole run (~31 MB of heap each, ~8 GB against Node's ~4.3 GB limit).
+
+- Why so big: the extension's `node.dom` is the element's FULL `outerHTML`, so every subtree is repeated at each ancestor (13 of the 23 MB per state). Only the chrome-zone skip reads it.
+- `slimGraphForGeneration` (`domZone.ts`): on load, each node's `dom` becomes its precomputed `chromeZone` label and is dropped. Same verdict: checked on every stored state (1 472 states, 3.0M nodes, 0 differences).
+- The graph cache is now an LRU bounded by stored JSON size (`graphCacheMaxBytes`, default 1 GB). Every other site fits whole, so they never re-parse; `ReactStateStore.getJsonById` added.
+- Effect (generation only, rocketlanguages, default heap): peak 2.3 GB, 275 parses (259 states + 16 re-parses), 33 s, 231 candidates. No change to what any site generates.
+
 ## 2026-11-24 19:06 — fix: `run_metadata` drops `git_commit`, stores the seed URL as given
 
 RAPIDOR goes to peer review with an anonymous repository: a public commit hash in the DB would break it.
@@ -84,25 +93,3 @@ byte-identical for daniel/evelyn/joseph/echo) and was flagged.
   client-routing `courseName` swaps dropped (`unlocked: false -> true`: the candidate is the unlocked side).
 - **Known limit:** user-STATE terms (`purchased`, `owned`, `isSubscribed`) get the wrong sign; absent from
   the reference set, but `purchased: true -> false` would be dropped.
-
-## 2026-11-24 12:40 — fix: NON_AUTHZ_TERMS += feature/service (plural-aware) — talkpal mode-swap FPs
-
-talkpal's `sentence-mode -> character/daily-pick` dashboard-mode swaps (6 findings) passed the authz
-gate only because the embedding classifier scored benign UI chrome above the 0.30 threshold: the
-`newFeature` "NEW" badge normalizes to "new feature" (0.46) and a `category` VALUE of `"Services"`
-normalizes to "services" (0.37). Neither is a paid-resource gate; the DOM guards can't reject them
-because a different mode genuinely renders different content.
-
-- **What changed:** `NON_AUTHZ_TERMS` now also holds the SINGULARs `feature` and `service`, and the
-  membership check (`isNonAuthzWord`) matches a word or its simple English plural (s/es/ies), so one
-  entry covers `services`/`features`/`categories` — no need to list plurals. Live policy (checked in
-  `classify` before cache/model), so no `CLASSIFIER_VERSION` bump and cached scores are overridden.
-- **Suffix-only de-pluralization** keeps lookalikes distinct: `featured` (pimsleur, ends in `ed`) is
-  NOT a plural of `feature`; `access`/`status`/`business` do not collapse to any set entry.
-- **Reference set safe (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy signal matches —
-  `isFree`/`lock`/`premium`/`tier`/`paywall`/`featured` all kept; busuu's `…-service-…` is inside
-  image-URL asset values (already excluded). authzClassifier tests 7/7.
-- **Effect:** talkpal 6 mode-swap FPs dropped (the 4 `modeType` fallback FPs were already removed by
-  the page-uses-param fallback gate). Decision-logic change → `recheckFindings` on the 5 reference
-  sites to confirm (offline already shows no loss).
-  

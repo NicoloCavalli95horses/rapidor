@@ -3,9 +3,10 @@ import type Database from 'better-sqlite3';
 /** Loose on purpose: the graph's shape is owned by RAPIDOR, not the crawler. */
 export interface RapidorGraph {
   fingerprint: string;
-  // `dom` (serialized nearest DOM element, children stripped) and `parent` are added by the newer browser
-  // extension; absent on captures from the old one, so every reader must tolerate them being undefined.
-  nodes?: Record<string, { id: string; componentId?: number; key?: unknown; tag?: number; name?: string; props?: unknown; dom?: string | null; parent?: string }>;
+  // `dom` (the nearest DOM element's FULL outerHTML, subtree included) and `parent` are added by the newer
+  // browser extension; absent on captures from the old one, so every reader must tolerate them being undefined.
+  // `chromeZone` is never stored: slimGraphForGeneration (domZone.ts) derives it from `dom` and drops `dom`.
+  nodes?: Record<string, { id: string; componentId?: number; key?: unknown; tag?: number; name?: string; props?: unknown; dom?: string | null; parent?: string; chromeZone?: string | null }>;
   relations?: Record<string, unknown>;
   componentIndex?: Record<string, string[]>;
   [key: string]: unknown;
@@ -82,8 +83,13 @@ export class ReactStateStore {
   }
 
   getById(stateId: number): RapidorGraph | undefined {
-    const row = this.db.prepare('SELECT graph FROM react_states WHERE id = ?').get(stateId) as { graph: string } | undefined;
-    return row ? (JSON.parse(row.graph) as RapidorGraph) : undefined;
+    const json = this.getJsonById(stateId);
+    return json === undefined ? undefined : (JSON.parse(json) as RapidorGraph);
+  }
+
+  /** The raw stored graph JSON (lets a caller size it before / without keeping the parsed object). */
+  getJsonById(stateId: number): string | undefined {
+    return (this.db.prepare('SELECT graph FROM react_states WHERE id = ?').get(stateId) as { graph: string } | undefined)?.graph;
   }
 
   count(url?: string): number {

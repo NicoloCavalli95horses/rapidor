@@ -3,7 +3,7 @@ import type { PreindexedValueStore, PreindexMatch } from '../db/PreindexedValueS
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import { findCandidates, type MatchCandidate } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
-import { nodeChromeZone, zoneWalkDepthFor } from './domZone';
+import { nodeChromeZone, slimGraphForGeneration, zoneWalkDepthFor } from './domZone';
 import { tokenizeParamName } from '../utils/utils';
 
 // tokenizeParamName now lives in utils (shared with findings' identifier guard); re-exported so
@@ -85,13 +85,19 @@ export interface UrlCandidate {
  * per-run cache of parsed React graphs — call `reset()` at the start of each site's analysis. Pulled
  * out of AnalysisPipeline so candidate generation can be read and tested on its own.
  */
+// ~1 GB of stored graph JSON ≈ 0.7 GB of heap once slimmed: well under Node's default ~4 GB limit.
+export const DEFAULT_GRAPH_CACHE_MAX_BYTES = 1_000_000_000;
+
 export class CandidateGenerator {
   // Per-run cache of React graphs parsed from the DB. findUrlCandidates looks a state's graph up once
   // per preindex match (tens of thousands of times for a rich site), but there are only as many
   // DISTINCT graphs as captured react_states (a couple hundred at most): without this, candidate
-  // generation spent most of its time re-running JSON.parse on the SAME ~150KB graph strings. Reset per
-  // run so it never grows across sites or goes stale against a later re-run.
-  private graphCache = new Map<number, RapidorGraph | undefined>();
+  // generation spent most of its time re-running JSON.parse on the SAME graph strings. Reset per run.
+  // LRU-bounded by stored JSON size (graphCacheMaxBytes): unbounded, rocketlanguages' 259 x 23 MB
+  // graphs exhausted the heap. Every site crawled so far fits whole (largest ~500 MB), so no re-parse.
+  private graphCache = new Map<number, { graph: RapidorGraph | undefined; bytes: number }>();
+  private graphCacheBytes = 0;
+  private graphLoads = 0;   // JSON.parse count this run (logged: re-parses mean the LRU bound is biting)
 
   // Per-run cache of each graph's size-scaled chrome-zone walk depth (zoneWalkDepthFor is O(nodes), so it
   // is computed once per state, not once per match). Keyed by stateId like graphCache; reset per run.
@@ -112,11 +118,14 @@ export class CandidateGenerator {
     maxSegmentMatches: number;
     segmentBlacklist: string[];
     paramBlacklist: string[];
+    graphCacheMaxBytes?: number;   // default DEFAULT_GRAPH_CACHE_MAX_BYTES
   }) {}
 
   /** Drops the per-run caches. Call once at the start of each site's analysis. */
   reset(): void {
     this.graphCache.clear();
+    this.graphCacheBytes = 0;
+    this.graphLoads = 0;
     this.zoneDepthCache.clear();
     this.lookupCache.clear();
     this.expansionCache.clear();
@@ -245,13 +254,34 @@ export class CandidateGenerator {
     return depth;
   }
 
-  /** reactStateStore.getById, memoized for this run: each distinct graph is read + JSON.parsed once. */
+  /** How many graphs were JSON.parsed this run (= distinct states touched, unless the LRU bound evicted). */
+  get graphLoadCount(): number {
+    return this.graphLoads;
+  }
+
+  /**
+   * The state's graph, slimmed (`dom` -> `chromeZone`, see slimGraphForGeneration) and LRU-cached for this
+   * run within graphCacheMaxBytes of stored JSON; the most recent graph is always kept, even if larger.
+   */
   private getGraph(stateId: number): RapidorGraph | undefined {
-    let graph = this.graphCache.get(stateId);
-    if (graph === undefined && !this.graphCache.has(stateId)) {
-      graph = this.deps.reactStateStore.getById(stateId);
-      this.graphCache.set(stateId, graph);
+    const hit = this.graphCache.get(stateId);
+    if (hit) {
+      this.graphCache.delete(stateId);   // re-insert = most recently used (Map keeps insertion order)
+      this.graphCache.set(stateId, hit);
+      return hit.graph;
     }
+    const json = this.deps.reactStateStore.getJsonById(stateId);
+    const graph = json === undefined ? undefined : slimGraphForGeneration(JSON.parse(json) as RapidorGraph);
+    const bytes = json?.length ?? 0;
+    this.graphLoads++;
+    const max = this.deps.graphCacheMaxBytes ?? DEFAULT_GRAPH_CACHE_MAX_BYTES;
+    for (const [id, entry] of this.graphCache) {
+      if (this.graphCacheBytes + bytes <= max) break;
+      this.graphCache.delete(id);
+      this.graphCacheBytes -= entry.bytes;
+    }
+    this.graphCache.set(stateId, { graph, bytes });
+    this.graphCacheBytes += bytes;
     return graph;
   }
 

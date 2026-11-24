@@ -2,6 +2,28 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-24 12:40 — fix: NON_AUTHZ_TERMS += feature/service (plural-aware) — talkpal mode-swap FPs
+
+talkpal's `sentence-mode -> character/daily-pick` dashboard-mode swaps (6 findings) passed the authz
+gate only because the embedding classifier scored benign UI chrome above the 0.30 threshold: the
+`newFeature` "NEW" badge normalizes to "new feature" (0.46) and a `category` VALUE of `"Services"`
+normalizes to "services" (0.37). Neither is a paid-resource gate; the DOM guards can't reject them
+because a different mode genuinely renders different content.
+
+- **What changed:** `NON_AUTHZ_TERMS` now also holds the SINGULARs `feature` and `service`, and the
+  membership check (`isNonAuthzWord`) matches a word or its simple English plural (s/es/ies), so one
+  entry covers `services`/`features`/`categories` — no need to list plurals. Live policy (checked in
+  `classify` before cache/model), so no `CLASSIFIER_VERSION` bump and cached scores are overridden.
+- **Suffix-only de-pluralization** keeps lookalikes distinct: `featured` (pimsleur, ends in `ed`) is
+  NOT a plural of `feature`; `access`/`status`/`business` do not collapse to any set entry.
+- **Reference set safe (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy signal matches —
+  `isFree`/`lock`/`premium`/`tier`/`paywall`/`featured` all kept; busuu's `…-service-…` is inside
+  image-URL asset values (already excluded). authzClassifier tests 7/7.
+- **Effect:** talkpal 6 mode-swap FPs dropped (the 4 `modeType` fallback FPs were already removed by
+  the page-uses-param fallback gate). Decision-logic change → `recheckFindings` on the 5 reference
+  sites to confirm (offline already shows no loss).
+  
+
 ## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
 
 The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the

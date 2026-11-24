@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { domChromeZone, nodeChromeZone, zoneWalkDepthFor } from '../src/analysis/domZone';
+import { domChromeZone, nodeChromeZone, slimGraphForGeneration, zoneWalkDepthFor } from '../src/analysis/domZone';
 import type { RapidorGraph } from '../src/db/ReactStateStore';
 
 describe('domChromeZone (a single element)', () => {
@@ -77,5 +77,26 @@ describe('zoneWalkDepthFor (scales with graph size)', () => {
     assert.equal(zoneWalkDepthFor({ graph: mk(4) }), 3);        // small graph -> floor
     assert.equal(zoneWalkDepthFor({ graph: mk(8028) }), 13);    // busuu-sized -> covers the observed depth 9
     assert.ok(zoneWalkDepthFor({ graph: mk(300) }) < 13);       // mid graph -> smaller window
+  });
+});
+
+describe('slimGraphForGeneration (drops the outerHTML, keeps the verdict)', () => {
+  it('gives every node the same chrome zone as its full dom, without keeping the dom', () => {
+    const full = (): RapidorGraph => ({
+      fingerprint: 'fp',
+      nodes: {
+        root: { id: 'root', dom: '<div><nav class="navbar"><a href="/x">x</a></nav></div>' },   // class read from the subtree
+        nav: { id: 'nav', parent: 'root', dom: '<nav class="navbar"><a href="/x">x</a></nav>' },
+        link: { id: 'link', parent: 'nav', dom: '<a href="/x">x</a>' },
+        main: { id: 'main', dom: '<main><p>lesson</p></main>' },
+        old: { id: 'old' },                                                                    // old capture: no dom
+      },
+    });
+    const before = full();
+    const slim = slimGraphForGeneration(full());
+    for (const id of Object.keys(before.nodes!)) {
+      assert.equal(nodeChromeZone({ graph: slim, nodeId: id }), nodeChromeZone({ graph: before, nodeId: id }), id);
+      assert.equal('dom' in slim.nodes![id]!, false, id);
+    }
   });
 });

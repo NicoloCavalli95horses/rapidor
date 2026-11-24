@@ -228,6 +228,36 @@ describe('CandidateGenerator', () => {
     assert.deepEqual({ ...again, items: again.items.length }, { ...first, items: first.items.length });
   });
 
+  it('proposes the same candidates when the graph LRU evicts (bounded cache), re-parsing evicted graphs', () => {
+    const db = new Database(join(root, `${n++}.db`));
+    const preindexStore = new PreindexedValueStore({ db, clearOnStart: true });
+    const reactStateStore = new ReactStateStore({ db, clearOnStart: true });
+    const values = ['101', '201', '301'];
+    for (const v of values) {
+      // per-state siblings (v, v+1) plus a component shared by every state (900, 901)
+      const graph: RapidorGraph = {
+        fingerprint: `f-${v}`,
+        nodes: {
+          a: { id: 'a', componentId: 1, props: { id: v } }, b: { id: 'b', componentId: 1, props: { id: String(Number(v) + 1) } },
+          c: { id: 'c', componentId: 2, props: { id: '900' } }, d: { id: 'd', componentId: 2, props: { id: '901' } },
+        },
+        componentIndex: { '1': ['a', 'b'], '2': ['c', 'd'] },
+      };
+      const stateId = reactStateStore.record({ site: SITE, url: `https://${SITE}/users/${v}/profile`, graph })!;
+      preindexStore.reindex({ stateId, graph });
+    }
+    const urls = [...values.map((v) => `https://${SITE}/users/${v}/profile`), `https://${SITE}/items/900`];
+    const deps = { preindexStore, reactStateStore, maxSegmentMatches: 300, segmentBlacklist: [], paramBlacklist: [] };
+    const run = (gen: CandidateGenerator) => urls.map((url) => gen.findUrlCandidates({ url, site: SITE }).items.map((i) => i.candidate.candidateValue));
+    const unbounded = new CandidateGenerator(deps);
+    const tiny = new CandidateGenerator({ ...deps, graphCacheMaxBytes: 1 });   // keeps only the latest graph
+
+    assert.deepEqual(run(tiny), run(unbounded));
+    assert.deepEqual(run(unbounded).at(-1), ['901', '901', '901']);
+    assert.equal(unbounded.graphLoadCount, 3);   // each state parsed once
+    assert.equal(tiny.graphLoadCount, 6);        // `900` revisits all 3 states, each evicted by the next one
+  });
+
   it('warns for a crawled URL that has no captured React state', () => {
     const url = `https://${SITE}/users/101/profile`;
     const gen = newGenerator({ graph: graphWith({ a: '101', b: '102' }), url });
