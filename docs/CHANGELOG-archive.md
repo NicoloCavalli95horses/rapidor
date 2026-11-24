@@ -2,6 +2,14 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-23 — feature: client-routing sibling-group confirmation + semantic finding dedup
+
+Two companion changes that together cut noise and recover flaky-lost findings without weakening any guard.
+
+- **Sibling-group confirmation (recover flaky-lost paid siblings).** The client-routing probe is flaky on fetch-gated routes (ejoy's locked lessons load content by id over XHR; one real load can snapshot an incomplete render and read as a false negative), so which paid siblings surface flips run-to-run — ejoy flagged only 1 of 4 locked lessons. Siblings of ONE reference node that share the swap `path` AND the authz-relevant keys are structurally identical resources behind the same route, so a genuine confirmation of one is a logical consequence for all. `CandidateEvaluator` now keys each client-routing candidate into a group (`pageUrl` + `stateId` + refNodeId + swap path + sorted authz sensitiveKeys). A genuine accept confirms the group; siblings the per-candidate probe rejected are stashed and replayed once their group is confirmed (eagerly on confirm, plus `finalizeClientGroups()` backstop). A sibling of an already-confirmed group is recorded without re-probing. SAFETY: only ever ADDS siblings to an already-confirmed group — can never confirm a group with zero genuine accepts.
+- **Semantic dedup key (collapse carrier-redundancy, preserve api/page/client layer).** Promova produced 41 findings for 9 underlying paid-lesson IDORs because the same sibling pair surfaced via three HTTP carriers (page SSR flight, backend API, alternate plan URL) + client-routing. The old `vulnerabilityId` keyed on `candidateValue + nodeId + method + url`, so every carrier's `url` produced a distinct row. The new key is `sha256(site + origin + method + stateId + refNodeId + candNodeId + path)`: the sibling PAIR (stateId+nodes+path) scoped to the LAYER the leak was observed at (origin+method). Three plan carriers on `promova.com:GET` collapse to one; the `courses.api.promova.com:GET` row stays distinct (different layer); the `promova.com:CLIENT` row stays distinct (different detection surface). Preserves the auditor's api-vs-page-vs-client distinction, collapses plan-context noise.
+- **Safety & tests:** `findings.test.ts` + `AnalysisPipeline.test.ts` 25/25 pass; recheckFindings on busuu/pimsleur/babbel/lingualeo + ejoy/promova re-analysis pending. Decision-logic change → still owes a recheck pass on the 4 reference sites.
+
 ## 2026-11-22 18:30 — feature: persist paper-support metrics to the DB + cross-app aggregation script
 
 To make writing the evaluation (Fig. 3 funnel, Fig. 4 identifier position, Table IV cost) a query instead of a manual dig, the per-app rows now carry every number the figures need, and a new script aggregates them across the application set.

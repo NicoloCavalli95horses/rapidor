@@ -2,6 +2,26 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 12:40 — fix: NON_AUTHZ_TERMS += feature/service (plural-aware) — talkpal mode-swap FPs
+
+talkpal's `sentence-mode -> character/daily-pick` dashboard-mode swaps (6 findings) passed the authz
+gate only because the embedding classifier scored benign UI chrome above the 0.30 threshold: the
+`newFeature` "NEW" badge normalizes to "new feature" (0.46) and a `category` VALUE of `"Services"`
+normalizes to "services" (0.37). Neither is a paid-resource gate; the DOM guards can't reject them
+because a different mode genuinely renders different content.
+
+- **What changed:** `NON_AUTHZ_TERMS` now also holds the SINGULARs `feature` and `service`, and the
+  membership check (`isNonAuthzWord`) matches a word or its simple English plural (s/es/ies), so one
+  entry covers `services`/`features`/`categories` — no need to list plurals. Live policy (checked in
+  `classify` before cache/model), so no `CLASSIFIER_VERSION` bump and cached scores are overridden.
+- **Suffix-only de-pluralization** keeps lookalikes distinct: `featured` (pimsleur, ends in `ed`) is
+  NOT a plural of `feature`; `access`/`status`/`business` do not collapse to any set entry.
+- **Reference set safe (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy signal matches —
+  `isFree`/`lock`/`premium`/`tier`/`paywall`/`featured` all kept; busuu's `…-service-…` is inside
+  image-URL asset values (already excluded). authzClassifier tests 7/7.
+- **Effect:** talkpal 6 mode-swap FPs dropped (the 4 `modeType` fallback FPs were already removed by
+  the page-uses-param fallback gate). Decision-logic change → `recheckFindings` on the 5 reference
+  sites to confirm (offline already shows no loss).
 ## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
 
 The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the
@@ -108,11 +128,3 @@ clozemaster produced 101 client-routing FPs in 65 min of analysis: every paid wi
 - **Why (time):** each visited story slug matches its catalog card, whose ~508 paid siblings are all genuine `isFree: true → false` candidates; client probes were deduped per *reference page*, so 10 visited stories × 508 = 5 080 live probes.
 - **What changed:** (1) stage 2 rejects a real load the app redirected away from (same `sameRoutePath` guard; a failed capture still keeps). (2) Client-routing probes are deduped by canonical candidate route, like HTTP. (3) Negative sibling-group inference (`analysis.clientRoutingGroupRejectAfter`, default 3, 0 = off): after K same-target redirect-aways the rest of the group is skipped (stashed, so a later genuine confirmation still recovers it). `recheckFindings` gained `RECHECK_LIMIT=N`.
 - **Effect:** clozemaster recheck 0/101 still flagged (all `/pro` redirect-away); full re-analysis 101 → 0 findings, client probes 5 080 → 508 dispatched / ~10 executed (498 skipped), analysis 64m48s → 1m38s. New tests: stage-2 paywall redirect (fails without the fix) + group skip; `AnalysisPipeline.test.ts` 12/12. Stage 2 is lingualeo's stage → its `recheckFindings` is still owed.
-
-## 2026-11-23 — feature: client-routing sibling-group confirmation + semantic finding dedup
-
-Two companion changes that together cut noise and recover flaky-lost findings without weakening any guard.
-
-- **Sibling-group confirmation (recover flaky-lost paid siblings).** The client-routing probe is flaky on fetch-gated routes (ejoy's locked lessons load content by id over XHR; one real load can snapshot an incomplete render and read as a false negative), so which paid siblings surface flips run-to-run — ejoy flagged only 1 of 4 locked lessons. Siblings of ONE reference node that share the swap `path` AND the authz-relevant keys are structurally identical resources behind the same route, so a genuine confirmation of one is a logical consequence for all. `CandidateEvaluator` now keys each client-routing candidate into a group (`pageUrl` + `stateId` + refNodeId + swap path + sorted authz sensitiveKeys). A genuine accept confirms the group; siblings the per-candidate probe rejected are stashed and replayed once their group is confirmed (eagerly on confirm, plus `finalizeClientGroups()` backstop). A sibling of an already-confirmed group is recorded without re-probing. SAFETY: only ever ADDS siblings to an already-confirmed group — can never confirm a group with zero genuine accepts.
-- **Semantic dedup key (collapse carrier-redundancy, preserve api/page/client layer).** Promova produced 41 findings for 9 underlying paid-lesson IDORs because the same sibling pair surfaced via three HTTP carriers (page SSR flight, backend API, alternate plan URL) + client-routing. The old `vulnerabilityId` keyed on `candidateValue + nodeId + method + url`, so every carrier's `url` produced a distinct row. The new key is `sha256(site + origin + method + stateId + refNodeId + candNodeId + path)`: the sibling PAIR (stateId+nodes+path) scoped to the LAYER the leak was observed at (origin+method). Three plan carriers on `promova.com:GET` collapse to one; the `courses.api.promova.com:GET` row stays distinct (different layer); the `promova.com:CLIENT` row stays distinct (different detection surface). Preserves the auditor's api-vs-page-vs-client distinction, collapses plan-context noise.
-- **Safety & tests:** `findings.test.ts` + `AnalysisPipeline.test.ts` 25/25 pass; recheckFindings on busuu/pimsleur/babbel/lingualeo + ejoy/promova re-analysis pending. Decision-logic change → still owes a recheck pass on the 4 reference sites.

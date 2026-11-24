@@ -76,7 +76,7 @@ export class AuthzClassifier {
     const norm = normalizeKey(key);
     // Live policy, like THRESHOLD: a term whose any WORD is in NON_AUTHZ_TERMS is never authz-relevant,
     // without touching the persisted score (so no CLASSIFIER_VERSION bump) and without loading the model.
-    if (norm.split(' ').some((w) => NON_AUTHZ_TERMS.has(w))) return { score: 0, isAuthZRelevant: false };
+    if (norm.split(' ').some(isNonAuthzWord)) return { score: 0, isAuthZRelevant: false };
     const storeKey = `${CLASSIFIER_VERSION}:${norm}`;
     // THRESHOLD is applied at READ time (recomputed from the stored score), so lowering/raising it takes
     // effect on already-cached scores without a CLASSIFIER_VERSION bump — only the SCORE is a function of
@@ -103,13 +103,22 @@ export class AuthzClassifier {
 }
 
 /**
- * Words that read like access control to the embedding model but never mark a PAID / higher-privilege
- * resource, the only entitlement RAPIDOR looks for. `privacy` (privacy policy, privacy settings) is the
- * user's own data-protection page: duolingo's `/settings/account -> /settings/privacy` and its footer
- * "Privacy" link both passed the gate on it. Matched per normalized word, so `Privacy settings`,
- * `settings-privacy`, `privacyPolicy` are all covered. A semantic fact like PREINDEXED_KEYS, not a knob.
+ * Words that read like access control to the embedding model but never mark a PAID / higher-privilege resource
  */
-const NON_AUTHZ_TERMS = new Set(['privacy']);
+const NON_AUTHZ_TERMS = new Set(['privacy', 'feature', 'service']);
+
+/**
+ * True when a normalized word is a NON_AUTHZ term or its simple English plural, so one singular entry
+ * covers the plural (`services` -> `service`, `categories` -> `category`). Suffix-only: `featured` does
+ * not end in s/es/ies, so it never collapses to `feature`.
+ */
+function isNonAuthzWord(w: string): boolean {
+  if (NON_AUTHZ_TERMS.has(w)) return true;
+  if (w.endsWith('ies') && NON_AUTHZ_TERMS.has(`${w.slice(0, -3)}y`)) return true;
+  if (w.endsWith('es') && NON_AUTHZ_TERMS.has(w.slice(0, -2))) return true;
+  if (w.endsWith('s') && NON_AUTHZ_TERMS.has(w.slice(0, -1))) return true;
+  return false;
+}
 
 // Bump whenever classify's normalization or embedding input changes, to invalidate the persisted
 // authz_classifications rows a previous version wrote. v2: camelCase/snake split + "whether" framing.
