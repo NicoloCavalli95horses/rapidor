@@ -2,6 +2,35 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 11:05 — fix: only 200 GETs are forge references; memoized preindex lookups; early-abort generation
+
+talkpal's analysis never finished: generation ran for 20+ min at ~4 GB RSS with zero forges. Its
+~31k first-party Google Analytics beacons (`app.talkpal.ai/bqpw/g/collect`, status `204`, unique
+`_p`/`sst.rnd`/`rcb` per hit) survive both the same-site capture filter and `normalizeUrl`, and drove
+~2M segments / ~3.6M preindex matches with a fresh URL per beacon, so `seen` never deduped them.
+
+- **Why:** a `204`/`3xx`/`4xx` GET can never be a forge reference (no body to compare; a forged `200`
+  fails the status-equality similarity, a forged `>=400` hits the error-status guard), so they only
+  cost time. The main pipeline also had no generation early-abort, unlike the ablation.
+- **What changed:** `AnalysisPipeline` and `AblationPipeline` skip non-200 GETs as forge references
+  (history filter still uses every event); `CandidateGenerator` memoizes `countByValue`/`findByValue`
+  per value per site (reset per run); the main pipeline breaks out of generation as soon as
+  `tasks > maxGeneratedRequests`. New test in `AnalysisPipeline.test.ts`.
+- **Latent ablation bug, also fixed:** the ablation generation loop never enforced the GET-only
+  invariant (it used every event as its own forge reference), so once talkpal's generation was no
+  longer `infeasible` it reached a `200` POST whose URL carried a preindexed value and crashed on
+  `forgeRequest`'s non-GET refusal. `AblationPipeline` now skips non-GET references too (the talkpal
+  roleplay resources stay analysed via their 3 `200` GET carriers). Reference pool drops from ~21k
+  POST to 192 GET; the JSON preindex/siblings still come from any response body.
+- **Measured (offline generation, read-only):** talkpal >10k candidates (early-aborted after 170 URLs,
+  12 s) → **500 in 1.9 s**; promova 128 → 128; mondly.com / app.mondly.com 0 → 0; busuu 61 → 42 (the 19
+  dropped come from one `403` premium-download reference, which could never yield a finding). All 40
+  stored HTTP findings (busuu 14, promova 16, mondly 10) have a `200` reference → no loss.
+  Client-routing is untouched (seeded from page URLs, not `http_events`).
+- **Live (talkpal, re-authenticated):** main pipeline FRESH, 31436 non-200 GETs excluded, 726
+  candidates dispatched, 54 s, not infeasible, **9 findings** (3 client CLIENT, 4 client GET, 2 http
+  GET). The session expires in ~3 min, so a clean end-to-end ablation run still awaits a fresh login.
+
 ## 2026-11-23 19:10 — fix: recover longer paid resources — asymmetric response-length check
 
 busuu re-derived only 8 of its paid-lesson HTTP findings when ~14 are real. The 6 missing ones
@@ -82,14 +111,3 @@ To make writing the evaluation (Fig. 3 funnel, Fig. 4 identifier position, Table
   - `mean`/`median`/`mode` helpers in `utils`; `tokenizeParamName` already shared there.
   - **Fix (pre-existing):** a re-analysis of already-captured data (`runAnalysisFromDb` passes `explorationMs:0` — it never explores) overwrote the crawl's real `exploration_ms` with 0. `record()` now keeps the stored value whenever the incoming one is 0 (a genuine crawl is always >0), so the exploration time survives any number of re-runs. Covered by a new store test.
 - **Effect:** no behaviour change to detection — purely additive persistence + reporting. Existing rows read back with the new columns defaulted to 0 until re-run; `runAnalysisFromDb` backfills them without a re-crawl. Full suite green (new `clickableCountsBySite`/`countByMethod` paths covered by the store tests; a pre-existing `AnalysisStatsStore` test row was fixed to include `infeasible`).
-
-## 2026-11-22 17:10 — fix: tame candidate-generation explosion on telemetry-heavy SPAs (duolingo)
-
-Duolingo's analysis was abandoned as `infeasible` — candidate generation produced **110k forged GETs** (11× the 10k budget) from only ~75 logical endpoints. Diagnosed three compounding causes and fixed each at its root; duolingo now generates **458** distinct forges (offline count) and is analysed instead of skipped.
-
-- **Why it exploded:** (1) the crawler re-fires every XHR on each DFS restore, so ~75 endpoints became **58,474 GET events**; (2) each carried a cache-buster timestamp (`_=<epoch-ms>`, `ts=<epoch-s>`), so every repeat was a *distinct* URL that neither the history filter nor the forge-dedup collapsed, and candidate generation ran 58k times; (3) a timezone param `tzoffset` (a non-identifier, like pagination/locale) was forged into thousands of nonsense offsets.
-- **What changed:**
-  - `normalizeUrl` (findings.ts) now strips volatile params **robustly by value shape**, not a name list: any query value that is a 10-/13-digit epoch timestamp is dropped, so it catches cache-busters whatever the site names them (corpus-wide: `_`, `ts`, `t`, promova's `tft`). An **identifier-name guard** (`id`/`userId`/`uuid`/`token`/…) keeps a real id that merely resembles an epoch. `tokenizeParamName` moved to `utils` (shared with the param blacklist).
-  - `AnalysisPipeline` generates candidates **once per canonical GET URL** (dedup before the generation loop) instead of once per raw event — behaviour-identical to the existing forge-dedup (first-wins), but it no longer re-runs the whole preindex lookup for every duplicate (duolingo: 58k → 79 generations).
-  - `tzoffset`/`timezone`/`tz`/`utcoffset` added to `analysis.paramBlacklist` (representation params, not object references).
-- **Effect:** duolingo 110k → 458 forges (feasible). No reference site uses any stripped/blacklisted param (`_`/`ts`/`tzoffset` absent on busuu/pimsleur/lingualeo/babbel), and the event-dedup is behaviour-preserving, so the dispatched set for the reference sites is unchanged. Decision-logic (guards, response comparison) untouched. New unit tests in findings/utils; full analysis + ablation suites green (60 tests). Live `recheckFindings`/`runAnalysisFromDb` regression skipped per the user (re-crawl pending).

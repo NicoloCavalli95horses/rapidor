@@ -210,15 +210,26 @@ export class AnalysisPipeline {
     // VOLATILE_PARAMS to canonicalize, see findings.ts).
     const uniqueGets: typeof events = [];
     const seenEventUrls = new Set<string>();
+    let nonOkSkipped = 0;
     for (const event of events) {
       if (event.method.toUpperCase() !== 'GET') continue;
+      // Only a 200 can be a forge REFERENCE: a 204/3xx has no body to compare and a 4xx means the user
+      // can't reach even the original. talkpal's 31k first-party GA beacons (204, unique `_p`/`rnd`) are
+      // the motivating case. historyUrls above still holds EVERY event (an already-seen URL stays excluded).
+      if (event.status !== 200) { nonOkSkipped++; continue; }
       const canonical = normalizeUrl(event.url);
       if (seenEventUrls.has(canonical)) continue;
       seenEventUrls.add(canonical);
       uniqueGets.push(event);
     }
 
+    if (nonOkSkipped > 0) log.info(`AnalysisPipeline: ${site} — ${nonOkSkipped} non-200 GET event(s) excluded as forge references`);
+
+    // Early-abort once the forge budget is exceeded (as the ablation does): the site is infeasible
+    // anyway, and materialising every task first is what exhausted memory on a noisy site.
+    generation: {
     for (const event of uniqueGets) {
+      if (tasks.length > options.maxGeneratedRequests) break generation;
       const found = this.candidateGenerator.findUrlCandidates({ url: event.url, site });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
@@ -245,6 +256,7 @@ export class AnalysisPipeline {
     // replayable offline, so the offline demo skips this whole phase and stays HTTP-only (see
     // AnalysisPipelineOptions.offline and demo/README.md).
     for (const pageUrl of options.offline ? [] : pageUrls) {
+      if (tasks.length > options.maxGeneratedRequests) break generation;
       const found = this.candidateGenerator.findUrlCandidates({ url: pageUrl, site });
       segmentsExtracted += found.segments;
       matchesFound += found.matches;
@@ -278,6 +290,7 @@ export class AnalysisPipeline {
         }
       }
     }
+    } // generation
 
     // Paper-support per-app aggregates, computed once (used by both the infeasible and the normal
     // record below). `httpEventsUnique` collapses re-fired endpoints by canonical URL; the clickables

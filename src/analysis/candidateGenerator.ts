@@ -1,5 +1,5 @@
 import { log } from 'crawlee';
-import type { PreindexedValueStore } from '../db/PreindexedValueStore';
+import type { PreindexedValueStore, PreindexMatch } from '../db/PreindexedValueStore';
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
 import { findCandidates } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
@@ -97,6 +97,10 @@ export class CandidateGenerator {
   // is computed once per state, not once per match). Keyed by stateId like graphCache; reset per run.
   private zoneDepthCache = new Map<number, number>();
 
+  // Per-run cache of preindex lookups by value (site-keyed for safety). URLs of one site repeat the same
+  // param values thousands of times (talkpal: 2M segments, 15k distinct values): one SQL round per value.
+  private lookupCache = new Map<string, { count: number; matches?: PreindexMatch[] }>();
+
   constructor(private deps: {
     preindexStore: PreindexedValueStore;
     reactStateStore: ReactStateStore;
@@ -109,6 +113,20 @@ export class CandidateGenerator {
   reset(): void {
     this.graphCache.clear();
     this.zoneDepthCache.clear();
+    this.lookupCache.clear();
+  }
+
+  /** Cached countByValue + (only under the cap) findByValue, so an over-cap value never fetches its rows. */
+  private lookup({ value, site }: { value: string; site: string }): PreindexMatch[] | undefined {
+    const { preindexStore, maxSegmentMatches } = this.deps;
+    const key = `${site}\u0000${value}`;
+    let entry = this.lookupCache.get(key);
+    if (!entry) {
+      const count = preindexStore.countByValue({ value, site });
+      entry = { count, matches: count > maxSegmentMatches ? undefined : preindexStore.findByValue({ value, site }) };
+      this.lookupCache.set(key, entry);
+    }
+    return entry.matches;
   }
 
   /**
@@ -117,7 +135,7 @@ export class CandidateGenerator {
    * lookup matches another site's nodes (a cross-site false positive, see PreindexedValueStore.findByValue).
    */
   findUrlCandidates({ url, site }: { url: string; site: string }): { segments: number; matches: number; chromeSkipped: number; items: UrlCandidate[] } {
-    const { preindexStore, maxSegmentMatches, segmentBlacklist, paramBlacklist } = this.deps;
+    const { segmentBlacklist, paramBlacklist } = this.deps;
     let segments = 0;
     let matches = 0;
     let chromeSkipped = 0;
@@ -154,8 +172,9 @@ export class CandidateGenerator {
       // shares the word) is what made candidate generation explode. Identifiers appear a bounded
       // handful of times, well under this cap, so this skips only the noise. countByValue never
       // materializes the rows, so an over-cap segment costs a single COUNT, not a huge fetch.
-      if (preindexStore.countByValue({ value: segment.value, site }) > maxSegmentMatches) continue;
-      for (const match of preindexStore.findByValue({ value: segment.value, site })) {
+      const preindexMatches = this.lookup({ value: segment.value, site });
+      if (!preindexMatches) continue;   // over maxSegmentMatches
+      for (const match of preindexMatches) {
         matches++;
         const graph = this.getGraph(match.stateId);
         if (!graph) continue;

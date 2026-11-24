@@ -115,6 +115,25 @@ describe('AnalysisPipeline: client-side-only query params', () => {
     assert.equal(findings, 1);
   });
 
+  // Only a 200 GET is a forge reference: a 204 beacon carrying the same id (talkpal's first-party GA
+  // `collect`) must generate nothing, while the 200 one still yields its sibling forge.
+  it('generates HTTP forge candidates only from 200 GET events', async () => {
+    const { pipeline, httpEventStore, preindexStore, reactStateStore } = newPipeline();
+    const page = await newPage();
+    const graph = siblingGraph();
+    const stateId = reactStateStore.record({ site: 'app.test', url: `${APP_ORIGIN}/home`, graph })!;
+    preindexStore.reindex({ stateId, graph });
+    const base = { method: 'GET', requestHeaders: {}, timestamp: new Date().toISOString(), pageUrl: `${APP_ORIGIN}/home`, responseBody: '' };
+    httpEventStore.record({ site: 'app.test', request: { ...base, url: `${APP_ORIGIN}/collect?id=101`, status: 204 } });
+    httpEventStore.record({ site: 'app.test', request: { ...base, url: `${APP_ORIGIN}/api/item?id=101`, status: 200, responseBody: '{"id":"101"}' } });
+
+    await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+
+    const db = (httpEventStore as unknown as { db: Database.Database }).db;
+    const { http_forged } = db.prepare("SELECT http_forged FROM analysis_stats WHERE site = 'app.test'").get() as { http_forged: number };
+    assert.equal(http_forged, 1);
+  });
+
   // Sibling-group confirmation: four sibling instances of one component (reference 101 + premium
   // siblings 102/103/104). The SPA (the `html` fixture) KNOWS only 101 and 102, so 102 renders a real
   // distinct profile (a genuine accept) while 103/104 render the app's empty not-found page — which the

@@ -170,6 +170,12 @@ export class AblationPipeline {
     // match/siblings were found in: that's `bodies[hit.bodyIndex]`, resolved independently per hit.
     generation:
     for (const event of events) {
+      // Forge references are 200 GETs only (same as AnalysisPipeline, and the GET-only invariant):
+      // `event` is the splice target AND the forged request, so a non-GET here would reach
+      // forgeRequest's non-GET refusal (talkpal's roleplay POSTs carry roleplay ids, so they DID), and a
+      // 204/3xx/4xx has no usable reference body. Every event's body still fed the JSON preindex above
+      // (siblings come from any response); the history filter still used every event.
+      if (event.method.toUpperCase() !== 'GET' || event.status !== 200) continue;
       for (const segment of extractSegments({ url: event.url })) {
         segmentsExtracted++;
         // Same blacklists as the main pipeline (candidateGenerator): a pagination/sorting query param

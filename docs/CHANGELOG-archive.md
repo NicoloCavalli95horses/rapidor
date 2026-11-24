@@ -2,6 +2,17 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-22 17:10 — fix: tame candidate-generation explosion on telemetry-heavy SPAs (duolingo)
+
+Duolingo's analysis was abandoned as `infeasible` — candidate generation produced **110k forged GETs** (11× the 10k budget) from only ~75 logical endpoints. Diagnosed three compounding causes and fixed each at its root; duolingo now generates **458** distinct forges (offline count) and is analysed instead of skipped.
+
+- **Why it exploded:** (1) the crawler re-fires every XHR on each DFS restore, so ~75 endpoints became **58,474 GET events**; (2) each carried a cache-buster timestamp (`_=<epoch-ms>`, `ts=<epoch-s>`), so every repeat was a *distinct* URL that neither the history filter nor the forge-dedup collapsed, and candidate generation ran 58k times; (3) a timezone param `tzoffset` (a non-identifier, like pagination/locale) was forged into thousands of nonsense offsets.
+- **What changed:**
+  - `normalizeUrl` (findings.ts) now strips volatile params **robustly by value shape**, not a name list: any query value that is a 10-/13-digit epoch timestamp is dropped, so it catches cache-busters whatever the site names them (corpus-wide: `_`, `ts`, `t`, promova's `tft`). An **identifier-name guard** (`id`/`userId`/`uuid`/`token`/…) keeps a real id that merely resembles an epoch. `tokenizeParamName` moved to `utils` (shared with the param blacklist).
+  - `AnalysisPipeline` generates candidates **once per canonical GET URL** (dedup before the generation loop) instead of once per raw event — behaviour-identical to the existing forge-dedup (first-wins), but it no longer re-runs the whole preindex lookup for every duplicate (duolingo: 58k → 79 generations).
+  - `tzoffset`/`timezone`/`tz`/`utcoffset` added to `analysis.paramBlacklist` (representation params, not object references).
+- **Effect:** duolingo 110k → 458 forges (feasible). No reference site uses any stripped/blacklisted param (`_`/`ts`/`tzoffset` absent on busuu/pimsleur/lingualeo/babbel), and the event-dedup is behaviour-preserving, so the dispatched set for the reference sites is unchanged. Decision-logic (guards, response comparison) untouched. New unit tests in findings/utils; full analysis + ablation suites green (60 tests). Live `recheckFindings`/`runAnalysisFromDb` regression skipped per the user (re-crawl pending).
+
 ## 2026-11-22 15:30 — safety: block external protocol handlers (mailto:/tel:/sms:/webcal:/zoommtg:/…)
 
 Clicking an `example@gmail.com`-style link (or any `mailto:`/`tel:`/`sms:`/`webcal:`/`zoommtg:`/app-deep-link) made Chromium hand the URL to the OS, launching an external app and pulling the crawler out of the page. These links carry no paid resource to probe, so they are pure noise and risk.
