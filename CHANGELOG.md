@@ -2,6 +2,24 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
+
+The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the
+param to `event.pageUrl` and probed it. But `pageUrl` is only where the XHR fired, not necessarily a
+route that honours the param — so talkpal's `mode-progress-percentage?modeType=<mode>` (XHR on
+`/sentence-mode` & `/word-mode`, pages with no `modeType` in their URL) produced one false positive
+per sibling mode: the page ignored the bogus param and rendered its own content, which read as "novel".
+
+- **What changed:** `clientRoutingQueryFallback` now drops unless `event.pageUrl` already carries
+  `paramName` in its query. A param genuinely part of the page route (pimsleur's `/…?id=`) is present,
+  so real fallbacks are untouched. Can only DROP, never add.
+- **Reference set is unaffected (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy finding
+  comes through this fallback — they are all `http` or direct `CLIENT` (method ≠ GET+client-routing).
+  Only talkpal (the 4 FPs, now dropped) and the EXCLUDED mondly had fallback rows.
+- **Reference set note:** the evaluation set is busuu/pimsleur/promova/lingualeo/ejoy (+ babbel as the
+  0-finding control). mondly (Ember) and global-exam (React+Vue hybrid) are excluded; their DB rows are
+  to be deleted. `.claude/rules/analysis.md` Regression-checks updated accordingly.
+
 ## 2026-11-24 11:05 — fix: only 200 GETs are forge references; memoized preindex lookups; early-abort generation
 
 talkpal's analysis never finished: generation ran for 20+ min at ~4 GB RSS with zero forges. Its
@@ -98,16 +116,3 @@ Two companion changes that together cut noise and recover flaky-lost findings wi
 - **Sibling-group confirmation (recover flaky-lost paid siblings).** The client-routing probe is flaky on fetch-gated routes (ejoy's locked lessons load content by id over XHR; one real load can snapshot an incomplete render and read as a false negative), so which paid siblings surface flips run-to-run — ejoy flagged only 1 of 4 locked lessons. Siblings of ONE reference node that share the swap `path` AND the authz-relevant keys are structurally identical resources behind the same route, so a genuine confirmation of one is a logical consequence for all. `CandidateEvaluator` now keys each client-routing candidate into a group (`pageUrl` + `stateId` + refNodeId + swap path + sorted authz sensitiveKeys). A genuine accept confirms the group; siblings the per-candidate probe rejected are stashed and replayed once their group is confirmed (eagerly on confirm, plus `finalizeClientGroups()` backstop). A sibling of an already-confirmed group is recorded without re-probing. SAFETY: only ever ADDS siblings to an already-confirmed group — can never confirm a group with zero genuine accepts.
 - **Semantic dedup key (collapse carrier-redundancy, preserve api/page/client layer).** Promova produced 41 findings for 9 underlying paid-lesson IDORs because the same sibling pair surfaced via three HTTP carriers (page SSR flight, backend API, alternate plan URL) + client-routing. The old `vulnerabilityId` keyed on `candidateValue + nodeId + method + url`, so every carrier's `url` produced a distinct row. The new key is `sha256(site + origin + method + stateId + refNodeId + candNodeId + path)`: the sibling PAIR (stateId+nodes+path) scoped to the LAYER the leak was observed at (origin+method). Three plan carriers on `promova.com:GET` collapse to one; the `courses.api.promova.com:GET` row stays distinct (different layer); the `promova.com:CLIENT` row stays distinct (different detection surface). Preserves the auditor's api-vs-page-vs-client distinction, collapses plan-context noise.
 - **Safety & tests:** `findings.test.ts` + `AnalysisPipeline.test.ts` 25/25 pass; recheckFindings on busuu/pimsleur/babbel/lingualeo + ejoy/promova re-analysis pending. Decision-logic change → still owes a recheck pass on the 4 reference sites.
-
-## 2026-11-22 18:30 — feature: persist paper-support metrics to the DB + cross-app aggregation script
-
-To make writing the evaluation (Fig. 3 funnel, Fig. 4 identifier position, Table IV cost) a query instead of a manual dig, the per-app rows now carry every number the figures need, and a new script aggregates them across the application set.
-
-- **Why:** the stored stats conflated HTTP forges with client-routing probes, did not record the mutated-segment position of a finding, had no per-app UI-complexity measure, and nothing computed the cross-app mean/median/mode the paper reports.
-- **What changed:**
-  - `analysis_stats` gains per-app columns (added via on-the-fly migration, read-only-safe): `http_events_unique`, `http_forged` + `client_probes` (the split of `requests_generated` by detection path), `vulns_http` + `vulns_client` (findings per class), `clickables_per_state_mean` + `clickables_per_state_median` (GUI complexity, from `crawl_states.clickables`).
-  - `vulnerabilities` gains `segment_location` (`path`/`query`) + `segment_index` (0-based from the right) — the mutated-value position for Fig. 4. `SegmentCandidate` now carries `location`/`indexFromRight`, threaded through the three evaluate paths into `recordFinding`.
-  - New `npm run paper-stats` (`scripts/paperStats.ts`): per-app table, cross-app mean/median/mode (+min/max) per metric, and the position × value-type matrix; writes `reports/paper_per_app.csv` and `reports/paper_id_location.csv`. The Fig. 4 matrix is derived from the finding URLs, so it already works on findings stored before the new columns existed. Cost compute/wait is split using the forge-pacing constants.
-  - `mean`/`median`/`mode` helpers in `utils`; `tokenizeParamName` already shared there.
-  - **Fix (pre-existing):** a re-analysis of already-captured data (`runAnalysisFromDb` passes `explorationMs:0` — it never explores) overwrote the crawl's real `exploration_ms` with 0. `record()` now keeps the stored value whenever the incoming one is 0 (a genuine crawl is always >0), so the exploration time survives any number of re-runs. Covered by a new store test.
-- **Effect:** no behaviour change to detection — purely additive persistence + reporting. Existing rows read back with the new columns defaulted to 0 until re-run; `runAnalysisFromDb` backfills them without a re-crawl. Full suite green (new `clickableCountsBySite`/`countByMethod` paths covered by the store tests; a pre-existing `AnalysisStatsStore` test row was fixed to include `infeasible`).

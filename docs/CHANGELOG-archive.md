@@ -2,6 +2,19 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-22 18:30 — feature: persist paper-support metrics to the DB + cross-app aggregation script
+
+To make writing the evaluation (Fig. 3 funnel, Fig. 4 identifier position, Table IV cost) a query instead of a manual dig, the per-app rows now carry every number the figures need, and a new script aggregates them across the application set.
+
+- **Why:** the stored stats conflated HTTP forges with client-routing probes, did not record the mutated-segment position of a finding, had no per-app UI-complexity measure, and nothing computed the cross-app mean/median/mode the paper reports.
+- **What changed:**
+  - `analysis_stats` gains per-app columns (added via on-the-fly migration, read-only-safe): `http_events_unique`, `http_forged` + `client_probes` (the split of `requests_generated` by detection path), `vulns_http` + `vulns_client` (findings per class), `clickables_per_state_mean` + `clickables_per_state_median` (GUI complexity, from `crawl_states.clickables`).
+  - `vulnerabilities` gains `segment_location` (`path`/`query`) + `segment_index` (0-based from the right) — the mutated-value position for Fig. 4. `SegmentCandidate` now carries `location`/`indexFromRight`, threaded through the three evaluate paths into `recordFinding`.
+  - New `npm run paper-stats` (`scripts/paperStats.ts`): per-app table, cross-app mean/median/mode (+min/max) per metric, and the position × value-type matrix; writes `reports/paper_per_app.csv` and `reports/paper_id_location.csv`. The Fig. 4 matrix is derived from the finding URLs, so it already works on findings stored before the new columns existed. Cost compute/wait is split using the forge-pacing constants.
+  - `mean`/`median`/`mode` helpers in `utils`; `tokenizeParamName` already shared there.
+  - **Fix (pre-existing):** a re-analysis of already-captured data (`runAnalysisFromDb` passes `explorationMs:0` — it never explores) overwrote the crawl's real `exploration_ms` with 0. `record()` now keeps the stored value whenever the incoming one is 0 (a genuine crawl is always >0), so the exploration time survives any number of re-runs. Covered by a new store test.
+- **Effect:** no behaviour change to detection — purely additive persistence + reporting. Existing rows read back with the new columns defaulted to 0 until re-run; `runAnalysisFromDb` backfills them without a re-crawl. Full suite green (new `clickableCountsBySite`/`countByMethod` paths covered by the store tests; a pre-existing `AnalysisStatsStore` test row was fixed to include `infeasible`).
+
 ## 2026-11-22 17:10 — fix: tame candidate-generation explosion on telemetry-heavy SPAs (duolingo)
 
 Duolingo's analysis was abandoned as `infeasible` — candidate generation produced **110k forged GETs** (11× the 10k budget) from only ~75 logical endpoints. Diagnosed three compounding causes and fixed each at its root; duolingo now generates **458** distinct forges (offline count) and is analysed instead of skipped.

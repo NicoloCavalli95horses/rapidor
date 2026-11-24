@@ -414,6 +414,19 @@ export class CandidateEvaluator {
   }): Promise<'client-routing' | null> {
     if (!segment.paramName) return null;
     const paramName = segment.paramName;
+    // Only re-apply the param to event.pageUrl when that page ACTUALLY uses it as a route param. The
+    // param lived in an API query (the value matched a React node), and event.pageUrl is merely where
+    // that XHR fired — not necessarily a route that honours the param. talkpal's mode-progress XHR fires
+    // on /sentence-mode and /word-mode (no `modeType` in their URL); re-applying `?modeType=<sibling>`
+    // there navigates a 200 page that ignores the param and renders its own content, so every sibling
+    // "confirms" — a systematic false positive. A param genuinely part of the page route (pimsleur's
+    // `/…?id=`) is present in pageUrl, so real fallbacks are untouched. Can only DROP, never add.
+    let pageUsesParam = false;
+    try { pageUsesParam = new URL(event.pageUrl).searchParams.has(paramName); } catch { pageUsesParam = false; }
+    if (!pageUsesParam) {
+      log.debug(`AnalysisPipeline: client-routing fallback skipped — ${event.pageUrl} does not use ?${paramName} as a route param`);
+      return null;
+    }
     const clientCandidateUrl = withParam({ url: event.pageUrl, name: paramName, value: candidate.candidateValue });
     // highSuspicion: the authz gate already passed, licensing the verifier's stage-3 full-navigation
     // escalation if the cheap pushState stage is inconclusive.
