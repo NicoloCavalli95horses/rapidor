@@ -12,6 +12,7 @@ The extension stored each node's full `outerHTML`, repeating every subtree at ea
 - Effect vs the old rule: identical on every site but babbel (+40 generation candidates, `lesson-player -> root/lesson-root/…`) and rocketlanguages (2 590 nodes no longer chrome, 0 candidate change). Reference sites unchanged.
 - babbel `runAnalysisFromDb`: the +40 candidates are all rejected. It now stores 3 CLIENT findings (was 0 on 2026-11-23) from candidates the old rule produced too, so NOT from this change: a `[non-serializable:undefined]` extension sentinel used as a path value, and 2 `content_release_id` lesson swaps passing on `unlocked` only. Open: to investigate.
 - Build docs: `yarn build:chrome` (production + ONNX/offscreen assets), not the development build the docs named.
+- Extension build 58: same, minus an unused `prop-types` import in `bridge.js` (no longer bundled).
 
 ## 2026-11-24 20:30 — fix: analysis heap OOM on large React graphs (rocketlanguages)
 
