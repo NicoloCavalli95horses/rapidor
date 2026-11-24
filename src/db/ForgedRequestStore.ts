@@ -55,6 +55,14 @@ export class ForgedRequestStore {
     return { status: row.status, headers: JSON.parse(row.headers), body: row.body, contentType: row.contentType ?? undefined };
   }
 
+  /** URLs (no bodies) forged for one site+method under an origin: recheck's sibling-forge lookup (value-insensitivity guard). */
+  listUrlsByOrigin({ site, method, origin }: { site: string; method: string; origin: string }): string[] {
+    const prefix = `${origin}/`;
+    return (this.db.prepare(
+      'SELECT url FROM forged_requests WHERE site = ? AND method = ? AND post_data = \'\' AND substr(url, 1, ?) = ?',
+    ).all(site, method, prefix.length, prefix) as { url: string }[]).map((r) => r.url);
+  }
+
   record({ site, method, url, postData, response }: {
     site: string; method: string; url: string; postData?: string; response: ResponseLike;
   }): void {

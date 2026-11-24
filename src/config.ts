@@ -174,7 +174,7 @@ export interface CrawlConfig {
     // Negative sibling-group inference: after this many siblings of one group (same reference node, swap
     // path, authz keys) were rejected by a redirect-away to the SAME target, skip the rest of the group.
     // A paywall bounce is deterministic and uniform across structurally identical siblings (clozemaster:
-    // 508 paid stories -> /pro). 0 = off (probe every sibling). See CandidateEvaluator.clientGroupRejected.
+    // 508 paid stories -> /pro). 0 = off (probe every sibling). See ClientSiblingGroups (analysis/clientSiblingGroups.ts).
     clientRoutingGroupRejectAfter: number;
     // Re-analysis hygiene: before recording a site's findings, delete that site's PREVIOUS rows in
     // `vulnerabilities` (clearSite) so the table always reflects the CURRENT engine's output, not the

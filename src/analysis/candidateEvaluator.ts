@@ -15,7 +15,9 @@ import { assessAuthZ, assessDirection, type AuthzClassifier, type AuthzAssessmen
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, normalizeUrl, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
-import { redirectAwayTarget, type ClientRoutingVerifier } from './clientRoutingVerifier';
+import type { ClientRoutingVerifier } from './clientRoutingVerifier';
+import { ClientSiblingGroups } from './clientSiblingGroups';
+import { ForgeValueSensitivity, forgeTemplateKey } from './forgeValueSensitivity';
 
 /** Only the knobs this stage reads (see config.analysis for each one's own comment). */
 export interface CandidateEvaluatorOptions {
@@ -73,6 +75,10 @@ export class CandidateEvaluator {
   // suppressed as a duplicate instead of producing a redundant finding row. Reset per run.
   private recordedForgedBodyKeys = new Set<string>();
 
+  // HTTP value-insensitivity guard (see forgeValueSensitivity.ts): every forge is observed per request
+  // slot and HTTP findings are deferred to finalizeHttpFindings, since the colliding sibling may come later.
+  private forgeValueSensitivity = new ForgeValueSensitivity();
+
   // CONTENT keys of every response the crawler already collected legitimately (http_events) for the
   // site under analysis. An HTTP forge whose response is in here returned data this user can already
   // reach by normal browsing — not an access-control leak — so it is not flagged, even when that
@@ -86,40 +92,19 @@ export class CandidateEvaluator {
   // here any more: it is done on the leaked route in vulnerabilityId — see keepClientRoutingByContent.)
   private collectedReactKeys = new Set<string>();
 
-  // CLIENT-ROUTING SIBLING-GROUP confirmation (see .claude/rules/analysis.md). A client-routing probe is
-  // flaky on a fetch-gated route (ejoy's locked lessons load their content by id over XHR; a single real
-  // load can snapshot an incomplete render and read as a false NEGATIVE), so which paid siblings surface
-  // flips run-to-run. But siblings of one reference node that share the swap PATH and the authz-relevant
-  // keys are structurally identical resources behind the same route: if the probe genuinely confirms ONE
-  // (a real, distinct, not-found-passing render), the others are a logical consequence. `clientGroupConfirmed`
-  // holds the key of every group a sibling genuinely confirmed; `clientGroupPending` holds the record
-  // thunks of siblings the per-candidate probe REJECTED, replayed once their group is confirmed. Both reset
-  // per run. SAFETY: this only ever ADDS siblings to an ALREADY-confirmed group — it can never confirm a
-  // group with zero genuine accepts, so it recovers the flaky-lost siblings of a real finding without
-  // manufacturing a finding where the detector found nothing.
-  private clientGroupConfirmed = new Set<string>();
-  private clientGroupPending = new Map<string, Array<() => void>>();
+  // CLIENT-ROUTING sibling-group inference, positive and negative (see clientSiblingGroups.ts). Reset per run.
+  private clientGroups: ClientSiblingGroups;
 
-  // NEGATIVE sibling-group inference, the mirror of the confirmation above: once `clientRoutingGroupRejectAfter`
-  // siblings of one group were rejected by a DETERMINISTIC redirect-away to the SAME target (clozemaster
-  // bounces every paid story to /pro), the remaining siblings are skipped instead of probed (508 per group
-  // there). Only redirect-away counts: probe flakiness yields false negatives on inert/capture, never a
-  // redirect. Skipped siblings are still stashed, so a later genuine confirmation recovers them. Reset per run.
-  private clientGroupRedirects = new Map<string, Map<string, number>>();
-  private clientGroupRejected = new Set<string>();
-  private clientGroupSkippedCount = 0;
-
-  constructor(private deps: CandidateEvaluatorDeps) {}
+  constructor(private deps: CandidateEvaluatorDeps) {
+    this.clientGroups = new ClientSiblingGroups(deps.options.clientRoutingGroupRejectAfter ?? 3);
+  }
 
   /** Starts a fresh run: drops the per-run log/dedup state and re-sizes the forge concurrency bound. */
   reset(): void {
     this.loggedFindingIds.clear();
     this.recordedForgedBodyKeys.clear();
-    this.clientGroupConfirmed.clear();
-    this.clientGroupPending.clear();
-    this.clientGroupRedirects.clear();
-    this.clientGroupRejected.clear();
-    this.clientGroupSkippedCount = 0;
+    this.forgeValueSensitivity.reset();
+    this.clientGroups.reset();
     this.forgeSemaphore = new Semaphore(this.deps.options.maxConcurrentRequests);
   }
 
@@ -162,87 +147,17 @@ export class CandidateEvaluator {
     return true;
   }
 
-  /**
-   * Sibling-group key for a client-routing candidate: the reference component INSTANCE (stateId + node)
-   * on a given page, the swapped field (`path`) and the authz-relevant keys. Every sibling swap that one
-   * reference node produces shares it; a different authz signature forms a different group, so unrelated
-   * entitlements never cross-confirm. See the clientGroup* fields.
-   */
-  private clientGroupKey({ pageUrl, candidate, authz }: {
-    pageUrl: string; candidate: ReturnType<typeof findCandidates>[number]; authz: AuthzAssessment;
-  }): string {
-    return [pageUrl, candidate.stateId, candidate.referenceNodeId, JSON.stringify(candidate.path), [...authz.sensitiveKeys].sort().join(',')].join('\u0000');
-  }
-
-  /**
-   * A client-routing sibling the per-candidate probe REJECTED: not recorded now, but stashed under its
-   * group. If any sibling of the group is later genuinely confirmed, the group flush records it — the
-   * reject was most likely a flaky render, not a real negative. `record` captures the recordFinding call.
-   */
-  private stashClientSibling({ groupKey, record }: { groupKey: string; record: () => void }): void {
-    const list = this.clientGroupPending.get(groupKey) ?? [];
-    list.push(record);
-    this.clientGroupPending.set(groupKey, list);
-  }
-
-  /**
-   * Counts a sibling's reject towards its group's negative inference: only a redirect-away counts, per
-   * target. Reaching `clientRoutingGroupRejectAfter` redirects to one target marks the group rejected.
-   */
-  private noteClientGroupReject({ groupKey, reason }: { groupKey: string; reason: string }): void {
-    const threshold = this.deps.options.clientRoutingGroupRejectAfter ?? 3;
-    const target = redirectAwayTarget(reason);
-    if (threshold <= 0 || !target || this.clientGroupRejected.has(groupKey)) return;
-    const perTarget = this.clientGroupRedirects.get(groupKey) ?? new Map<string, number>();
-    const count = (perTarget.get(target) ?? 0) + 1;
-    perTarget.set(target, count);
-    this.clientGroupRedirects.set(groupKey, perTarget);
-    if (count >= threshold) {
-      this.clientGroupRejected.add(groupKey);
-      log.info(`AnalysisPipeline: client-routing sibling group rejected — ${count} siblings redirected to ${target}; skipping the rest of the group`);
-    }
-  }
-
-  /**
-   * True (and the sibling stashed) when its group was already rejected by negative inference: the caller
-   * skips the probe. Confirmation wins over rejection — an already-confirmed group never reaches here.
-   */
-  private skipRejectedClientGroup({ groupKey, record }: { groupKey: string; record: () => void }): boolean {
-    if (!this.clientGroupRejected.has(groupKey)) return false;
-    this.clientGroupSkippedCount++;
-    this.stashClientSibling({ groupKey, record });
-    return true;
-  }
-
   /** Client-routing siblings skipped by negative group inference this run (for the end-of-run log). */
   get clientGroupSkipped(): number {
-    return this.clientGroupSkippedCount;
-  }
-
-  /** Marks a client-routing group confirmed by a genuine accept and immediately replays its pending siblings. */
-  private confirmClientGroup({ groupKey }: { groupKey: string }): void {
-    this.clientGroupConfirmed.add(groupKey);
-    this.flushClientGroup({ groupKey });
-  }
-
-  /** Records every still-pending sibling of a (now confirmed) client-routing group, once (the list is consumed). */
-  private flushClientGroup({ groupKey }: { groupKey: string }): void {
-    const list = this.clientGroupPending.get(groupKey);
-    if (!list) return;
-    this.clientGroupPending.delete(groupKey);
-    for (const record of list) record();
+    return this.clientGroups.skipped;
   }
 
   /**
-   * End-of-run backstop for client-routing sibling groups: records any still-pending sibling whose group
-   * was confirmed. confirmClientGroup already flushes eagerly, so this only catches the race where a
-   * sibling's probe rejected (and stashed it) AFTER its group's confirming flush had already run. Called
-   * once by AnalysisPipeline after every candidate task settles, before the final finding count.
+   * End-of-run backstop for client-routing sibling groups (see ClientSiblingGroups.finalize). Called once by
+   * AnalysisPipeline after every candidate task settles, before the final finding count.
    */
   finalizeClientGroups(): void {
-    for (const groupKey of [...this.clientGroupPending.keys()]) {
-      if (this.clientGroupConfirmed.has(groupKey)) this.flushClientGroup({ groupKey });
-    }
+    this.clientGroups.finalize();
   }
 
   /**
@@ -321,10 +236,9 @@ export class CandidateEvaluator {
 
   /**
    * The HTTP-only content guards for a genuine HTTP finding's forged response, run before it is recorded.
-   * Returns true to DROP the candidate (logging why), false to keep it. Synchronous, and the only state it
-   * touches is adding the forged response's content key to recordedForgedBodyKeys on a keep — so, with no
-   * await between this call and the record, that check-and-add stays atomic under concurrent evaluation.
-   * Never run for a client-routing finding: it carries no server-response evidence to key on.
+   * Returns true to DROP the candidate (logging why), false to keep it. Pure w.r.t. per-run state: the
+   * cross-candidate dedup runs at the end of the run (finalizeHttpFindings), after the value-insensitivity
+   * check. Never run for a client-routing finding: it carries no server-response evidence to key on.
    */
   private httpContentGuardReject({ forged, original, context }: {
     forged: ResponseLike; original: ResponseLike; context: string;
@@ -351,20 +265,11 @@ export class CandidateEvaluator {
     // The reference event's OWN response is excluded from the history check: a forge returning the
     // original's body is the "server ignored the value" case, not "accessible at some OTHER url".
     const referenceKey = canonicalResponseKey({ status: original.status, body: original.body });
-    if (forgedKey !== undefined) {
-      // (1) History: the forged data is a response the crawler already collected at a DIFFERENT url —
-      // the user can already reach it, so not a leak.
-      if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
-        log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${context}`);
-        return true;
-      }
-      // (2) Dedup: an earlier candidate this run produced a byte/JSON-identical forged response (the same
-      // leak reached from another sibling) — record it once, drop the duplicate.
-      if (this.recordedForgedBodyKeys.has(forgedKey)) {
-        log.debug(`AnalysisPipeline: HTTP candidate not flagged (duplicate forged response of an already-recorded finding) — ${context}`);
-        return true;
-      }
-      this.recordedForgedBodyKeys.add(forgedKey);
+    // History: the forged data is a response the crawler already collected at a DIFFERENT url — the user
+    // can already reach it, so not a leak.
+    if (forgedKey !== undefined && forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
+      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${context}`);
+      return true;
     }
     return false;
   }
@@ -483,6 +388,11 @@ export class CandidateEvaluator {
       return res;
     });
 
+    // Every forge is evidence about its request slot, accepted or not (see forgeValueSensitivity.ts).
+    const template = forgeTemplateKey({ method: event.method, url: event.url, segment });
+    const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
+    this.forgeValueSensitivity.observe({ template, forgedKey, value: candidate.candidateValue });
+
     // Reference body fetched lazily (events are listed without bodies, see listMetaBySite): past the
     // forge semaphore this path has no further await, so only a few bodies are ever live at once.
     const responseBody = event.id !== undefined ? this.deps.httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
@@ -509,21 +419,56 @@ export class CandidateEvaluator {
       detectionMethod = fallback;
     }
 
-    // HTTP-only content guards (httpContentGuardReject): they key on the forged response's CONTENT, the
-    // evidence for an HTTP finding — a client-routing finding carries none, so it skips them. Synchronous
-    // and the last step before recordFinding (also synchronous), so the dedup check-and-add stays atomic.
-    if (detectionMethod === 'http' && this.httpContentGuardReject({ forged, original, context: `${event.url} -> ${url}` })) return;
-
-    this.recordFinding({
+    const record = (method: 'http' | 'client-routing') => this.recordFinding({
       site, method: event.method, referenceUrl: event.url, candidateUrl: url, candidate, segment,
-      motivation: describeDiffs(differences), detectionMethod, responseSimilarity: similarity, authz,
-      logMessage: `AnalysisPipeline: potential access control issue (${detectionMethod}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
+      motivation: describeDiffs(differences), detectionMethod: method, responseSimilarity: similarity, authz,
+      logMessage: `AnalysisPipeline: potential access control issue (${method}) — extracted ${describeExtractedSegment({ segment, candidate })} | ${event.method} ${event.url} -> ${url}`,
       // The forge url is the reference for an HTTP finding; the client-routing fallback reproduces the
       // client route from the page url instead (its kind differs too).
-      reproduction: detectionMethod === 'http'
+      reproduction: method === 'http'
         ? { referenceUrl: event.url, candidateUrl: url, kind: { type: 'http', method: event.method, headers: event.requestHeaders, postData: event.postData, baselineStatus: event.status ?? 0, baselineHeaders: event.responseHeaders ?? {}, baselineBody: responseBody ?? '', baselineContentType: event.contentType } }
         : { referenceUrl: event.pageUrl, candidateUrl: url, kind: { type: 'client-routing-query', paramName: segment.paramName!, candidateValue: candidate.candidateValue } },
     });
+    if (detectionMethod === 'client-routing') { record('client-routing'); return; }
+
+    // HTTP-only content guards (httpContentGuardReject): they key on the forged response's CONTENT, the
+    // evidence for an HTTP finding — a client-routing finding carries none, so it skips them.
+    if (this.httpContentGuardReject({ forged, original, context: `${event.url} -> ${url}` })) return;
+    // Deferred: a sibling forged later may still prove the slot value-insensitive (finalizeHttpFindings).
+    this.forgeValueSensitivity.defer({
+      template, forgedKey, context: `${event.url} -> ${url}`,
+      recordHttp: () => record('http'),
+      // same treatment as an identical-to-reference forge: the client-routing query fallback (live only)
+      onValueInsensitive: async () => {
+        if (options.offline) return;
+        const fallback = await this.clientRoutingQueryFallback({ event, candidate, segment });
+        if (fallback !== null) record(fallback);
+      },
+    });
+  }
+
+  /**
+   * Records the deferred HTTP findings once every candidate settled. Must run BEFORE the page pool is torn
+   * down (a value-insensitive one gets the client-routing fallback). In arrival order: (1) drop a finding
+   * whose forged response another candidate VALUE reproduced in the same request slot (the server fell
+   * back to a default, see forgeValueSensitivity.ts); (2) dedup two swaps with identical forged responses.
+   */
+  async finalizeHttpFindings(): Promise<void> {
+    for (const f of this.forgeValueSensitivity.drain()) {
+      if (this.forgeValueSensitivity.isValueInsensitive({ template: f.template, forgedKey: f.forgedKey })) {
+        log.debug(`AnalysisPipeline: HTTP candidate not flagged (another value forged in the same slot returned the identical response: the server falls back to a default) — ${f.context}`);
+        await f.onValueInsensitive();
+        continue;
+      }
+      if (f.forgedKey !== undefined) {
+        if (this.recordedForgedBodyKeys.has(f.forgedKey)) {
+          log.debug(`AnalysisPipeline: HTTP candidate not flagged (duplicate forged response of an already-recorded finding) — ${f.context}`);
+          continue;
+        }
+        this.recordedForgedBodyKeys.add(f.forgedKey);
+      }
+      f.recordHttp();
+    }
   }
 
   /**
@@ -541,32 +486,22 @@ export class CandidateEvaluator {
     const differences = authz.differences;
 
     // The record action for THIS sibling, reused whether it is confirmed on its own probe or recovered
-    // from a confirmed sibling of its group (see the clientGroup* fields).
+    // from a confirmed sibling of its group (see clientSiblingGroups.ts).
     const record = () => this.recordFinding({
       site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
       logMessage: `AnalysisPipeline: potential access control issue (client-routing) — extracted query param "${paramName}": ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${candidateUrl}`,
       reproduction: { referenceUrl: pageUrl, candidateUrl, kind: { type: 'client-routing-query', paramName, candidateValue: candidate.candidateValue } },
     });
-    const groupKey = this.clientGroupKey({ pageUrl, candidate, authz });
-    // A sibling of an ALREADY-confirmed group: record it without re-probing (see evaluateClientRoutingPathCandidate).
-    if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
-    if (this.skipRejectedClientGroup({ groupKey, record })) return;
-
-    const reason = await this.deps.clientRoutingVerifier.verifyQueryParam({
-      pageUrl, candidateUrl, paramName,
-      candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
+    const context = `${pageUrl} ?${paramName}=${candidate.candidateValue}`;
+    await this.clientGroups.evaluate({
+      groupKey: ClientSiblingGroups.key({ pageUrl, candidate, authz }), record, context,
+      probe: () => this.deps.clientRoutingVerifier.verifyQueryParam({
+        pageUrl, candidateUrl, paramName,
+        candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
+      }),
+      keep: () => this.keepClientRoutingByContent({ pageUrl, candidateUrl, context }),
     });
-    if (reason) {
-      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} ?${paramName}=${candidate.candidateValue}`);
-      this.stashClientSibling({ groupKey, record });
-      this.noteClientGroupReject({ groupKey, reason });
-      return;
-    }
-    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl, context: `${pageUrl} ?${paramName}=${candidate.candidateValue}` })) return;
-
-    record();
-    this.confirmClientGroup({ groupKey });
   }
 
   /**
@@ -610,46 +545,21 @@ export class CandidateEvaluator {
     // query), so the content guard, finding id, record and reproduction all reflect the url that leaked.
     const confirmedUrl = probeUrl;
     // The record action for THIS sibling, reused whether it is confirmed on its own probe or recovered
-    // from a confirmed sibling of its group (see the clientGroup* fields).
+    // from a confirmed sibling of its group (see clientSiblingGroups.ts).
     const record = () => this.recordFinding({
       site, method: CLIENT_ROUTING_METHOD, referenceUrl: pageUrl, candidateUrl: confirmedUrl, candidate, segment,
       motivation: describeDiffs(differences), detectionMethod: 'client-routing', responseSimilarity: null, authz,
       logMessage: `AnalysisPipeline: potential access control issue (client-routing path) — extracted path segment: ${String(candidate.referenceValue)} -> ${candidate.candidateValue} | ${pageUrl} -> ${confirmedUrl}`,
       reproduction: { referenceUrl: pageUrl, candidateUrl: confirmedUrl, kind: { type: 'client-routing-path', candidateUrl: confirmedUrl } },
     });
-    const groupKey = this.clientGroupKey({ pageUrl, candidate, authz });
-    // A sibling of an ALREADY-confirmed group: record it without re-probing. The group's confirming
-    // sibling already proved the route honours the swap client-side; a fresh flaky probe here would only
-    // risk losing this structurally-identical sibling (the content guards are skipped for the same reason).
-    if (this.clientGroupConfirmed.has(groupKey)) { record(); return; }
-    // The mirror: a group already rejected by deterministic redirects is skipped (see clientGroupRejected).
-    if (this.skipRejectedClientGroup({ groupKey, record })) return;
-
-    const reason = await this.probeClientRoutingPath({ pageUrl, candidateUrl: probeUrl, candidate, highSuspicion: true });
-    if (reason) {
-      log.debug(`AnalysisPipeline: candidate rejected (${reason}) — ${pageUrl} -> ${probeUrl}`);
-      // Maybe a flaky render, not a real negative: stash under the group and recover it if a sibling confirms.
-      this.stashClientSibling({ groupKey, record });
-      this.noteClientGroupReject({ groupKey, reason });
-      return;
-    }
-    if (!await this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` })) return;
-
-    record();
-    this.confirmClientGroup({ groupKey });
-  }
-
-  /**
-   * One client-routing path probe + content-guard decision: the cheap pushState/popstate probe against
-   * `candidateUrl`, then clientSideConfirmed. Returns null to ACCEPT, or a rejection reason string.
-   * `highSuspicion` is forwarded to clientSideConfirmed to license its stage-3 full-navigation escalation.
-   */
-  private async probeClientRoutingPath({ pageUrl, candidateUrl, candidate, highSuspicion }: {
-    pageUrl: string; candidateUrl: string; candidate: ReturnType<typeof findCandidates>[number]; highSuspicion: boolean;
-  }): Promise<string | null> {
-    return this.deps.clientRoutingVerifier.verifyPathSegment({
-      pageUrl, candidateUrl,
-      candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion,
+    await this.clientGroups.evaluate({
+      groupKey: ClientSiblingGroups.key({ pageUrl, candidate, authz }), record, context: `${pageUrl} -> ${probeUrl}`,
+      // pushState/popstate probe, then clientSideConfirmed; highSuspicion licenses its stage-3 escalation
+      probe: () => this.deps.clientRoutingVerifier.verifyPathSegment({
+        pageUrl, candidateUrl: probeUrl,
+        candidateValue: candidate.candidateValue, referenceValue: String(candidate.referenceValue), highSuspicion: true,
+      }),
+      keep: () => this.keepClientRoutingByContent({ pageUrl, candidateUrl: confirmedUrl, context: `${pageUrl} -> ${confirmedUrl}` }),
     });
   }
 

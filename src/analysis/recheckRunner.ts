@@ -3,7 +3,9 @@ import type { HttpEventStore } from '../db/HttpEventStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
 import type { StoredFinding } from '../db/VulnerabilityStore';
 import { forgeRequestCached } from './requestForge';
-import { getServerResponseSimilarity, isIdenticalResponse } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey } from './responseEvaluate';
+import { singleSwapPosition } from './forgeValueSensitivity';
+import type { ResponseLike } from './requestForge';
 import { CLIENT_ROUTING_METHOD } from './findings';
 import { withParam } from '../utils/utils';
 import type { PagePool } from './PagePool';
@@ -89,8 +91,14 @@ export class RecheckRunner {
         const responseBody = event.id !== undefined ? this.deps.httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
         const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: responseBody ?? '', contentType: event.contentType };
         const similar = getServerResponseSimilarity(original, forged).areSimilar;
-        if (similar && !isIdenticalResponse({ reference: original, candidate: forged })) return null;
-        const why = similar ? 'forged response identical to the original (server ignores the value)' : 'forged response not similar';
+        let why: string;
+        if (!similar) why = 'forged response not similar';
+        else if (isIdenticalResponse({ reference: original, candidate: forged })) why = 'forged response identical to the original (server ignores the value)';
+        else {
+          const sibling = this.valueInsensitiveSibling({ site, method: event.method, referenceUrl, candidateUrl, forged });
+          if (sibling === null) return null;
+          why = `another value forged in the same slot returned the identical response (${sibling}): the server falls back to a default`;
+        }
         // the same client-routing fallback evaluateHttpCandidate would run
         const fallback = await this.recheckQueryFallback({ pageUrl: event.pageUrl, referenceUrl, referenceValue, candidateValue });
         return fallback === null ? null : `${why}; client-routing fallback: ${fallback}`;
@@ -118,6 +126,27 @@ export class RecheckRunner {
       pageUrl: referenceUrl, candidateUrl, candidateValue,
       referenceValue: i >= 0 ? decodeURIComponent(refSegs[i] ?? '') : referenceValue, highSuspicion: true,
     });
+  }
+
+  /**
+   * The value-insensitivity guard (forgeValueSensitivity.ts), rebuilt from the forged_requests cache: a
+   * cached forge that swaps a DIFFERENT value into the same slot and got the identical response. Returns
+   * its url, or null. Cache only (writes nothing, no network): siblings the original run never forged are not evidence.
+   */
+  private valueInsensitiveSibling({ site, method, referenceUrl, candidateUrl, forged }: {
+    site: string; method: string; referenceUrl: string; candidateUrl: string; forged: ResponseLike;
+  }): string | null {
+    const slot = singleSwapPosition({ a: referenceUrl, b: candidateUrl });
+    const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
+    if (slot === null || forgedKey === undefined) return null;
+    const origin = new URL(candidateUrl).origin;
+    for (const url of this.deps.forgedRequestStore.listUrlsByOrigin({ site, method, origin })) {
+      if (url === candidateUrl || url === referenceUrl) continue;
+      if (singleSwapPosition({ a: candidateUrl, b: url }) !== slot || singleSwapPosition({ a: referenceUrl, b: url }) !== slot) continue;
+      const sibling = this.deps.forgedRequestStore.get({ site, method, url });
+      if (sibling && canonicalResponseKey({ status: sibling.status, body: sibling.body }) === forgedKey) return url;
+    }
+    return null;
   }
 
   /** The http path's client-routing fallback, rebuilt from a stored finding: same param, swapped on the event's own page. */

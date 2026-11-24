@@ -2,6 +2,34 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 18:31 — docs: getpronounce joins the reference set; busuu/promova expected counts refreshed
+
+The getpronounce TP must survive future decision-logic changes, so it is now a regression reference.
+
+- `.claude/rules/analysis.md` Regression checks: reference set = busuu, pimsleur, promova, lingualeo, ejoy, **getpronounce** (+ babbel). getpronounce expects exactly 1: `voice=echo -> shimmer` (paid TTS voice on arbitrary text); `shimmer -> daniel` and `shimmer -> evelyn` must stay rejected.
+- Expected counts from today's `recheckFindings`: busuu 20/23 → **14/17** (14 `http` objective siblings; the 3 client-routing `courseName` rows are directional-gate FPs), promova 16 → **25/25** (9 CLIENT + 16 `http`).
+
+## 2026-11-24 18:14 — chore: extract client-routing sibling-group inference from `CandidateEvaluator`
+
+`candidateEvaluator.ts` was past 700 lines. The client-routing sibling-group logic (positive confirmation +
+negative redirect-away inference) moves to its own module. Behavior-preserving refactor.
+
+- New `src/analysis/clientSiblingGroups.ts` (`ClientSiblingGroups`): the group state, the key, `finalize()`, and `evaluate()`. `evaluate()` is the confirmed → rejected-skip → probe → content-guard → confirm flow that the query and path evaluators used to duplicate line by line.
+- `CandidateEvaluator` delegates to it (708 → 582 lines). `finalizeClientGroups()`/`clientGroupSkipped` stay as thin delegates, so `AnalysisPipeline` and the tests are unchanged.
+- New `test/clientSiblingGroups.test.ts` (8 unit tests, no browser). `AnalysisPipeline.test.ts` 15/15 (browser-backed group tests). Full `npm test`: 372/373, the one failure is the flaky `ExtensionCalls` 200 ms handshake (passes 3/3 alone, untouched code).
+
+## 2026-11-24 17:59 — fix: HTTP value-insensitivity guard — getpronounce `shimmer -> evelyn` FP
+
+A forge was accepted when its response differed from the reference, even if the server had ignored the value
+and fallen back to a default. getpronounce `/pronounce?voice=evelyn&provider=openai` (`evelyn` is a `gcp` voice,
+the URL value matched `voiceId` instead of `providerVoiceId`) returned the default `echo` audio, byte-identical
+to `voice=joseph` and to every other unknown openai voice.
+
+- New `src/analysis/forgeValueSensitivity.ts`: two DIFFERENT values in the SAME request slot (method + reference url + param/path position) with an identical response (`canonicalResponseKey`) → server fallback, neither is an HTTP finding. Generalizes `isIdenticalResponse` (candidate == reference) to candidate == sibling.
+- `CandidateEvaluator`: every forge is observed; HTTP findings are deferred to `finalizeHttpFindings` (the colliding sibling may come later), called by `AnalysisPipeline` before pool teardown. The cross-candidate dedup moved there, after this check. Value-insensitive → client-routing query fallback, as for an identical-to-reference forge.
+- `RecheckRunner` rebuilds it from the `forged_requests` cache (`ForgedRequestStore.listUrlsByOrigin`, `singleSwapPosition`): no new requests. Ablation unchanged (it lacks `isIdenticalResponse` by design).
+- Offline replay on every stored http finding: getpronounce `evelyn` dropped, `shimmer` (paid voice, distinct audio) kept; promova 16/16 and busuu 14/14 kept. Client-routing findings untouched. Live `recheckFindings`: getpronounce 1/2 (`evelyn` rejected by this guard), pimsleur 4/4, promova 25/25, ejoy 4/4, busuu 14/17 (the 3 dropped are the client-routing `courseName` swaps of the directional gate, unrelated), lingualeo 16/18 (2 client-routing redirect-away, unrelated). `runAnalysisFromDb` getpronounce: 1 finding (`echo -> shimmer`).
+
 ## 2026-11-24 16:50 — fix: directional authz gate (NLI polarity) — getpronounce `shimmer -> daniel` FP
 
 The authz gate was symmetric: it checked that an entitlement prop differs, not WHICH side is locked.
@@ -121,27 +149,3 @@ active lesson `5f` and forge a 200 with real content, but were dropped by the re
   clean. Run `recheckFindings` on the 4 live sites to confirm no stored finding is lost (guaranteed by the
   monotonic relaxation, but it is the official gate).
 
-## 2026-11-23 14:30 — fix: lingualeo refclmark HTTP FPs — tracking-param filter
-
-A depth-4 lingualeo crawl flagged 19 findings, only 9 TP (the `wordTranslate` client-routing training siblings). The other 10 were all the SAME request: the CRM buy-page data blob `/_next/data/…/en/buy/nt_ton_prem_web_2690n.json?…&refclmark=2&campaignId=…`, HTTP-detected, swapping `refclmark` from `2` to wordset ids.
-
-- **Why:** `refclmark` (ref-click-mark, a marketing/attribution param) is inert — the server ignores it. But its value `2` collided with a real wordset id in the page's React state (`props.elements.1.id`, 5 nodes), so candidate generation forged sibling ids (`12178`, …). `isIdenticalResponse` couldn't drop them: the blob's `elements`/`tags` list is dynamic and reordered between crawl-time capture and analysis-time forge, so the POSITIONAL diff at `elements.1` showed `type: "user" -> "global"`; the value `"user"` tripped the authz classifier → 10 HTTP FPs. `refclmark` was already a known client-routing FP (rejected by the content guard); with the `_next/data` JSON now in `http_events`, the HTTP path had no equivalent filter.
-- **What changed:** new `TRACKING_PARAM`/`isTrackingParam` in `candidateGenerator.ts` (regex, a semantic param-name fact like `LOCALE_PARAM` — not a config knob), matched beside the locale filter in BOTH the main pipeline and the ablation. Covers `utm_*`, `refclmark`, `campaign(_)?id`, and the common click-ids (`gclid`/`fbclid`/`msclkid`/…). Regex, not a blacklist token, so a resource param that merely contains a tracking word (`refId`, `price_id`, `campaign_name`) stays mutable.
-- **Effect:** the 10 `refclmark` HTTP candidates are skipped at generation time; the 9 client-routing TPs are untouched (different path). No reference-site TP swaps a tracking param (verified by name: pimsleur `?id`, busuu objective/price, lingualeo `wordTranslate`, promova/mondly ids), so no loss. `candidateGenerator` tests 18/18 (+1 `isTrackingParam` suite). Re-run `runAnalysisFromDb.ts lingualeo.com` to confirm 9/9 on the live session.
-
-## 2026-11-23 — fix: ejoy 4/4 — client-routing dedup by route, cross-origin auth gate
-
-ejoy kept flagging 0–2 of its 4 locked lessons, flapping run-to-run; the root causes were two, neither the query-rewrite (the `?path=` reaches the probe intact).
-
-- **Cross-origin login redirect not detected.** The analysis profile's ejoy session had expired, so every cold navigation (free reference AND paid siblings) bounced to `sso.ejoyspace.com/?continue=…` — a DIFFERENT origin. The auth-freshness gate couldn't catch it: ejoy's entry URL has no seed fingerprint, so the gate proceeded conservatively and the run wasted ~50s producing 0 with misleading "redirected to /" logs. The gate now checks a cross-origin redirect FIRST, independent of any seed — positive, unambiguous evidence of an unauthenticated session. Verified live: logged in → FRESH, logged out → EXPIRED (sso bounce).
-- **Distinct locked siblings collapsed as "duplicate".** Once authenticated, all 4 siblings render distinct real content (the DOM guard sees Lesson 3/4/5/6), but `keepClientRoutingByContent`'s reactContentKey duplicate-check dropped all but 2: a LOCKED lesson renders a near-identical paywall shell, whose identifier set is the course's whole lesson LIST (same across siblings), so 1033/1035 hashed equal to 1032/1034 and were dropped. Cross-candidate dedup for client-routing is now DETERMINISTIC on the leaked ROUTE (`vulnerabilityId`'s `clientRoute = normalizeUrl(candidateUrl)`): 1032 proposed from both the 1030 and 1031 pages rewrites to one route → one finding, sibling lessons keep their own routes. The reactContentKey DUPLICATE check is removed (the ALREADY-COLLECTED check stays); `captureReactContentKey` also now waits network-idle + settle so a fetch-gated route's content has landed before hashing.
-- **Effect:** ejoy a stable 4/4 across two consecutive runs (1032/1033/1034/1035), ~50s. `findings`/`AnalysisPipeline`/`authFreshness` tests green (+1 client-route id test, +1 cross-origin SSO-bounce test, authFreshness 8/8). Promova/lingualeo client-routing counts unaffected (each sibling already a distinct route).
-
-## 2026-11-23 — fix: authz gate ignores the swapped identifier + same-type id swaps + `privacy` is never authz (duolingo)
-
-duolingo flagged 2 FPs, both swaps onto a "Privacy" link. Neither was caused by missing history (live DOM: neither link is inside nav/footer, and `/privacy` was already crawled), so a nav/footer harvest would not have helped.
-
-- **Why:** (1) `/settings/account -> /settings/privacy`: the ONLY sensitive key was the swapped href VALUE `privacy` — the identifier being swapped acted as its own entitlement evidence. (2) `help/faq?relative_domains=1 -> privacy`: the value `1` matched by token inside a lesson button's href (`/lesson/unit/1/level/1`), whose "sibling" in the same Link component is the footer `/privacy` link — a numeric slot swapped for a word.
-- **What changed:** `excludeSwapDiff` drops the swap-path diff before `assessAuthZ` (motivation keeps the full diff); `sameIdShape` skips numeric <-> non-numeric swaps at generation (main + ablation; string form, so React `1` and `'1'` are both numeric); `NON_AUTHZ_TERMS = {privacy}` in the classifier, matched per normalized word at read time (no `CLASSIFIER_VERSION` bump).
-- **Auth gate false EXPIRED (same batch):** `runAnalysisFromDb` kept aborting on duolingo even right after `refreshAuth`, because the gate required an EXACT fingerprint match and duolingo `/learn` had 220 captures with 220 distinct fingerprints (live, logged in: 562 nodes, no redirect, no login form). A mismatch is no longer expiry: EXPIRED now needs positive evidence — left the entry route, a password field, or a tree < 0.5× the smallest captured one (`ReactStateStore.nodeCountsForUrl`). Verified live both ways: logged in → FRESH; empty profile → EXPIRED (redirected to `/`). `authFreshness.test.ts` rewritten, 7/7.
-- **Effect:** live duolingo re-analysis 2 → 0 findings, 569 → 354 requests, 3m06s → 49s; the `relative_domains` candidate is no longer generated, the `settings/privacy` one no longer passes the gate. Offline check on every stored finding: no TP of pimsleur (4), lingualeo (19), promova (25) affected; 2 odd mondly rows (`4 -> leoSprint/savannah`, lingualeo values — likely pre-site-scoping residue) would also drop. Tests: +6 unit (sameIdShape incl. `'1'`/`1`, excludeSwapDiff, privacy deny); pipeline/ablation 21/21.

@@ -166,8 +166,8 @@ describe('AnalysisPipeline: client-side-only query params', () => {
   // per-candidate not-found guard would reject in isolation. Because 102 genuinely confirms the group
   // (same reference node, swap path and authz-relevant `premium` key), 103/104 are recovered as a
   // logical consequence instead of lost: all three siblings are flagged. This is the flakiness fix —
-  // confirming ONE paid sibling confirms them all (ejoy's locked lessons). See candidateEvaluator's
-  // clientGroup* fields.
+  // confirming ONE paid sibling confirms them all (ejoy's locked lessons). See
+  // ClientSiblingGroups (clientSiblingGroups.ts).
   it('recovers flaky-rejected siblings once one sibling of the group is genuinely confirmed', async () => {
     const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline();
     (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });

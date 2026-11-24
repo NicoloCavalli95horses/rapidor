@@ -348,13 +348,15 @@ export class AnalysisPipeline {
         // Outer limit is the page-pool size: client-routing tasks are gated by the pool, forge-only
         // tasks by forgeSemaphore, so letting this many run keeps the pool fed without over-forging.
         await runWithConcurrency({ tasks: guarded, limit: Math.max(poolSize, options.maxConcurrentRequests) });
+        // Deferred HTTP findings (value-insensitivity + dedup); before teardown: it may run the client-routing fallback.
+        await this.candidateEvaluator.finalizeHttpFindings();
       } finally {
         if (!options.offline) await this.pagePool.teardown();
       }
     }
 
     // Client-routing sibling-group backstop: record any flaky-rejected sibling whose group a genuine
-    // accept confirmed (see CandidateEvaluator's clientGroup* fields). Must run AFTER every candidate
+    // accept confirmed (see ClientSiblingGroups, clientSiblingGroups.ts). Must run AFTER every candidate
     // task settled and BEFORE the count below, so recovered siblings are included. No-op offline (no
     // client-routing tasks) and when no group was confirmed.
     this.candidateEvaluator.finalizeClientGroups();
