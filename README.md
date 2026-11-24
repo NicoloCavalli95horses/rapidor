@@ -191,7 +191,7 @@ extension: {
 * The functions must live in the page's `MAIN` world: declare the content script with `"world": "MAIN"` in `manifest.json`, otherwise `window` does not see them.
 * A missing function (waits up to `actionTimeoutMs`) or a failing call logs a warning and never stops the crawl.
 * With an extension, each site gets its own Chromium with a temporary profile (isolation is the same as incognito, but memory use is higher). Headless uses Chromium's new headless mode (`npx playwright install chromium`).
-* After editing RAPIDOR's own source, rebuild it before the crawler picks it up: `cd ../rapidor/packages/react-devtools-extensions && NODE_ENV=development node ./chrome/build`.
+* After editing the instrumented extension's source, rebuild it before the crawler picks it up: `cd ../rapidor-browser-extension/packages/react-devtools-extensions && yarn build:chrome`, then copy `chrome/build/unpacked/` into `browser_extension/react-instrumented/`.
 
 ## IDOR analysis (authz/IDOR detection)
 

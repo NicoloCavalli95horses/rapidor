@@ -4,7 +4,7 @@ type GraphNode = NonNullable<RapidorGraph['nodes']>[string];
 
 /**
  * DOM "chrome zone" inference over a captured React graph, using the per-node serialized DOM element the
- * newer browser extension adds (`node.dom`: the nearest DOM element's outerHTML). A URL value that
+ * newer browser extension adds (`node.dom`: the nearest DOM element's OPENING TAG). A URL value that
  * comes from inside the site's navigation/footer furniture is never a user-scoped resource id, so the
  * match it produced is noise — this lets candidate generation skip it.
  *
@@ -20,19 +20,37 @@ const CHROME_ROLES = new Set(['navigation', 'contentinfo']);   // the ARIA landm
 // substring like `clipboard` does not). Kept to navigation/footer words only — no `header`/`banner`.
 const CHROME_CLASS = /(?:^|[\s_-])(nav|navbar|navigation|navmenu|sidebar|side-bar|topbar|top-bar|breadcrumb|footer|site-footer)(?=$|[\s_-])/i;
 
+/**
+ * The element's own start tag (`<a class="x" href="/y">`), cut at the first `>` outside a quoted attribute.
+ * Applied defensively to `node.dom`: only the element's OWN tag/role/class say whether it is chrome; read
+ * from a full outerHTML, a role/class anywhere in the SUBTREE would mark a whole wrapper "chrome" (babbel's
+ * app wrapper, via a nested role="navigation"). Same cut as the extension's bridge.js. Idempotent.
+ */
+export function openingTag(dom: string): string {
+  let quote: string | null = null;
+  for (let i = 0; i < dom.length; i++) {
+    const c = dom[i];
+    if (quote) { if (c === quote) quote = null; }
+    else if (c === '"' || c === "'") quote = c;
+    else if (c === '>') return dom.slice(0, i + 1);
+  }
+  return dom;
+}
+
 function domTag(dom: string): string | null {
   const m = /^<([a-zA-Z][a-zA-Z0-9]*)/.exec(dom);
   return m ? m[1].toLowerCase() : null;
 }
 
 function domAttr(dom: string, name: string): string | null {
-  const m = new RegExp(`\\b${name}="([^"]*)"`).exec(dom);
+  const m = new RegExp(`\\s${name}="([^"]*)"`).exec(dom);   // whole attribute name (not data-class=)
   return m ? m[1] : null;
 }
 
 /** The chrome-zone label for a single node's own DOM element, or null when it is not chrome (or has no DOM). */
-export function domChromeZone({ dom }: { dom: unknown }): string | null {
-  if (typeof dom !== 'string' || dom.length === 0) return null;
+export function domChromeZone({ dom: raw }: { dom: unknown }): string | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  const dom = openingTag(raw);
   const tag = domTag(dom);
   if (tag && CHROME_TAGS.has(tag)) return tag;
   const role = domAttr(dom, 'role');
@@ -83,9 +101,8 @@ export function nodeChromeZone({ graph, nodeId, maxDepth }: {
 }
 
 /**
- * Replaces every node's `dom` with its precomputed `chromeZone` label (same verdict as reading `dom`).
- * `dom` is the element's FULL outerHTML, so it repeats each subtree at every ancestor: ~60% of a graph
- * (rocketlanguages: 13 of 23 MB per state, 259 states -> heap OOM when candidate generation cached them all).
+ * Replaces every node's `dom` with its precomputed `chromeZone` label (same verdict as reading `dom`), so the
+ * generator's cached graphs keep a short label per node instead of a markup string (see its graphCache).
  */
 export function slimGraphForGeneration(graph: RapidorGraph): RapidorGraph {
   for (const node of Object.values(graph.nodes ?? {})) {

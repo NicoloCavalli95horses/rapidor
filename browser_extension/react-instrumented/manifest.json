@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "RAPIDOR (React App IDOR)",
   "description": "A React framework instrumentation to test for access control vulnerabilities (IDOR/BOLA/MFLAC)\n\nCreated from revision 48b7922f2c.",
-  "version": "1.0.0.54",
-  "version_name": "1.0.0 (build 54)",
+  "version": "1.0.0.57",
+  "version_name": "1.0.0 (build 57)",
   "minimum_chrome_version": "114",
   "icons": {
     "16": "icons/16-production.png",

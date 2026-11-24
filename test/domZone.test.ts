@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { domChromeZone, nodeChromeZone, slimGraphForGeneration, zoneWalkDepthFor } from '../src/analysis/domZone';
+import { domChromeZone, nodeChromeZone, openingTag, slimGraphForGeneration, zoneWalkDepthFor } from '../src/analysis/domZone';
 import type { RapidorGraph } from '../src/db/ReactStateStore';
 
 describe('domChromeZone (a single element)', () => {
@@ -23,6 +23,14 @@ describe('domChromeZone (a single element)', () => {
   it('class match is token-bounded, not a substring (no false hit on "clipboard")', () => {
     assert.equal(domChromeZone({ dom: '<div class="clipboard navigator"></div>' }), null);
     assert.equal(domChromeZone({ dom: '<div class="main-nav"></div>' }), 'class:nav');   // token after `-`
+  });
+
+  it("reads only the element's OWN tag: a role/class in its subtree (legacy outerHTML) does not count", () => {
+    // babbel: an app wrapper without its own role was marked navigation via a nested role="navigation"
+    assert.equal(domChromeZone({ dom: '<div class="sc-a"><div role="navigation" class="x"></div></div>' }), null);
+    assert.equal(domChromeZone({ dom: '<a href="/p"><div class="topbar-item">0</div></a>' }), null);
+    assert.equal(domChromeZone({ dom: '<nav><div class="y"></div></nav>' }), 'nav');
+    assert.equal(domChromeZone({ dom: '<div data-class="navbar" class="main"></div>' }), null);   // whole attribute name
   });
 
   it('null when there is no DOM (an old capture, or a composite with dom:null)', () => {
@@ -85,7 +93,7 @@ describe('slimGraphForGeneration (drops the outerHTML, keeps the verdict)', () =
     const full = (): RapidorGraph => ({
       fingerprint: 'fp',
       nodes: {
-        root: { id: 'root', dom: '<div><nav class="navbar"><a href="/x">x</a></nav></div>' },   // class read from the subtree
+        root: { id: 'root', dom: '<div><nav class="navbar"><a href="/x">x</a></nav></div>' },   // legacy outerHTML
         nav: { id: 'nav', parent: 'root', dom: '<nav class="navbar"><a href="/x">x</a></nav>' },
         link: { id: 'link', parent: 'nav', dom: '<a href="/x">x</a>' },
         main: { id: 'main', dom: '<main><p>lesson</p></main>' },
@@ -98,5 +106,14 @@ describe('slimGraphForGeneration (drops the outerHTML, keeps the verdict)', () =
       assert.equal(nodeChromeZone({ graph: slim, nodeId: id }), nodeChromeZone({ graph: before, nodeId: id }), id);
       assert.equal('dom' in slim.nodes![id]!, false, id);
     }
+  });
+});
+
+describe('openingTag', () => {
+  it('cuts at the first > outside quotes and is idempotent', () => {
+    assert.equal(openingTag('<a title="1 > 0" href="/x"><b>x</b></a>'), '<a title="1 > 0" href="/x">');
+    assert.equal(openingTag("<div data-x='a>b'>t</div>"), "<div data-x='a>b'>");
+    assert.equal(openingTag('<img src="/i.png">'), '<img src="/i.png">');
+    assert.equal(openingTag(openingTag('<div class="c">y</div>')), '<div class="c">');
   });
 });

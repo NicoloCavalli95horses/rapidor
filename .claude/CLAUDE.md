@@ -39,7 +39,7 @@ To query data, use `sqlite3 storage/crawler.db` (read-only queries). Never `Read
 `node_modules/`, `storage/` (SQLite, ~500MB), `reports/` (generated), `browser_extension/react-instrumented/` (minified build of a browser extension, rebuilt from its own repo: never edit it here). `TODO.md` holds the user's notes (in Italian).
 
 ## React instrumented (external extension)
-Source: `/home/ncavalli/Desktop/rapidor-browser-extension/packages/react-devtools-{instrumentation,extensions}`. Its build must be copied into `browser_extension/react-instrumented`. Rebuild with: `cd ../rapidor-browser-extension/packages/react-devtools-extensions && NODE_ENV=development node ./chrome/build`. The crawler only uses `window.__RAPIDOR__*` (MAIN world).
+Source: `/home/ncavalli/Desktop/rapidor-browser-extension/packages/react-devtools-{instrumentation,extensions}`. Its build must be copied into `browser_extension/react-instrumented`. Rebuild with: `cd ../rapidor-browser-extension/packages/react-devtools-extensions && yarn build:chrome`, then copy `chrome/build/unpacked/` over `browser_extension/react-instrumented/` (e.g. `rsync -a --delete`). The crawler only uses `window.__RAPIDOR__*` (MAIN world).
 
 ## Rules
 - TypeScript only. **Named parameters**: functions take a single destructured object (`function f({ a, b }: { a: string; b: number })`); callers pass `f({ a, b })`. Exceptions: interface methods already in `core/interfaces.ts` and trivial helpers (`sleep(ms)`).

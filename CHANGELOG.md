@@ -2,6 +2,17 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 21:40 — feature: `node.dom` = the element's opening tag (extension build 57); chrome zone reads only the element's own tag
+
+The extension stored each node's full `outerHTML`, repeating every subtree at each ancestor, although the chrome-zone skip only needs the element's own tag/role/class.
+
+- Extension (`bridge.js`, build 57): `dom` is the start tag, serialized from a shallow copy in an inert document (no custom-element constructor, no resource load). Checked in Chromium: equal to `openingTag(outerHTML)` on every element, SVG/void/`>`-in-attribute included.
+- `domZone.openingTag` + `domChromeZone` reads only the element's own tag (`\srole=`/`\sclass=`, whole attribute names). Before, a role/class anywhere in the subtree counted: babbel's app wrapper was "navigation" through a nested `role="navigation"`, so its descendants were skipped.
+- Stored `react_states` trimmed to the same form (backup first, then `VACUUM`): `storage/crawler.db` 11.5 -> 7.0 GB (graphs 7.6 -> 3.1 GB), `demo/crawler.db` 0.94 -> 0.41 GB. Backup vs trimmed, same code: identical candidates, chrome skips and `reactContentKey` on all 15 sites.
+- Effect vs the old rule: identical on every site but babbel (+40 generation candidates, `lesson-player -> root/lesson-root/…`) and rocketlanguages (2 590 nodes no longer chrome, 0 candidate change). Reference sites unchanged.
+- babbel `runAnalysisFromDb`: the +40 candidates are all rejected. It now stores 3 CLIENT findings (was 0 on 2026-11-23) from candidates the old rule produced too, so NOT from this change: a `[non-serializable:undefined]` extension sentinel used as a path value, and 2 `content_release_id` lesson swaps passing on `unlocked` only. Open: to investigate.
+- Build docs: `yarn build:chrome` (production + ONNX/offscreen assets), not the development build the docs named.
+
 ## 2026-11-24 20:30 — fix: analysis heap OOM on large React graphs (rocketlanguages)
 
 rocketlanguages' end-of-crawl analysis died with `JavaScript heap out of memory`: 259 states of ~23 MB of graph JSON each (5.4 GB, 10x any other site), and `CandidateGenerator` kept every parsed graph for the whole run (~31 MB of heap each, ~8 GB against Node's ~4.3 GB limit).
@@ -68,28 +79,3 @@ to `voice=joseph` and to every other unknown openai voice.
 - `CandidateEvaluator`: every forge is observed; HTTP findings are deferred to `finalizeHttpFindings` (the colliding sibling may come later), called by `AnalysisPipeline` before pool teardown. The cross-candidate dedup moved there, after this check. Value-insensitive → client-routing query fallback, as for an identical-to-reference forge.
 - `RecheckRunner` rebuilds it from the `forged_requests` cache (`ForgedRequestStore.listUrlsByOrigin`, `singleSwapPosition`): no new requests. Ablation unchanged (it lacks `isIdenticalResponse` by design).
 - Offline replay on every stored http finding: getpronounce `evelyn` dropped, `shimmer` (paid voice, distinct audio) kept; promova 16/16 and busuu 14/14 kept. Client-routing findings untouched. Live `recheckFindings`: getpronounce 1/2 (`evelyn` rejected by this guard), pimsleur 4/4, promova 25/25, ejoy 4/4, busuu 14/17 (the 3 dropped are the client-routing `courseName` swaps of the directional gate, unrelated), lingualeo 16/18 (2 client-routing redirect-away, unrelated). `runAnalysisFromDb` getpronounce: 1 finding (`echo -> shimmer`).
-
-## 2026-11-24 16:50 — fix: directional authz gate (NLI polarity) — getpronounce `shimmer -> daniel` FP
-
-The authz gate was symmetric: it checked that an entitlement prop differs, not WHICH side is locked.
-getpronounce lets a free user preview every voice, paid ones included, so `voice=shimmer` (`isFree: false`)
-is a legitimate 200 reference and its free siblings (`daniel`, …) became candidates — `isFree: false -> true`
-passed the gate. The forge with `voice=daniel&provider=openai` returned the server's fallback voice (`echo`,
-byte-identical for daniel/evelyn/joseph/echo) and was flagged.
-
-- **Why NLI:** the MiniLM similarity is polarity-blind — measured, `locked`/`restricted`/`disabled` sit
-  closer to an "access granted" anchor than `unlocked`. A zero-shot NLI model reads negation. Chosen among
-  7 models × 7 phrasings on 44 terms: `Xenova/bart-large-mnli`, premise "This lesson is marked as <term>.",
-  hypotheses "The user must pay or upgrade to open it" / "can open it at no cost" (multi-label) → signs
-  `lock` +0.80, `premium` +1.00, `free` −1.00, `unlocked` −0.99; neutral terms relevance ≤ 0.42.
-- **What changed:** `EntitlementPolarity` (new, `entitlementPolarity.ts`, cached in the new `authz_polarity`
-  table) + `assessDirection` (`authzClassifier.ts`): only the diffs MiniLM already found authz-relevant vote;
-  a flag's key carries the sign, its value switches it; a string enum's values carry it. Drop only on
-  positive evidence (delta < −0.2). Applied in `authzGate` (main) and the ablation; re-run by
-  `recheckFindings` on the stored `authz_diff`. Kill switch `analysis.authzDirectionGate` (`AUTHZ_DIRECTION_GATE=false`).
-- **Effect (all 76 stored findings, real implementation):** getpronounce 4/5 (`daniel` dropped; the
-  `echo -> shimmer` premium-voice TP and the 3 locked exercises kept), ejoy 4/4, pimsleur 4/4, lingualeo
-  18/18 (no vote: `available: null -> 0`), promova 25/25, busuu 14/17 — the 14 objective TPs kept, the 3
-  client-routing `courseName` swaps dropped (`unlocked: false -> true`: the candidate is the unlocked side).
-- **Known limit:** user-STATE terms (`purchased`, `owned`, `isSubscribed`) get the wrong sign; absent from
-  the reference set, but `purchased: true -> false` would be dropped.

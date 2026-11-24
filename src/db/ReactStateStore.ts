@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 /** Loose on purpose: the graph's shape is owned by RAPIDOR, not the crawler. */
 export interface RapidorGraph {
   fingerprint: string;
-  // `dom` (the nearest DOM element's FULL outerHTML, subtree included) and `parent` are added by the newer
+  // `dom` (the nearest DOM element's opening tag, see domZone.openingTag) and `parent` are added by the newer
   // browser extension; absent on captures from the old one, so every reader must tolerate them being undefined.
   // `chromeZone` is never stored: slimGraphForGeneration (domZone.ts) derives it from `dom` and drops `dom`.
   nodes?: Record<string, { id: string; componentId?: number; key?: unknown; tag?: number; name?: string; props?: unknown; dom?: string | null; parent?: string; chromeZone?: string | null }>;
