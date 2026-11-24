@@ -113,6 +113,7 @@ export function buildExplorer(
       clientRoutingEscalationAttempts: cfg.analysis.clientRoutingEscalationAttempts,
       clientRoutingPathCoherence: cfg.analysis.clientRoutingPathCoherence,
       clientRoutingGroupRejectAfter: cfg.analysis.clientRoutingGroupRejectAfter,
+      authzDirectionGate: cfg.analysis.authzDirectionGate,
       overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
     },
   });
@@ -129,6 +130,7 @@ export function buildExplorer(
           maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs,
           maxSegmentMatches: cfg.analysis.maxSegmentMatches, maxGeneratedRequests: cfg.analysis.maxGeneratedRequests,
           paramBlacklist: cfg.analysis.paramBlacklist, segmentBlacklist: cfg.analysis.segmentBlacklist,
+          authzDirectionGate: cfg.analysis.authzDirectionGate,
           overwriteFindingsPerSite: cfg.analysis.overwriteFindingsPerSite,
         },
       })

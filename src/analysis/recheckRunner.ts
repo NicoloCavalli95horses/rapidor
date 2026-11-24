@@ -8,13 +8,15 @@ import { CLIENT_ROUTING_METHOD } from './findings';
 import { withParam } from '../utils/utils';
 import type { PagePool } from './PagePool';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
+import { assessDirection, type AuthzAssessment, type AuthzClassifier } from './authzClassifier';
 
 export interface RecheckRunnerDeps {
   httpEventStore: HttpEventStore;
   forgedRequestStore: ForgedRequestStore;
   pagePool: PagePool;
   clientRoutingVerifier: ClientRoutingVerifier;
-  options: { clientRoutingConcurrency: number };
+  classifier: AuthzClassifier;
+  options: { clientRoutingConcurrency: number; authzDirectionGate?: boolean };
 }
 
 /**
@@ -40,7 +42,8 @@ export class RecheckRunner {
    *   swapped param/segment are recovered from the stored reference/candidate URLs (for a finding that
    *   came from the http fallback, the page URL is the captured event's own page_url).
    * The authz-relevance step is not re-run: it depends only on the React props, which this change does
-   * not touch, so the stored finding already passed it.
+   * not touch, so the stored finding already passed it. The DIRECTION gate is re-run first, on the stored
+   * `authz_diff` (pure, no network): it is the one authz rule added after many findings were stored.
    */
   async recheckFindings({ page, site, findings }: {
     page: Page; site: string; findings: StoredFinding[];
@@ -67,6 +70,10 @@ export class RecheckRunner {
     site: string; finding: StoredFinding; events: ReturnType<HttpEventStore['listBySite']>; page: Page;
   }): Promise<string | null> {
     const { referenceUrl, candidateUrl, referenceValue, candidateValue } = finding;
+    if (this.deps.options.authzDirectionGate && finding.authzDiff) {
+      const direction = await assessDirection({ authz: finding.authzDiff as AuthzAssessment, classifier: this.deps.classifier });
+      if (direction.lessRestricted) return `candidate less restricted than the reference (delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')})`;
+    }
     // A finding the http path produced (detected over HTTP, or via its client-routing fallback): the
     // stored reference URL is the captured request, its page is that event's page_url.
     const event = finding.method !== CLIENT_ROUTING_METHOD

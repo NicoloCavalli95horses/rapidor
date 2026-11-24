@@ -12,7 +12,7 @@ import { paramNameBlacklisted, isLocaleParam, isTrackingParam, sameIdShape } fro
 import { forgeRequestCached } from './requestForge';
 import { runWithConcurrency, sleep } from '../utils/utils';
 import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse, isErrorEnvelopeResponse } from './responseEvaluate';
-import { assessAuthZ, type AuthzClassifier } from './authzClassifier';
+import { assessAuthZ, assessDirection, type AuthzClassifier } from './authzClassifier';
 import { formatDuration } from '../core/duration';
 import { normalizeUrl } from './findings';
 
@@ -34,6 +34,8 @@ export interface AblationPipelineOptions {
   // segmentBlacklist.
   paramBlacklist: string[];
   segmentBlacklist: string[];
+  // Same direction gate as the main pipeline (assessDirection; off when undefined, see config.analysis.authzDirectionGate).
+  authzDirectionGate?: boolean;
   // Mirrors config.analysis.overwriteFindingsPerSite for the ablation's own table: when not explicitly
   // false, a re-run clears this site's previous ablation_vulnerabilities before recording.
   overwriteFindingsPerSite?: boolean;
@@ -292,6 +294,14 @@ export class AblationPipeline {
     if (!authz.isAuthzRelevant) {
       log.debug(`AblationPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${event.method} ${event.url} -> ${url} | ${describeDiffs(differences)}`);
       return;
+    }
+    // Same direction gate as the main pipeline: the candidate must be the restricted side.
+    if (options.authzDirectionGate) {
+      const direction = await assessDirection({ authz, classifier });
+      if (direction.lessRestricted) {
+        log.debug(`AblationPipeline: candidate rejected (candidate less restricted than the reference, delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')}) — ${event.method} ${event.url} -> ${url}`);
+        return;
+      }
     }
 
     // Same always-on HTTP content guards as AnalysisPipeline: drop a forged response already present in

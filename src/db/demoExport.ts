@@ -24,7 +24,7 @@ export interface DemoExportResult {
  *
  * Copied: `http_events`, `react_states`, `preindexed_values` (via its `state_id` link to react_states),
  * `crawl_states`, `forged_requests` (the recorded live responses the offline forge replays), and
- * `authz_classifications` (global, a pure function of the key string — copied whole). Deliberately NOT
+ * `authz_classifications` + `authz_polarity` (global, pure functions of the key string — copied whole). Deliberately NOT
  * copied: `vulnerabilities`/`analysis_stats` (the demo regenerates those when it runs) and anything the
  * client-routing phase needs (the demo is HTTP-only — see demo/README.md). The destination's own
  * `vulnerabilities`/`analysis_stats` tables are created (empty) so the offline run has somewhere to write.
@@ -68,6 +68,10 @@ export function exportSiteToDemoDb({ sourceDbPath, destDbPath, site }: {
       // Global classifier cache: a pure function of the key string, independent of site/run. Copied whole
       // (small), OR IGNORE so re-running never duplicates or overwrites existing rows.
       db.prepare('INSERT OR IGNORE INTO authz_classifications SELECT * FROM src.authz_classifications').run();
+      // Same for the polarity cache, so the offline demo never loads the NLI model. A source DB written
+      // before the table existed has none: skip rather than fail.
+      const hasPolarity = db.prepare("SELECT 1 FROM src.sqlite_master WHERE type = 'table' AND name = 'authz_polarity'").get();
+      if (hasPolarity) db.prepare('INSERT OR IGNORE INTO authz_polarity SELECT * FROM src.authz_polarity').run();
     });
     copy();
 

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { AuthzClassifier, assessAuthZ } from '../src/analysis/authzClassifier';
+import { AuthzClassifier, assessAuthZ, assessDirection } from '../src/analysis/authzClassifier';
 import { AuthzClassificationStore } from '../src/db/AuthzClassificationStore';
 import { compareObj } from '../src/analysis/responseEvaluate';
 
@@ -89,5 +89,64 @@ describe('AuthzClassifier', { timeout: 120_000 }, () => {
     const tierAssessment = await assessAuthZ({ differences: tierDiff, classifier });
     assert.equal(tierAssessment.isAuthzRelevant, true);
     assert.ok(tierAssessment.sensitiveKeys.includes('premium'));
+  });
+});
+
+// No model needed: the NLI polarity cache is pre-seeded with the signs bart-large-mnli gives these terms.
+describe('assessDirection', () => {
+  const seeded = (): AuthzClassifier => {
+    const classifier = newClassifier();
+    const polarity = (classifier as unknown as { polarityModel: { cache: Map<string, unknown> } }).polarityModel.cache;
+    polarity.set('is free', { polarity: -1, relevance: 1 });
+    polarity.set('available', { polarity: -0.91, relevance: 0.92 });
+    polarity.set('lock', { polarity: 0.8, relevance: 0.81 });
+    polarity.set('provider', { polarity: 0.1, relevance: 0.6 });
+    polarity.set('openai', { polarity: -0.2, relevance: 0.3 });
+    polarity.set('gcp', { polarity: 1, relevance: 1 });
+    polarity.set('tier', { polarity: 0.5, relevance: 0.9 });
+    polarity.set('free', { polarity: -1, relevance: 1 });
+    polarity.set('premium', { polarity: 1, relevance: 1 });
+    return classifier;
+  };
+
+  it('a free sibling of a paid reference is LESS restricted (getpronounce shimmer -> daniel)', async () => {
+    const differences = compareObj(
+      { isFree: false, available: false, provider: 'openai', name: 'Emma' },
+      { isFree: true, available: true, provider: 'gcp', name: 'Daniel' },
+    );
+    const result = await assessDirection({ authz: { differences, sensitiveKeys: ['isFree', 'available', 'provider', 'gcp'] }, classifier: seeded() });
+    assert.equal(result.lessRestricted, true, result.evidence.join(' '));
+  });
+
+  it('a paid sibling of a free reference is MORE restricted (kept): flag, missing flag and string enum', async () => {
+    const classifier = seeded();
+    for (const [ref, cand, keys] of [
+      [{ lock: false }, { lock: true }, ['lock']],                 // ejoy
+      [{ isFree: true }, { isFree: undefined }, ['isFree']],       // pimsleur: the paid sibling lacks the flag
+      [{ tier: 'free' }, { tier: 'premium' }, ['tier', 'premium']],
+    ] as const) {
+      const result = await assessDirection({ authz: { differences: compareObj(ref, cand), sensitiveKeys: [...keys] }, classifier });
+      assert.equal(result.lessRestricted, false, JSON.stringify(ref));
+      assert.ok(result.delta > 0, JSON.stringify(ref));
+    }
+  });
+
+  it('casts no vote without evidence: non-sensitive diffs and falsy->falsy flags keep the candidate', async () => {
+    const classifier = seeded();
+    // isFree is in the diff but not a sensitive key -> ignored; available null -> 0 is no switch (lingualeo)
+    const differences = compareObj({ isFree: false, available: null }, { isFree: true, available: 0 });
+    const result = await assessDirection({ authz: { differences, sensitiveKeys: ['available'] }, classifier });
+    assert.deepEqual([result.delta, result.lessRestricted], [0, false]);
+  });
+});
+
+// Loads the real NLI model (Xenova/bart-large-mnli, ~400 MB on the first run): the sign must follow the
+// term's MEANING, which the MiniLM similarity could not separate (locked vs unlocked).
+describe('AuthzClassifier.polarity (real NLI model)', () => {
+  it('restricting terms are positive, granting terms negative, neutral terms barely relevant', async () => {
+    const classifier = newClassifier();
+    for (const term of ['lock', 'isLocked', 'premium', 'paywall', 'requiresSubscription']) assert.ok((await classifier.polarity(term)).polarity > 0.5, term);
+    for (const term of ['free', 'isFree', 'unlocked', 'isLessonUnlocked', 'available']) assert.ok((await classifier.polarity(term)).polarity < -0.5, term);
+    for (const term of ['id', 'title', 'voiceId', 'featured']) assert.ok((await classifier.polarity(term)).relevance < 0.5, term);
   });
 });

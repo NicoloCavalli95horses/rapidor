@@ -2,6 +2,31 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 16:50 — fix: directional authz gate (NLI polarity) — getpronounce `shimmer -> daniel` FP
+
+The authz gate was symmetric: it checked that an entitlement prop differs, not WHICH side is locked.
+getpronounce lets a free user preview every voice, paid ones included, so `voice=shimmer` (`isFree: false`)
+is a legitimate 200 reference and its free siblings (`daniel`, …) became candidates — `isFree: false -> true`
+passed the gate. The forge with `voice=daniel&provider=openai` returned the server's fallback voice (`echo`,
+byte-identical for daniel/evelyn/joseph/echo) and was flagged.
+
+- **Why NLI:** the MiniLM similarity is polarity-blind — measured, `locked`/`restricted`/`disabled` sit
+  closer to an "access granted" anchor than `unlocked`. A zero-shot NLI model reads negation. Chosen among
+  7 models × 7 phrasings on 44 terms: `Xenova/bart-large-mnli`, premise "This lesson is marked as <term>.",
+  hypotheses "The user must pay or upgrade to open it" / "can open it at no cost" (multi-label) → signs
+  `lock` +0.80, `premium` +1.00, `free` −1.00, `unlocked` −0.99; neutral terms relevance ≤ 0.42.
+- **What changed:** `EntitlementPolarity` (new, `entitlementPolarity.ts`, cached in the new `authz_polarity`
+  table) + `assessDirection` (`authzClassifier.ts`): only the diffs MiniLM already found authz-relevant vote;
+  a flag's key carries the sign, its value switches it; a string enum's values carry it. Drop only on
+  positive evidence (delta < −0.2). Applied in `authzGate` (main) and the ablation; re-run by
+  `recheckFindings` on the stored `authz_diff`. Kill switch `analysis.authzDirectionGate` (`AUTHZ_DIRECTION_GATE=false`).
+- **Effect (all 76 stored findings, real implementation):** getpronounce 4/5 (`daniel` dropped; the
+  `echo -> shimmer` premium-voice TP and the 3 locked exercises kept), ejoy 4/4, pimsleur 4/4, lingualeo
+  18/18 (no vote: `available: null -> 0`), promova 25/25, busuu 14/17 — the 14 objective TPs kept, the 3
+  client-routing `courseName` swaps dropped (`unlocked: false -> true`: the candidate is the unlocked side).
+- **Known limit:** user-STATE terms (`purchased`, `owned`, `isSubscribed`) get the wrong sign; absent from
+  the reference set, but `purchased: true -> false` would be dropped.
+
 ## 2026-11-24 12:40 — fix: NON_AUTHZ_TERMS += feature/service (plural-aware) — talkpal mode-swap FPs
 
 talkpal's `sentence-mode -> character/daily-pick` dashboard-mode swaps (6 findings) passed the authz
@@ -22,6 +47,7 @@ because a different mode genuinely renders different content.
 - **Effect:** talkpal 6 mode-swap FPs dropped (the 4 `modeType` fallback FPs were already removed by
   the page-uses-param fallback gate). Decision-logic change → `recheckFindings` on the 5 reference
   sites to confirm (offline already shows no loss).
+  
 ## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
 
 The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the
@@ -119,12 +145,3 @@ duolingo flagged 2 FPs, both swaps onto a "Privacy" link. Neither was caused by 
 - **What changed:** `excludeSwapDiff` drops the swap-path diff before `assessAuthZ` (motivation keeps the full diff); `sameIdShape` skips numeric <-> non-numeric swaps at generation (main + ablation; string form, so React `1` and `'1'` are both numeric); `NON_AUTHZ_TERMS = {privacy}` in the classifier, matched per normalized word at read time (no `CLASSIFIER_VERSION` bump).
 - **Auth gate false EXPIRED (same batch):** `runAnalysisFromDb` kept aborting on duolingo even right after `refreshAuth`, because the gate required an EXACT fingerprint match and duolingo `/learn` had 220 captures with 220 distinct fingerprints (live, logged in: 562 nodes, no redirect, no login form). A mismatch is no longer expiry: EXPIRED now needs positive evidence — left the entry route, a password field, or a tree < 0.5× the smallest captured one (`ReactStateStore.nodeCountsForUrl`). Verified live both ways: logged in → FRESH; empty profile → EXPIRED (redirected to `/`). `authFreshness.test.ts` rewritten, 7/7.
 - **Effect:** live duolingo re-analysis 2 → 0 findings, 569 → 354 requests, 3m06s → 49s; the `relative_domains` candidate is no longer generated, the `settings/privacy` one no longer passes the gate. Offline check on every stored finding: no TP of pimsleur (4), lingualeo (19), promova (25) affected; 2 odd mondly rows (`4 -> leoSprint/savannah`, lingualeo values — likely pre-site-scoping residue) would also drop. Tests: +6 unit (sameIdShape incl. `'1'`/`1`, excludeSwapDiff, privacy deny); pipeline/ablation 21/21.
-
-## 2026-11-23 — fix: stage-2 redirect-away guard + negative sibling-group inference + route-level probe dedup (clozemaster)
-
-clozemaster produced 101 client-routing FPs in 65 min of analysis: every paid wikipedia story bounces to `/pro`, and nothing noticed.
-
-- **Why (FPs):** the stage-2 SSR navigation fallback captured the post-goto URL but never checked it — only stages 1 (`stayedOnRoute`) and 3 (`sameRoutePath`) had a redirect-away guard. The `/pro` upsell differs from both the reference and the not-found baseline, so it read as "new content" → accept.
-- **Why (time):** each visited story slug matches its catalog card, whose ~508 paid siblings are all genuine `isFree: true → false` candidates; client probes were deduped per *reference page*, so 10 visited stories × 508 = 5 080 live probes.
-- **What changed:** (1) stage 2 rejects a real load the app redirected away from (same `sameRoutePath` guard; a failed capture still keeps). (2) Client-routing probes are deduped by canonical candidate route, like HTTP. (3) Negative sibling-group inference (`analysis.clientRoutingGroupRejectAfter`, default 3, 0 = off): after K same-target redirect-aways the rest of the group is skipped (stashed, so a later genuine confirmation still recovers it). `recheckFindings` gained `RECHECK_LIMIT=N`.
-- **Effect:** clozemaster recheck 0/101 still flagged (all `/pro` redirect-away); full re-analysis 101 → 0 findings, client probes 5 080 → 508 dispatched / ~10 executed (498 skipped), analysis 64m48s → 1m38s. New tests: stage-2 paywall redirect (fails without the fix) + group skip; `AnalysisPipeline.test.ts` 12/12. Stage 2 is lingualeo's stage → its `recheckFindings` is still owed.

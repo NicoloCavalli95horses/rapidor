@@ -62,6 +62,7 @@ const pipeline = new AblationPipeline({
     maxGeneratedRequests: config.analysis.maxGeneratedRequests,
     paramBlacklist: config.analysis.paramBlacklist,
     segmentBlacklist: config.analysis.segmentBlacklist,
+    authzDirectionGate: config.analysis.authzDirectionGate,
   },
 });
 

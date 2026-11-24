@@ -2,6 +2,15 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-23 — fix: stage-2 redirect-away guard + negative sibling-group inference + route-level probe dedup (clozemaster)
+
+clozemaster produced 101 client-routing FPs in 65 min of analysis: every paid wikipedia story bounces to `/pro`, and nothing noticed.
+
+- **Why (FPs):** the stage-2 SSR navigation fallback captured the post-goto URL but never checked it — only stages 1 (`stayedOnRoute`) and 3 (`sameRoutePath`) had a redirect-away guard. The `/pro` upsell differs from both the reference and the not-found baseline, so it read as "new content" → accept.
+- **Why (time):** each visited story slug matches its catalog card, whose ~508 paid siblings are all genuine `isFree: true → false` candidates; client probes were deduped per *reference page*, so 10 visited stories × 508 = 5 080 live probes.
+- **What changed:** (1) stage 2 rejects a real load the app redirected away from (same `sameRoutePath` guard; a failed capture still keeps). (2) Client-routing probes are deduped by canonical candidate route, like HTTP. (3) Negative sibling-group inference (`analysis.clientRoutingGroupRejectAfter`, default 3, 0 = off): after K same-target redirect-aways the rest of the group is skipped (stashed, so a later genuine confirmation still recovers it). `recheckFindings` gained `RECHECK_LIMIT=N`.
+- **Effect:** clozemaster recheck 0/101 still flagged (all `/pro` redirect-away); full re-analysis 101 → 0 findings, client probes 5 080 → 508 dispatched / ~10 executed (498 skipped), analysis 64m48s → 1m38s. New tests: stage-2 paywall redirect (fails without the fix) + group skip; `AnalysisPipeline.test.ts` 12/12. Stage 2 is lingualeo's stage → its `recheckFindings` is still owed.
+
 ## 2026-11-23 — feature: client-routing sibling-group confirmation + semantic finding dedup
 
 Two companion changes that together cut noise and recover flaky-lost findings without weakening any guard.

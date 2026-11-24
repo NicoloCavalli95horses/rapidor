@@ -1,6 +1,7 @@
 import { pipeline } from '@huggingface/transformers';
 import type { PropDiff } from './responseEvaluate';
 import type { AuthzClassificationStore } from '../db/AuthzClassificationStore';
+import { EntitlementPolarity, type Polarity } from './entitlementPolarity';
 
 /**
  * Port of RAPIDOR's extension-only offscreen classifier (react-devtools-extensions/src/offscreen/
@@ -40,8 +41,17 @@ export class AuthzClassifier {
   private conceptEmbeddings?: Float32Array[];
   // L1 (in-memory, this process) in front of the store's L2 (SQLite, survives across runs/sites)
   private cache = new Map<string, { score: number; isAuthZRelevant: boolean }>();
+  // The DIRECTION of an entitlement term (NLI) — relevance stays this class's MiniLM verdict.
+  private polarityModel: EntitlementPolarity;
 
-  constructor(private store: AuthzClassificationStore) {}
+  constructor(private store: AuthzClassificationStore) {
+    this.polarityModel = new EntitlementPolarity(store);
+  }
+
+  /** Sign (+1 restricts, -1 grants) and confidence of an entitlement term. See EntitlementPolarity. */
+  polarity(term: string): Promise<Polarity> {
+    return this.polarityModel.score(normalizeKey(term));
+  }
 
   private getExtractor(): Promise<FeatureExtractor> {
     this.extractor ??= pipeline('feature-extraction', MODEL) as unknown as Promise<FeatureExtractor>;
@@ -185,4 +195,55 @@ export async function assessAuthZ({ differences, classifier }: {
 
   const hasAnyDifference = differences.some((d) => d.reference !== d.current);
   return { isAuthzRelevant: hasAnyDifference && sensitiveKeys.length > 0, differences, sensitiveKeys };
+}
+
+// A term must be at least this likely to be about paid access (NLI relevance) to cast a direction vote,
+// and the summed vote must clear MIN_DIRECTION_DELTA: a weak/ambiguous signal is "no evidence" -> keep.
+// Verdicts on the stored findings were identical for any MIN_POLARITY_RELEVANCE in [0.4, 0.7].
+const MIN_POLARITY_RELEVANCE = 0.5;
+const MIN_DIRECTION_DELTA = 0.2;
+
+export interface DirectionAssessment {
+  delta: number;            // > 0: candidate more restricted than the reference; < 0: less restricted
+  evidence: string[];       // one `key:ref->cur(step)` per voting diff, for logs
+  lessRestricted: boolean;  // positive evidence that the candidate is the MORE accessible side
+}
+
+const isFlag = (v: unknown): boolean => v === null || v === undefined || typeof v === 'boolean' || v === 0 || v === 1;
+const isTerm = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_\- ]{0,40}$/.test(v);
+
+/**
+ * Which side of the swap is the restricted one. RAPIDOR's scope is a free user reaching a PAID sibling,
+ * so the candidate must be the more restricted side; the relevance gate alone is symmetric and also
+ * admits the inverse — a paid resource the user legitimately reached (a free preview) swapped for a
+ * free sibling, which can never be a paid-content leak (getpronounce `shimmer -> daniel`).
+ *
+ * Only diffs the relevance gate already found authz-relevant vote (`sensitiveKeys`); MiniLM still decides
+ * WHICH keys matter, the NLI polarity only HOW. A flag's key carries the sign and its value switches it
+ * (`isFree: false -> true` = −1: less restricted); a string enum's values carry it (`tier: free -> premium`),
+ * counted only when the key itself is about access. Drops only on positive evidence: no voting diff, or
+ * an ambiguous sum, keeps the candidate (lingualeo `available: null -> 0` casts no vote).
+ */
+export async function assessDirection({ authz, classifier }: {
+  authz: Pick<AuthzAssessment, 'differences' | 'sensitiveKeys'>; classifier: AuthzClassifier;
+}): Promise<DirectionAssessment> {
+  const sensitive = new Set<unknown>(authz.sensitiveKeys);
+  let delta = 0;
+  const evidence: string[] = [];
+  for (const d of authz.differences) {
+    if (![d.key, d.pathStr, d.reference, d.current].some((t) => sensitive.has(t))) continue;
+    let step = 0;
+    if (isFlag(d.reference) && isFlag(d.current)) {
+      const { polarity, relevance } = await classifier.polarity(String(d.key));
+      if (relevance >= MIN_POLARITY_RELEVANCE) step = polarity * (Number(Boolean(d.current)) - Number(Boolean(d.reference)));
+    } else if (isTerm(d.reference) && isTerm(d.current) && (await classifier.polarity(String(d.key))).relevance >= MIN_POLARITY_RELEVANCE) {
+      const [ref, cur] = await Promise.all([classifier.polarity(d.reference), classifier.polarity(d.current)]);
+      if (Math.max(ref.relevance, cur.relevance) >= MIN_POLARITY_RELEVANCE) step = cur.polarity - ref.polarity;
+    }
+    if (step !== 0) {
+      delta += step;
+      evidence.push(`${d.pathStr}:${String(d.reference)}->${String(d.current)}(${step.toFixed(2)})`);
+    }
+  }
+  return { delta, evidence, lessRestricted: delta < -MIN_DIRECTION_DELTA };
 }

@@ -11,7 +11,7 @@ import { forgeRequestCached, type ResponseLike } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
 import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, excludeSwapDiff, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
-import { assessAuthZ, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
+import { assessAuthZ, assessDirection, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, normalizeUrl, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
@@ -31,6 +31,8 @@ export interface CandidateEvaluatorOptions {
   clientRoutingPathCoherence?: boolean;
   // see config.analysis.clientRoutingGroupRejectAfter — negative sibling-group inference (default 3, 0 = off)
   clientRoutingGroupRejectAfter?: number;
+  // see config.analysis.authzDirectionGate — reject a candidate LESS restricted than its reference (off when undefined)
+  authzDirectionGate?: boolean;
 }
 
 export interface CandidateEvaluatorDeps {
@@ -304,6 +306,15 @@ export class CandidateEvaluator {
     if (!authz.isAuthzRelevant) {
       log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${context} | ${describeDiffs(differences)}`);
       return null;
+    }
+    // Direction: the candidate must be the RESTRICTED side. A free sibling of a paid reference the user
+    // legitimately reached (a free preview) is never a paid-content leak. See assessDirection.
+    if (this.deps.options.authzDirectionGate) {
+      const direction = await assessDirection({ authz, classifier: this.deps.classifier });
+      if (direction.lessRestricted) {
+        log.debug(`AnalysisPipeline: candidate rejected (candidate less restricted than the reference, delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')}) — ${context}`);
+        return null;
+      }
     }
     return { ...authz, differences };
   }

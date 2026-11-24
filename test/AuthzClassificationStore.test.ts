@@ -15,6 +15,16 @@ function newStore(name: string, clearOnStart = false): AuthzClassificationStore 
 }
 
 describe('AuthzClassificationStore', () => {
+  it('persists entitlement polarities in their own table, wiped by the same clearOnStart', () => {
+    const path = join(root, 'polarity.db');
+    const db = new Database(path);
+    const store = new AuthzClassificationStore({ db, clearOnStart: false });
+    assert.equal(store.getPolarity('1:lock'), undefined);
+    store.setPolarity('1:lock', { polarity: 0.8, relevance: 0.81 });
+    assert.deepEqual(new AuthzClassificationStore({ db, clearOnStart: false }).getPolarity('1:lock'), { polarity: 0.8, relevance: 0.81 });
+    assert.equal(new AuthzClassificationStore({ db, clearOnStart: true }).getPolarity('1:lock'), undefined);
+  });
+
   it('is empty for an unseen key, then returns what was set', () => {
     const store = newStore('a.db');
     assert.equal(store.get('premium'), undefined);

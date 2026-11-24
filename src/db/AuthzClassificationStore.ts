@@ -23,7 +23,16 @@ export class AuthzClassificationStore {
         is_authz_relevant INTEGER NOT NULL
       )
     `);
-    if (clearOnStart) this.db.exec('DELETE FROM authz_classifications');
+    // Entitlement POLARITY cache (EntitlementPolarity, NLI model): same lifecycle as the relevance
+    // cache above — a pure function of the term, wiped only by the same clearClassifierCache flag.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS authz_polarity (
+        key TEXT PRIMARY KEY,
+        polarity REAL NOT NULL,
+        relevance REAL NOT NULL
+      )
+    `);
+    if (clearOnStart) this.db.exec('DELETE FROM authz_classifications; DELETE FROM authz_polarity;');
   }
 
   get(key: string): { score: number; isAuthZRelevant: boolean } | undefined {
@@ -37,6 +46,18 @@ export class AuthzClassificationStore {
       INSERT INTO authz_classifications (key, score, is_authz_relevant) VALUES (@key, @score, @isAuthZRelevant)
       ON CONFLICT(key) DO UPDATE SET score = @score, is_authz_relevant = @isAuthZRelevant
     `).run({ key, score: result.score, isAuthZRelevant: result.isAuthZRelevant ? 1 : 0 });
+  }
+
+  getPolarity(key: string): { polarity: number; relevance: number } | undefined {
+    return this.db.prepare('SELECT polarity, relevance FROM authz_polarity WHERE key = ?').get(key) as
+      { polarity: number; relevance: number } | undefined;
+  }
+
+  setPolarity(key: string, result: { polarity: number; relevance: number }): void {
+    this.db.prepare(`
+      INSERT INTO authz_polarity (key, polarity, relevance) VALUES (@key, @polarity, @relevance)
+      ON CONFLICT(key) DO UPDATE SET polarity = @polarity, relevance = @relevance
+    `).run({ key, ...result });
   }
 
   count(): number {

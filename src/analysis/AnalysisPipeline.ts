@@ -35,6 +35,7 @@ export interface AnalysisPipelineOptions {
   clientRoutingFullNavigationEscalation: boolean; // allow clientSideConfirmed's strict stage-3 real-navigation escalation for high-suspicion candidates (see config.analysis.clientRoutingFullNavigationEscalation)
   clientRoutingEscalationAttempts: number; // total stage-3 attempts (1 = no retry); a retry recovers a flaky false-negative (see config.analysis.clientRoutingEscalationAttempts)
   clientRoutingPathCoherence: boolean; // retry a rejected high-suspicion path candidate once with its query stripped, for routes that infer params from the path (see config.analysis.clientRoutingPathCoherence)
+  authzDirectionGate?: boolean; // reject a candidate less restricted than its reference (off when undefined; see config.analysis.authzDirectionGate)
   clientRoutingGroupRejectAfter?: number; // skip a sibling group after this many same-target redirect-away rejects (default 3, 0 = off; see config.analysis.clientRoutingGroupRejectAfter)
   // Offline/replay mode (the deterministic demo, see scripts/runDemo.ts). When true the analysis is
   // pure HTTP and never touches the network: every forged request must already be in the
@@ -146,6 +147,7 @@ export class AnalysisPipeline {
         authOverride: deps.options.authOverride,
         clientRoutingPathCoherence: deps.options.clientRoutingPathCoherence,
         clientRoutingGroupRejectAfter: deps.options.clientRoutingGroupRejectAfter,
+        authzDirectionGate: deps.options.authzDirectionGate,
       },
     });
     this.recheckRunner = new RecheckRunner({
@@ -153,7 +155,8 @@ export class AnalysisPipeline {
       forgedRequestStore: deps.forgedRequestStore,
       pagePool: this.pagePool,
       clientRoutingVerifier: this.clientRoutingVerifier,
-      options: { clientRoutingConcurrency: deps.options.clientRoutingConcurrency },
+      classifier: deps.classifier,
+      options: { clientRoutingConcurrency: deps.options.clientRoutingConcurrency, authzDirectionGate: deps.options.authzDirectionGate },
     });
   }
 

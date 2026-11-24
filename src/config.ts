@@ -158,6 +158,11 @@ export interface CrawlConfig {
     // failed / inert / not-found — never an accept, never a deterministic redirect-away) recovers them.
     // Can only recover a finding, never lose one. Lower to 1 on a huge site if the 45-min budget is tight.
     clientRoutingEscalationAttempts: number;
+    // Direction gate (assessDirection, NLI zero-shot polarity): reject a candidate whose entitlement props
+    // say it is LESS restricted than its reference (`isFree: false -> true`) — a free sibling of a paid
+    // resource the user legitimately reached (a free preview) is never a paid-content leak. Main AND
+    // ablation. Kill switch for regression bisection: AUTHZ_DIRECTION_GATE=false.
+    authzDirectionGate: boolean;
     // client-routing PATH coherence: a path candidate keeps the reference URL's query (spliceSegment
     // re-attaches it), so when the swapped identity is DUPLICATED in the url (ejoy's lesson
     // /courses/37/314/<id>?path=.../lessons/<id>/<hash>.json) the query copy goes stale. When on, the query
@@ -282,6 +287,7 @@ export const config: Readonly<CrawlConfig> = Object.freeze({
     clientRoutingFullNavigationEscalation: true,
     // 2 = one retry of the stage-3 escalation on a flaky reject (reduces ejoy's run-to-run sibling flapping).
     clientRoutingEscalationAttempts: 2,
+    authzDirectionGate: process.env.AUTHZ_DIRECTION_GATE !== 'false',
     clientRoutingPathCoherence: true,
     clientRoutingGroupRejectAfter: 3,
     overwriteFindingsPerSite: true,

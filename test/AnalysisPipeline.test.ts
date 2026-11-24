@@ -36,7 +36,7 @@ function siblingGraph(): RapidorGraph {
 
 describe('AnalysisPipeline: client-side-only query params', () => {
   let n = 0;
-  function newPipeline() {
+  function newPipeline({ authzDirectionGate }: { authzDirectionGate?: boolean } = {}) {
     const dbPath = join(root, `${n++}.db`);
     const db = new Database(dbPath);
     const httpEventStore = new HttpEventStore({ db, clearOnStart: true });
@@ -61,6 +61,7 @@ describe('AnalysisPipeline: client-side-only query params', () => {
         clientRoutingFullNavigationEscalation: true,
         clientRoutingEscalationAttempts: 2,
         clientRoutingPathCoherence: true,
+        authzDirectionGate,
       },
     });
     return { pipeline, httpEventStore, preindexStore, reactStateStore, crawlStateStore, vulnerabilityStore, classifier };
@@ -114,6 +115,31 @@ describe('AnalysisPipeline: client-side-only query params', () => {
     const findings = vulnerabilityStore.count('app.test');
     assert.equal(findings, 1);
   });
+
+  // Direction gate: the candidate must be the RESTRICTED side. Reference 102 (premium) -> candidate 101
+  // (free) is the getpronounce `shimmer -> daniel` shape (a paid item the user legitimately reached,
+  // swapped for a free sibling) and is dropped; the forward swap 101 -> 102 is still flagged.
+  for (const [refId, expected] of [['102', 0], ['101', 1]] as const) {
+    it(`direction gate: reference ${refId} -> ${expected ? 'flagged (candidate is premium)' : 'dropped (candidate is free)'}`, async () => {
+      const { pipeline, preindexStore, reactStateStore, vulnerabilityStore, classifier } = newPipeline({ authzDirectionGate: true });
+      (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+      (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
+      // pre-seed the NLI polarity too (premium restricts), so no model is loaded
+      (classifier as unknown as { polarityModel: { cache: Map<string, unknown> } }).polarityModel.cache.set('premium', { polarity: 1, relevance: 1 });
+
+      const page = await newPage();
+      await installParamUsageTracking(page);
+      await page.route(`${APP_ORIGIN}/**`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }));
+      const pageUrl = `${APP_ORIGIN}/?id=${refId}`;
+      await page.goto(pageUrl);
+      const graph = siblingGraph();
+      const stateId = reactStateStore.record({ site: 'app.test', url: pageUrl, graph })!;
+      preindexStore.reindex({ stateId, graph });
+
+      await pipeline.runForSite({ page, site: 'app.test', explorationMs: 1000 });
+      assert.equal(vulnerabilityStore.count('app.test'), expected);
+    });
+  }
 
   // Only a 200 GET is a forge reference: a 204 beacon carrying the same id (talkpal's first-party GA
   // `collect`) must generate nothing, while the 200 one still yields its sibling forge.
