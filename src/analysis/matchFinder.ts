@@ -26,15 +26,27 @@ export function readPath(obj: unknown, path: (string | number)[]): unknown {
  * Port of matchFinder.js's getValueAtPath diffing step. Deviation, deliberate: RAPIDOR always
  * compares a NUMBER candidate against the reference's tokenized string ARRAY via `!=` (always
  * unequal regardless of actual value), which would flag identical numbers as "different". Here we
- * compare the actual values: string-vs-string uses the same tokenized single-diff extraction,
- * anything else uses straight inequality.
+ * compare the actual values: anything non-string uses straight inequality.
+ *
+ * Strings are compared POSITIONALLY token by token (same token count, exactly one position differs),
+ * and, when `matchedValue` is given, that position must hold the URL value that matched the preindex.
+ * A set difference paired tokens at different positions: mangolanguages' lesson `url` prop
+ * `/fr/485/1/1/1 -> /fr/485/1/1/4` matched on `485` but yielded the lesson number `4`, swapped into the
+ * PATHWAY slot (`/fr/4/1/1`, a 403 page); promova paired `/my-plan/<id>/73` with `/profile`.
  */
-export function diffValue({ candidateRaw, referenceRaw }: { candidateRaw: unknown; referenceRaw: unknown }): string | undefined {
+export function diffValue({ candidateRaw, referenceRaw, matchedValue }: {
+  candidateRaw: unknown; referenceRaw: unknown; matchedValue?: string;
+}): string | undefined {
   if (candidateRaw == null) return undefined;
   if (typeof referenceRaw === 'string' && typeof candidateRaw === 'string') {
-    const refTokens = new Set(tokenize(referenceRaw));
-    const diffTokens = tokenize(candidateRaw).filter((t) => !refTokens.has(t));
-    return diffTokens.length === 1 ? diffTokens[0] : undefined;
+    const refTokens = tokenize(referenceRaw);
+    const candTokens = tokenize(candidateRaw);
+    if (refTokens.length !== candTokens.length) return undefined;
+    const differing = refTokens.flatMap((t, i) => (t !== candTokens[i] ? [i] : []));
+    if (differing.length !== 1) return undefined;
+    const i = differing[0]!;
+    if (matchedValue !== undefined && refTokens[i] !== matchedValue) return undefined;
+    return candTokens[i];
   }
   return candidateRaw !== referenceRaw ? String(candidateRaw) : undefined;
 }
@@ -44,8 +56,9 @@ export function diffValue({ candidateRaw, referenceRaw }: { candidateRaw: unknow
  * instances of the same component (via the graph's componentIndex) whose value at the same path
  * genuinely differs — each one a candidate replacement for an IDOR probe.
  */
-export function findCandidates({ stateId, graph, nodeId, path }: {
+export function findCandidates({ stateId, graph, nodeId, path, matchedValue }: {
   stateId: number; graph: RapidorGraph; nodeId: string; path: (string | number)[];
+  matchedValue?: string;   // the URL value that matched the preindex: the swapped token must be it (see diffValue)
 }): MatchCandidate[] {
   const nodes = (graph.nodes ?? {}) as Record<string, { id: string; componentId?: number; props?: unknown }>;
   const componentIndex = (graph.componentIndex ?? {}) as Record<string, string[]>;
@@ -66,7 +79,7 @@ export function findCandidates({ stateId, graph, nodeId, path }: {
     if (!candidateNode) continue;
 
     const candidateRaw = readPath(candidateNode, path);
-    const candidateValue = diffValue({ candidateRaw, referenceRaw });
+    const candidateValue = diffValue({ candidateRaw, referenceRaw, matchedValue });
     if (candidateValue === undefined) continue;
 
     candidates.push({

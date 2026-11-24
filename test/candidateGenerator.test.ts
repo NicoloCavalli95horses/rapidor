@@ -187,6 +187,47 @@ describe('CandidateGenerator', () => {
     assert.deepEqual(after, ['102']);
   });
 
+  it('swaps only the URL segment whose token the siblings differ at (positional match)', () => {
+    // mangolanguages: lesson links /fr/485/1/1/<n> on a page /fr/485/1/1; `485` must not become a lesson number
+    const graph: RapidorGraph = {
+      fingerprint: 'f-mango',
+      nodes: {
+        'node-1': { id: 'node-1', componentId: 1, props: { url: '/pathway/fr/485/1/1/1' } },
+        'node-2': { id: 'node-2', componentId: 1, props: { url: '/pathway/fr/485/1/1/4' } },
+      },
+      componentIndex: { '1': ['node-1', 'node-2'] },
+    };
+    const url = `https://${SITE}/pathway/fr/485/1/1`;
+    const gen = newGenerator({ graph, url });
+
+    const { items } = gen.findUrlCandidates({ url, site: SITE });
+
+    assert.ok(items.every((i) => i.segment.value === '1'), 'only the `1` segments are swapped, never 485');
+    assert.deepEqual(items.map((i) => i.segment.indexFromRight).sort(), [0, 1]);
+    assert.ok(items.every((i) => i.candidate.candidateValue === '4'));
+  });
+
+  it('reuses a value\'s expansion for a repeated segment, with the same counters as before', () => {
+    const graph: RapidorGraph = {
+      fingerprint: 'f-rep',
+      nodes: {
+        'node-1': { id: 'node-1', componentId: 1, props: { id: 1 } },   // numbers: 1-char strings are not indexed
+        'node-2': { id: 'node-2', componentId: 1, props: { id: 2 } },
+      },
+      componentIndex: { '1': ['node-1', 'node-2'] },
+    };
+    const url = `https://${SITE}/lesson/1/7/1`;
+    const gen = newGenerator({ graph, url });
+
+    const first = gen.findUrlCandidates({ url, site: SITE });
+    const again = gen.findUrlCandidates({ url, site: SITE });
+
+    // both `1` segments get their own item (distinct swap positions), from one shared expansion
+    assert.deepEqual(first.items.map((i) => i.segment.indexFromRight).sort(), [0, 2]);
+    assert.equal(first.matches, 2);   // one preindex row, counted once per `1` segment
+    assert.deepEqual({ ...again, items: again.items.length }, { ...first, items: first.items.length });
+  });
+
   it('warns for a crawled URL that has no captured React state', () => {
     const url = `https://${SITE}/users/101/profile`;
     const gen = newGenerator({ graph: graphWith({ a: '101', b: '102' }), url });

@@ -132,7 +132,10 @@ function findAllArrayAncestors({ root, path }: { root: unknown; path: (string | 
  * authz-relevant difference, the same "swap exactly one thing" principle an IDOR test itself relies
  * on. No siblings at all (empty result) when the matched leaf isn't inside any array.
  */
-export function findJsonCandidates({ root, path }: { root: unknown; path: (string | number)[] }): JsonCandidate[] {
+export function findJsonCandidates({ root, path, matchedValue }: {
+  root: unknown; path: (string | number)[];
+  matchedValue?: string;   // same positional rule as the main pipeline (see matchFinder.diffValue)
+}): JsonCandidate[] {
   const candidates: JsonCandidate[] = [];
   const seenCandidatePaths = new Set<string>();
 
@@ -145,7 +148,7 @@ export function findJsonCandidates({ root, path }: { root: unknown; path: (strin
       if (i === itemIndex) continue;
       const candidateItem = array[i];
       const candidateRaw = readPath(candidateItem, relPath);
-      const candidateValue = diffValue({ candidateRaw, referenceRaw });
+      const candidateValue = diffValue({ candidateRaw, referenceRaw, matchedValue });
       if (candidateValue === undefined) continue;
 
       const candidatePath = [...arrayPath, i, ...relPath];

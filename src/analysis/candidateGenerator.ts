@@ -1,7 +1,7 @@
 import { log } from 'crawlee';
 import type { PreindexedValueStore, PreindexMatch } from '../db/PreindexedValueStore';
 import type { ReactStateStore, RapidorGraph } from '../db/ReactStateStore';
-import { findCandidates } from './matchFinder';
+import { findCandidates, type MatchCandidate } from './matchFinder';
 import { extractSegments, type SegmentCandidate } from './segments';
 import { nodeChromeZone, zoneWalkDepthFor } from './domZone';
 import { tokenizeParamName } from '../utils/utils';
@@ -101,6 +101,11 @@ export class CandidateGenerator {
   // param values thousands of times (talkpal: 2M segments, 15k distinct values): one SQL round per value.
   private lookupCache = new Map<string, { count: number; matches?: PreindexMatch[] }>();
 
+  // Per-run cache of a value's whole expansion (matches -> chrome skip -> siblings -> value filters): it
+  // depends on the VALUE only, never on where the segment sits, so `/lesson/1/2/1`'s second `1`, and every
+  // other URL carrying `1`, reuse it. Each segment still gets its own items (distinct swap positions).
+  private expansionCache = new Map<string, { matches: number; chromeSkipped: number; candidates: MatchCandidate[] }>();
+
   constructor(private deps: {
     preindexStore: PreindexedValueStore;
     reactStateStore: ReactStateStore;
@@ -114,6 +119,7 @@ export class CandidateGenerator {
     this.graphCache.clear();
     this.zoneDepthCache.clear();
     this.lookupCache.clear();
+    this.expansionCache.clear();
   }
 
   /** Cached countByValue + (only under the cap) findByValue, so an over-cap value never fetches its rows. */
@@ -172,35 +178,61 @@ export class CandidateGenerator {
       // shares the word) is what made candidate generation explode. Identifiers appear a bounded
       // handful of times, well under this cap, so this skips only the noise. countByValue never
       // materializes the rows, so an over-cap segment costs a single COUNT, not a huge fetch.
-      const preindexMatches = this.lookup({ value: segment.value, site });
-      if (!preindexMatches) continue;   // over maxSegmentMatches
-      for (const match of preindexMatches) {
-        matches++;
-        const graph = this.getGraph(match.stateId);
-        if (!graph) continue;
-        // Skip a match whose React node sits inside the site's navigation/footer chrome (see domZone):
-        // a URL value coming from nav/footer furniture is never a user-scoped resource id, so every
-        // candidate it would spawn is noise. Scoped to nav/footer/sidebar ONLY — <header>/<section> are
-        // deliberately NOT chrome (busuu renders its objective-id cards inside a <header>). No-op on old
-        // captures without the `dom` field (nodeChromeZone returns null), so this only skips on evidence.
-        if (nodeChromeZone({ graph, nodeId: match.nodeId, maxDepth: this.getZoneDepth(match.stateId, graph) })) {
-          chromeSkipped++;
-          continue;
-        }
-        for (const candidate of findCandidates({ stateId: match.stateId, graph, nodeId: match.nodeId, path: match.path })) {
-          // Blacklist applies to the swap in BOTH directions: skip not only a blacklisted segment as
-          // the value being mutated (above), but also any candidate whose REPLACEMENT value is
-          // blacklisted — otherwise a non-shell segment gets mutated INTO an app-shell prefix
-          // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
-          // from the other side.
-          if (segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
-          // the slot keeps its type (numeric <-> non-numeric is a different kind of link, see sameIdShape)
-          if (!sameIdShape({ original: segment.value, replacement: String(candidate.candidateValue) })) continue;
-          items.push({ segment, candidate });
-        }
-      }
+      const expansion = this.expand({ value: segment.value, site });
+      if (!expansion) continue;   // over maxSegmentMatches
+      matches += expansion.matches;
+      chromeSkipped += expansion.chromeSkipped;
+      for (const candidate of expansion.candidates) items.push({ segment, candidate });
     }
     return { segments, matches, chromeSkipped, items };
+  }
+
+  /**
+   * The value-only part of findUrlCandidates, memoized per run (see expansionCache). undefined when the
+   * value is over maxSegmentMatches.
+   */
+  private expand({ value, site }: { value: string; site: string }): { matches: number; chromeSkipped: number; candidates: MatchCandidate[] } | undefined {
+    const key = `${site}\u0000${value}`;
+    const cached = this.expansionCache.get(key);
+    if (cached) return cached;
+    const preindexMatches = this.lookup({ value, site });
+    if (!preindexMatches) return undefined;
+    const { segmentBlacklist } = this.deps;
+    const out = { matches: 0, chromeSkipped: 0, candidates: [] as MatchCandidate[] };
+    // The preindex holds one row per TOKEN, so `/fr/485/1/1/1` matches `1` three times on the same node+path:
+    // expand each (node, path) once (the `matches` stat still counts rows, as before).
+    const expanded = new Set<string>();
+    for (const match of preindexMatches) {
+      out.matches++;
+      const matchKey = `${match.stateId}\u0000${match.nodeId}\u0000${JSON.stringify(match.path)}`;
+      if (expanded.has(matchKey)) continue;
+      expanded.add(matchKey);
+      const graph = this.getGraph(match.stateId);
+      if (!graph) continue;
+      // Skip a match whose React node sits inside the site's navigation/footer chrome (see domZone):
+      // a URL value coming from nav/footer furniture is never a user-scoped resource id, so every
+      // candidate it would spawn is noise. Scoped to nav/footer/sidebar ONLY — <header>/<section> are
+      // deliberately NOT chrome (busuu renders its objective-id cards inside a <header>). No-op on old
+      // captures without the `dom` field (nodeChromeZone returns null), so this only skips on evidence.
+      if (nodeChromeZone({ graph, nodeId: match.nodeId, maxDepth: this.getZoneDepth(match.stateId, graph) })) {
+        out.chromeSkipped++;
+        continue;
+      }
+      // matchedValue: the sibling must differ at the token that matched the URL (see matchFinder.diffValue)
+      for (const candidate of findCandidates({ stateId: match.stateId, graph, nodeId: match.nodeId, path: match.path, matchedValue: value })) {
+        // Blacklist applies to the swap in BOTH directions: skip not only a blacklisted segment as
+        // the value being mutated (above), but also any candidate whose REPLACEMENT value is
+        // blacklisted — otherwise a non-shell segment gets mutated INTO an app-shell prefix
+        // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
+        // from the other side.
+        if (segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
+        // the slot keeps its type (numeric <-> non-numeric is a different kind of link, see sameIdShape)
+        if (!sameIdShape({ original: value, replacement: String(candidate.candidateValue) })) continue;
+        out.candidates.push(candidate);
+      }
+    }
+    this.expansionCache.set(key, out);
+    return out;
   }
 
   /** zoneWalkDepthFor(graph), memoized per state for this run (it is O(nodes), called once per match). */

@@ -21,6 +21,22 @@ describe('diffValue', () => {
     assert.equal(diffValue({ referenceRaw: 'a/b', candidateRaw: 'c/d' }), undefined);
   });
 
+  it('compares POSITIONALLY: same token count, one differing position', () => {
+    // a set difference would pair `/my-plan/<id>/73` with `/profile` (promova settings-link FP)
+    assert.equal(diffValue({ referenceRaw: '/my-plan/app3X/73', candidateRaw: '/profile' }), undefined);
+    assert.equal(diffValue({ referenceRaw: 'a/b', candidateRaw: 'a/b/c' }), undefined);
+  });
+
+  it('requires the differing token to be the matched URL value (mangolanguages 403 FP)', () => {
+    const ref = '/pathway/from/en-US/to/fr/485/1/1/1';
+    const cand = '/pathway/from/en-US/to/fr/485/1/1/4';
+    // matched on the pathway id `485`, but the sibling differs at the lesson number: not a swap of 485
+    assert.equal(diffValue({ referenceRaw: ref, candidateRaw: cand, matchedValue: '485' }), undefined);
+    // matched on `1`: the lesson-number position holds `1`, so `4` is a coherent swap
+    assert.equal(diffValue({ referenceRaw: ref, candidateRaw: cand, matchedValue: '1' }), '4');
+    assert.equal(diffValue({ referenceRaw: 'users/42', candidateRaw: 'users/43', matchedValue: '42' }), '43');
+  });
+
   it('falls back to straight inequality for non-string values', () => {
     assert.equal(diffValue({ referenceRaw: 42, candidateRaw: 43 }), '43');
     assert.equal(diffValue({ referenceRaw: 42, candidateRaw: 42 }), undefined);

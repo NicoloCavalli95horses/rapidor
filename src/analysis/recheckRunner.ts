@@ -5,6 +5,7 @@ import type { StoredFinding } from '../db/VulnerabilityStore';
 import { forgeRequestCached } from './requestForge';
 import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey } from './responseEvaluate';
 import { singleSwapPosition } from './forgeValueSensitivity';
+import { diffValue } from './matchFinder';
 import type { ResponseLike } from './requestForge';
 import { CLIENT_ROUTING_METHOD } from './findings';
 import { withParam } from '../utils/utils';
@@ -76,6 +77,8 @@ export class RecheckRunner {
       const direction = await assessDirection({ authz: finding.authzDiff as AuthzAssessment, classifier: this.deps.classifier });
       if (direction.lessRestricted) return `candidate less restricted than the reference (delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')})`;
     }
+    const misaligned = this.misalignedTokenSwap({ finding });
+    if (misaligned) return misaligned;
     // A finding the http path produced (detected over HTTP, or via its client-routing fallback): the
     // stored reference URL is the captured request, its page is that event's page_url.
     const event = finding.method !== CLIENT_ROUTING_METHOD
@@ -147,6 +150,32 @@ export class RecheckRunner {
       if (sibling && canonicalResponseKey({ status: sibling.status, body: sibling.body }) === forgedKey) return url;
     }
     return null;
+  }
+
+  /**
+   * Candidate generation's positional token rule (matchFinder.diffValue), replayed on a stored finding: the
+   * sibling's value must differ from the reference at the token the URL matched. Rebuilt from the stored
+   * swap diff (authz_diff keeps it) + the URL value that was replaced. Missing evidence → null (kept).
+   */
+  private misalignedTokenSwap({ finding }: { finding: StoredFinding }): string | null {
+    const { referenceUrl, candidateUrl, referenceValue, candidateValue } = finding;
+    const diff = ((finding.authzDiff as AuthzAssessment | undefined)?.differences ?? [])
+      .find((d) => d.reference === referenceValue && typeof d.current === 'string');
+    if (!diff) return null;
+    let matchedValue: string | undefined;
+    try {
+      const ref = new URL(referenceUrl); const cand = new URL(candidateUrl);
+      if (ref.pathname !== cand.pathname) {
+        const rs = ref.pathname.split('/'); const cs = cand.pathname.split('/');
+        const i = rs.findIndex((seg, k) => seg !== cs[k]);
+        matchedValue = i >= 0 ? decodeURIComponent(rs[i]!) : undefined;
+      } else {
+        matchedValue = [...ref.searchParams.entries()].find(([k, v]) => cand.searchParams.get(k) !== v)?.[1];
+      }
+    } catch { return null; }
+    if (matchedValue === undefined) return null;
+    if (diffValue({ referenceRaw: referenceValue, candidateRaw: diff.current, matchedValue }) === candidateValue) return null;
+    return `sibling value differs at another token than the matched URL value "${matchedValue}" (${referenceValue} -> ${String(diff.current)})`;
   }
 
   /** The http path's client-routing fallback, rebuilt from a stored finding: same param, swapped on the event's own page. */

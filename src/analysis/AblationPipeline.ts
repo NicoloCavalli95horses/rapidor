@@ -201,7 +201,7 @@ export class AblationPipeline {
         for (const hit of hits) {
           const matchBody = bodies[hit.bodyIndex];
           if (matchBody === undefined) continue;
-          for (const candidate of findJsonCandidates({ root: matchBody, path: hit.path })) {
+          for (const candidate of findJsonCandidates({ root: matchBody, path: hit.path, matchedValue: segment.value })) {
             // Blacklist applies in BOTH directions (as in the main pipeline): also skip a candidate whose
             // REPLACEMENT value is a blacklisted path-segment root (mutating an id INTO `/app` etc.).
             if (!segment.paramName && options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;

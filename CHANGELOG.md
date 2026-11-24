@@ -2,6 +2,18 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 18:36 — fix: positional token match in candidate generation + per-value expansion memo — mangolanguages 403 FPs
+
+mangolanguages flagged 4 client-routing FPs (a 403 "not authorized" page). The lesson links' `url` prop
+`/pathway/…/fr/485/1/1/1` is tokenized; the page segment `485` matched it, and `diffValue` (a token SET
+difference) returned the sibling's differing token, the lesson number `4`, which was swapped into the PATHWAY
+slot: `/fr/485/1/1 -> /fr/4/1/1`.
+
+- `matchFinder.diffValue`: positional comparison (same token count, one differing position) and, with `matchedValue`, that position must hold the matched URL value. Passed by `CandidateGenerator` and the ablation's `findJsonCandidates`.
+- `RecheckRunner` replays the rule on the stored swap diff (`authz_diff`), before any network.
+- `CandidateGenerator.expand`: the value-only expansion (preindex rows → chrome skip → siblings → value filters) is memoized per run, so a repeated segment (`/lesson/1/2/1`) or another URL with the same value reuses it; a node+path is expanded once (one preindex row per token). Same items and `matches` stat as before, minus exact duplicates.
+- Effect: offline replay on every stored finding changes only 5 rows. `recheckFindings`: mangolanguages 0/4 (all 4 FPs rejected), promova 24/25 (the `/my-plan/<id> -> /my-plan/profile` FP rejected). Unit tests: matchFinder 10/10, candidateGenerator 20/20, jsonMatchFinder 12/12, AblationPipeline 9/9. `runAnalysisFromDb`: mangolanguages 0 findings, promova 24 (9 CLIENT + 15 http), promova ablation unchanged at 138. `npm test` 377/377.
+
 ## 2026-11-24 18:31 — docs: getpronounce joins the reference set; busuu/promova expected counts refreshed
 
 The getpronounce TP must survive future decision-logic changes, so it is now a regression reference.
@@ -122,30 +134,4 @@ talkpal's analysis never finished: generation ran for 20+ min at ~4 GB RSS with 
 - **Live (talkpal, re-authenticated):** main pipeline FRESH, 31436 non-200 GETs excluded, 726
   candidates dispatched, 54 s, not infeasible, **9 findings** (3 client CLIENT, 4 client GET, 2 http
   GET). The session expires in ~3 min, so a clean end-to-end ablation run still awaits a fresh login.
-
-## 2026-11-23 19:10 — fix: recover longer paid resources — asymmetric response-length check
-
-busuu re-derived only 8 of its paid-lesson HTTP findings when ~14 are real. The 6 missing ones
-(`objective_ja_complete_a1_29/34_a/35_a/36/38_a`, `objective_8b3be45f`) pass the authz gate against the
-active lesson `5f` and forge a 200 with real content, but were dropped by the response-similarity gate.
-
-- **Why:** `getServerResponseSimilarity`'s body-length arm used a SYMMETRIC band (`checkIntSimilarity`,
-  ratio in `[0.45, 2.22]`). The reference is the single observed "active" lesson `5f` (a *writing* lesson,
-  27 KB); longer paid lessons of the same shape (identical 200 + `application/json` + 7 top-level keys) ran
-  2.25–2.64× its length and tripped the upper cap — a 4% length difference flipped the verdict (`22560674`
-  at 2.16× kept, `8b3be45f` at 2.25× dropped). A paid resource legitimately carries MORE content than the
-  reference, so a larger body is not evidence against a leak; only a much SMALLER body (stub/denial) is.
-- **What changed:** new `isLengthNotTruncated` in `responseEvaluate.ts` (keeps the lower bound — candidate
-  ≥ `0.45×` the reference — and drops the upper one); `getServerResponseSimilarity.bodyLength` now uses it.
-  Shape stays symmetric (`checkIntSimilarity` on the top-level key count) — a different-shaped response is a
-  different resource. Shared by BOTH the main pipeline and the ablation (the two analysis modules keep the
-  same tools; the ablation only differs in not using React states).
-- **Effect / regressions:** offline demo HTTP findings — busuu **8 → 14** (the +6 are exactly the longer
-  Group-A lessons, no spurious additions; the 2 Cluster-B siblings `06c5a9cd`/`2f34a6a8` stay out — they
-  fail the authz gate, a separate matter). The 4 reference sites are **unchanged**: promova 16 → 16 (same
-  set — the rule is strictly more permissive, so no finding can be lost), lingualeo/ejoy/pimsleur 0 → 0
-  (their TPs are client-routing = DOM comparison, untouched by construction). `responseEvaluate` 31/31
-  (+1 `isLengthNotTruncated` suite, +1 larger-body case), ablation 9/9, AnalysisPipeline 12/12, typecheck
-  clean. Run `recheckFindings` on the 4 live sites to confirm no stored finding is lost (guaranteed by the
-  monotonic relaxation, but it is the official gate).
 

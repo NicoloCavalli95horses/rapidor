@@ -2,6 +2,32 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-23 19:10 — fix: recover longer paid resources — asymmetric response-length check
+
+busuu re-derived only 8 of its paid-lesson HTTP findings when ~14 are real. The 6 missing ones
+(`objective_ja_complete_a1_29/34_a/35_a/36/38_a`, `objective_8b3be45f`) pass the authz gate against the
+active lesson `5f` and forge a 200 with real content, but were dropped by the response-similarity gate.
+
+- **Why:** `getServerResponseSimilarity`'s body-length arm used a SYMMETRIC band (`checkIntSimilarity`,
+  ratio in `[0.45, 2.22]`). The reference is the single observed "active" lesson `5f` (a *writing* lesson,
+  27 KB); longer paid lessons of the same shape (identical 200 + `application/json` + 7 top-level keys) ran
+  2.25–2.64× its length and tripped the upper cap — a 4% length difference flipped the verdict (`22560674`
+  at 2.16× kept, `8b3be45f` at 2.25× dropped). A paid resource legitimately carries MORE content than the
+  reference, so a larger body is not evidence against a leak; only a much SMALLER body (stub/denial) is.
+- **What changed:** new `isLengthNotTruncated` in `responseEvaluate.ts` (keeps the lower bound — candidate
+  ≥ `0.45×` the reference — and drops the upper one); `getServerResponseSimilarity.bodyLength` now uses it.
+  Shape stays symmetric (`checkIntSimilarity` on the top-level key count) — a different-shaped response is a
+  different resource. Shared by BOTH the main pipeline and the ablation (the two analysis modules keep the
+  same tools; the ablation only differs in not using React states).
+- **Effect / regressions:** offline demo HTTP findings — busuu **8 → 14** (the +6 are exactly the longer
+  Group-A lessons, no spurious additions; the 2 Cluster-B siblings `06c5a9cd`/`2f34a6a8` stay out — they
+  fail the authz gate, a separate matter). The 4 reference sites are **unchanged**: promova 16 → 16 (same
+  set — the rule is strictly more permissive, so no finding can be lost), lingualeo/ejoy/pimsleur 0 → 0
+  (their TPs are client-routing = DOM comparison, untouched by construction). `responseEvaluate` 31/31
+  (+1 `isLengthNotTruncated` suite, +1 larger-body case), ablation 9/9, AnalysisPipeline 12/12, typecheck
+  clean. Run `recheckFindings` on the 4 live sites to confirm no stored finding is lost (guaranteed by the
+  monotonic relaxation, but it is the official gate).
+
 ## 2026-11-23 14:30 — fix: lingualeo refclmark HTTP FPs — tracking-param filter
 
 A depth-4 lingualeo crawl flagged 19 findings, only 9 TP (the `wordTranslate` client-routing training siblings). The other 10 were all the SAME request: the CRM buy-page data blob `/_next/data/…/en/buy/nt_ton_prem_web_2690n.json?…&refclmark=2&campaignId=…`, HTTP-detected, swapping `refclmark` from `2` to wordset ids.
