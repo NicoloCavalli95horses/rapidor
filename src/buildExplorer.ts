@@ -66,9 +66,10 @@ export interface ObservabilityDeps {
 /**
  * @param rootUrl URL where the exploration starts (and returns to), already past redirects
  * @param site    site label in the results; defaults to the host of rootUrl
+ * @param seedUrl the start URL exactly as given (START_URL/START_URLS), before redirects: run_metadata.start_url
  */
 export function buildExplorer(
-  rootUrl: string, cfg: CrawlConfig, site: string, deps: ObservabilityDeps,
+  rootUrl: string, cfg: CrawlConfig, site: string, deps: ObservabilityDeps, seedUrl: string = rootUrl,
 ): DfsExplorer {
   const {
     network, reactState, preindex, httpEventStore, vulnerabilityStore, statsStore,
@@ -144,7 +145,7 @@ export function buildExplorer(
     network && new NetworkObserverHooks(network),
     new ReactStateHooks(reactState, preindex),
     // before AnalysisHooks: run_metadata is written as soon as the exploration ends, not after the analysis
-    new RunMetadataHooks(runMetadata, { site, startUrl: rootUrl, config: cfg }),
+    new RunMetadataHooks(runMetadata, { site, startUrl: seedUrl, config: cfg }),
     new AnalysisHooks(analysisPipeline, site,
       cfg.db.exportDemoAfterRun ? { sourceDbPath: cfg.db.path, destDbPath: cfg.db.demoPath } : undefined),
     ablationPipeline && new AblationHooks(ablationPipeline, site),

@@ -2,6 +2,24 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
+
+The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the
+param to `event.pageUrl` and probed it. But `pageUrl` is only where the XHR fired, not necessarily a
+route that honours the param — so talkpal's `mode-progress-percentage?modeType=<mode>` (XHR on
+`/sentence-mode` & `/word-mode`, pages with no `modeType` in their URL) produced one false positive
+per sibling mode: the page ignored the bogus param and rendered its own content, which read as "novel".
+
+- **What changed:** `clientRoutingQueryFallback` now drops unless `event.pageUrl` already carries
+  `paramName` in its query. A param genuinely part of the page route (pimsleur's `/…?id=`) is present,
+  so real fallbacks are untouched. Can only DROP, never add.
+- **Reference set is unaffected (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy finding
+  comes through this fallback — they are all `http` or direct `CLIENT` (method ≠ GET+client-routing).
+  Only talkpal (the 4 FPs, now dropped) and the EXCLUDED mondly had fallback rows.
+- **Reference set note:** the evaluation set is busuu/pimsleur/promova/lingualeo/ejoy (+ babbel as the
+  0-finding control). mondly (Ember) and global-exam (React+Vue hybrid) are excluded; their DB rows are
+  to be deleted. `.claude/rules/analysis.md` Regression-checks updated accordingly.
+
 ## 2026-11-24 11:05 — fix: only 200 GETs are forge references; memoized preindex lookups; early-abort generation
 
 talkpal's analysis never finished: generation ran for 20+ min at ~4 GB RSS with zero forges. Its

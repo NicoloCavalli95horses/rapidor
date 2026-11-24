@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Page } from 'playwright';
 import { RunMetadataStore, type RunMetadataRow } from '../src/db/RunMetadataStore';
-import { RunMetadataHooks, gitRevision, runConfigSnapshot } from '../src/browser/RunMetadataHooks';
+import { RunMetadataHooks, runConfigSnapshot } from '../src/browser/RunMetadataHooks';
 import { config, type CrawlConfig } from '../src/config';
 
 let root: string;
@@ -19,7 +19,7 @@ const page = {} as Page;
 
 const row = (site: string, stopReason: RunMetadataRow['stopReason'] = 'completed'): RunMetadataRow => ({
   site, startUrl: `https://${site}/`, startedAt: '2026-11-24T10:00:00.000Z', endedAt: '2026-11-24T10:45:00.000Z',
-  explorationMs: 2_700_000, stopReason, gitCommit: 'abc', config: '{}',
+  explorationMs: 2_700_000, stopReason, config: '{}',
 });
 
 describe('RunMetadataStore', () => {
@@ -47,7 +47,7 @@ describe('runConfigSnapshot', () => {
 });
 
 describe('RunMetadataHooks', () => {
-  it('writes the row at onEnd with timing, stop reason, revision and config', async () => {
+  it('writes the row at onEnd with timing, stop reason and config (no code revision: anonymous review)', async () => {
     const store = newStore();
     const hooks = new RunMetadataHooks(store, { site: 'app.test', startUrl: 'https://app.test/', config });
     await hooks.onStart();
@@ -57,7 +57,6 @@ describe('RunMetadataHooks', () => {
     assert.equal(got.stopReason, 'max-states');
     assert.equal(got.startUrl, 'https://app.test/');
     assert.ok(Date.parse(got.endedAt) >= Date.parse(got.startedAt));
-    assert.equal(got.gitCommit, gitRevision());
     assert.equal(JSON.parse(got.config).maxDepth, config.maxDepth);
   });
 
@@ -65,11 +64,5 @@ describe('RunMetadataHooks', () => {
     const broken = { record: () => { throw new Error('disk full'); } } as unknown as RunMetadataStore;
     const hooks = new RunMetadataHooks(broken, { site: 'app.test', startUrl: 'https://app.test/', config });
     await assert.doesNotReject(hooks.onEnd(page, 1, 'completed'));
-  });
-});
-
-describe('gitRevision', () => {
-  it('returns this repo HEAD (optionally -dirty)', () => {
-    assert.match(gitRevision() ?? '', /^[0-9a-f]{40}(-dirty)?$/);
   });
 });

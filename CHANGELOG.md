@@ -2,6 +2,13 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-24 19:06 — fix: `run_metadata` drops `git_commit`, stores the seed URL as given
+
+RAPIDOR goes to peer review with an anonymous repository: a public commit hash in the DB would break it.
+
+- `git_commit` removed from `RunMetadataStore`/`RunMetadataHooks` (and `gitRevision`), and dropped from `storage/crawler.db` (`ALTER TABLE run_metadata DROP COLUMN`, the 14 backfilled rows kept).
+- `start_url` is now the seed exactly as given (`request.url`, passed to `buildExplorer` as `seedUrl`), not the URL loaded after redirects. The 14 backfilled rows keep their root-state URL (the original seed is not in the DB).
+
 ## 2026-11-24 19:00 — feature: `run_metadata` table — how each site's crawl was produced
 
 The DB recorded no trace of the config, code revision or stop condition behind a crawl, so a truncated
@@ -99,21 +106,3 @@ because a different mode genuinely renders different content.
   the page-uses-param fallback gate). Decision-logic change → `recheckFindings` on the 5 reference
   sites to confirm (offline already shows no loss).
   
-## 2026-11-24 12:05 — fix: client-routing query fallback requires the page to use the param
-
-The HTTP→client-routing fallback (for a query candidate the forge did not confirm) re-applied the
-param to `event.pageUrl` and probed it. But `pageUrl` is only where the XHR fired, not necessarily a
-route that honours the param — so talkpal's `mode-progress-percentage?modeType=<mode>` (XHR on
-`/sentence-mode` & `/word-mode`, pages with no `modeType` in their URL) produced one false positive
-per sibling mode: the page ignored the bogus param and rendered its own content, which read as "novel".
-
-- **What changed:** `clientRoutingQueryFallback` now drops unless `event.pageUrl` already carries
-  `paramName` in its query. A param genuinely part of the page route (pimsleur's `/…?id=`) is present,
-  so real fallbacks are untouched. Can only DROP, never add.
-- **Reference set is unaffected (offline-proven):** no busuu/pimsleur/promova/lingualeo/ejoy finding
-  comes through this fallback — they are all `http` or direct `CLIENT` (method ≠ GET+client-routing).
-  Only talkpal (the 4 FPs, now dropped) and the EXCLUDED mondly had fallback rows.
-- **Reference set note:** the evaluation set is busuu/pimsleur/promova/lingualeo/ejoy (+ babbel as the
-  0-finding control). mondly (Ember) and global-exam (React+Vue hybrid) are excluded; their DB rows are
-  to be deleted. `.claude/rules/analysis.md` Regression-checks updated accordingly.
-

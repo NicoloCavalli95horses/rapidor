@@ -191,7 +191,7 @@ export function createCrawler(cfg: CrawlConfig = defaultConfig): PlaywrightCrawl
         }),
       );
       try {
-        await buildExplorer(rootUrl, cfg, site, { ...deps, network }).explore(page, extraPages);
+        await buildExplorer(rootUrl, cfg, site, { ...deps, network }, request.url).explore(page, extraPages);
         log.info(`${progress}Finished ${site}`);
         logAssetCacheSummary({ assetCache, site });
       } finally {
