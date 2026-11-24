@@ -24,6 +24,8 @@ import type { AblationStatsStore } from './db/AblationStatsStore';
 import type { ForgedRequestStore } from './db/ForgedRequestStore';
 import type { CrawlStateStore } from './db/CrawlStateStore';
 import type { CrawlEdgeStore } from './db/CrawlEdgeStore';
+import type { RunMetadataStore } from './db/RunMetadataStore';
+import { RunMetadataHooks } from './browser/RunMetadataHooks';
 import type { AuthzClassifier } from './analysis/authzClassifier';
 import { AnalysisPipeline } from './analysis/AnalysisPipeline';
 import { AnalysisHooks } from './browser/AnalysisHooks';
@@ -57,6 +59,7 @@ export interface ObservabilityDeps {
   forgedRequestStore: ForgedRequestStore;
   crawlStates: CrawlStateStore;
   crawlEdges: CrawlEdgeStore;
+  runMetadata: RunMetadataStore;
   classifier: AuthzClassifier;
 }
 
@@ -69,7 +72,7 @@ export function buildExplorer(
 ): DfsExplorer {
   const {
     network, reactState, preindex, httpEventStore, vulnerabilityStore, statsStore,
-    ablationVulnerabilityStore, ablationStatsStore, forgedRequestStore, crawlStates, crawlEdges, classifier,
+    ablationVulnerabilityStore, ablationStatsStore, forgedRequestStore, crawlStates, crawlEdges, runMetadata, classifier,
   } = deps;
   // 1. leaves: no dependencies on other modules
   const selectorBuilder = new SelectorBuilder({
@@ -140,6 +143,8 @@ export function buildExplorer(
     cfg.extension && new ExtensionCalls(cfg.extension, cfg.actionTimeoutMs),
     network && new NetworkObserverHooks(network),
     new ReactStateHooks(reactState, preindex),
+    // before AnalysisHooks: run_metadata is written as soon as the exploration ends, not after the analysis
+    new RunMetadataHooks(runMetadata, { site, startUrl: rootUrl, config: cfg }),
     new AnalysisHooks(analysisPipeline, site,
       cfg.db.exportDemoAfterRun ? { sourceDbPath: cfg.db.path, destDbPath: cfg.db.demoPath } : undefined),
     ablationPipeline && new AblationHooks(ablationPipeline, site),

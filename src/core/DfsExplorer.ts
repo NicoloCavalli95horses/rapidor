@@ -3,7 +3,7 @@ import { log } from 'crawlee';
 import type {
   IStabilityWaiter, IActionExecutor, IStateCapturer, IStateNavigator, IStateStore, IStateGraph, IExplorationHooks,
 } from './interfaces';
-import type { UIState, Action, ElementDescriptor } from './types';
+import type { UIState, Action, ElementDescriptor, ExplorationStopReason } from './types';
 import { formatDuration } from './duration';
 import { shuffled } from '../utils/utils';
 
@@ -31,6 +31,7 @@ const IDLE_POLL_MS = 50;
 
 export class DfsExplorer {
   private deadline = Infinity;
+  private limitHit: 'max-states' | 'max-duration' | null = null;   // first limit any tab reached (for onEnd)
   /** States with elements still to try: an idle tab takes work from another one here. */
   private frontier: UIState[] = [];
   private active = 0;   // tabs currently visiting a state
@@ -54,6 +55,9 @@ export class DfsExplorer {
   async explore(page: Page, extraPages: Page[] = []): Promise<void> {
     const startedAt = Date.now();
     this.deadline = startedAt + this.limits.maxDurationSecs * 1000;
+    this.limitHit = null;
+    // 'error' unless the DFS work settles without a worker failure (then: a limit, or the frontier ran dry)
+    let stopReason: ExplorationStopReason = 'error';
     // Set right after the DFS work itself is done (success or a worker's own failure — allSettled
     // never rejects), so it reflects "time spent clicking around", separate from onEnd's analysis
     // time below, which only starts once this value is final. Stays 0 if onStart/the root capture
@@ -68,8 +72,9 @@ export class DfsExplorer {
       explorationMs = Date.now() - startedAt;
       const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
       if (failed) throw failed.reason;
+      stopReason = this.limitHit ?? 'completed';
     } finally {
-      await this.hooks?.onEnd(page, explorationMs);
+      await this.hooks?.onEnd(page, explorationMs, stopReason);
       // even if the exploration is interrupted, the graph collected so far is saved
       await this.graph.persist();
       log.info(`Exploration finished: ${this.store.count()} states, ${this.graph.edgeCount()} edges (${formatDuration(explorationMs)})`);
@@ -193,8 +198,10 @@ export class DfsExplorer {
     let reason: string | null = null;
     if (w.saved >= this.limits.maxStates) {
       reason = `limit of ${this.limits.maxStates} states`;
+      this.limitHit ??= 'max-states';
     } else if (Date.now() >= this.deadline) {
       reason = `budget of ${this.limits.maxDurationSecs}s`;
+      this.limitHit ??= 'max-duration';
     }
     if (reason && !w.limitLogged) {
       log.warning(`Reached the ${reason}: exploration stopped`);

@@ -10,7 +10,8 @@ import { StateStore } from '../src/state/StateStore';
 import { StateGraph } from '../src/state/StateGraph';
 import { CrawlStateStore } from '../src/db/CrawlStateStore';
 import { CrawlEdgeStore } from '../src/db/CrawlEdgeStore';
-import type { IStateCapturer } from '../src/core/interfaces';
+import type { IExplorationHooks, IStateCapturer } from '../src/core/interfaces';
+import type { ExplorationStopReason } from '../src/core/types';
 import { FakeApp, FakeTabs, noWait } from './helpers/fakes';
 
 let root: string;
@@ -30,6 +31,7 @@ function run(
   limits: Partial<ExplorationLimits> = {},
   capturer?: IStateCapturer,
   restoreAttempts?: number,
+  hooks?: IExplorationHooks,
 ) {
   const { crawlStates, crawlEdges } = newPersistence();
   const cap = capturer ?? app.capturer();
@@ -38,11 +40,50 @@ function run(
   const store = new StateStore({ screenshots: false, restoreAttempts }, SITE, crawlStates);
   const graph = new StateGraph(SITE, crawlEdges);
   const explorer = new DfsExplorer(noWait, executor, cap, navigator, store, graph,
-    { maxDepth: 10, maxStates: 1000, maxDurationSecs: 3600, ...limits });
+    { maxDepth: 10, maxStates: 1000, maxDurationSecs: 3600, ...limits }, hooks);
   const states = () => crawlStates.listBySite(SITE);
   const saved = () => states().map((s) => s.id).sort();
   return { explorer, crawlStates, crawlEdges, graph, saved, states, explore: () => explorer.explore(app.page()) };
 }
+
+/** Hooks that only record what onEnd receives. */
+function endSpy() {
+  const ends: { explorationMs: number; stopReason?: ExplorationStopReason }[] = [];
+  const hooks: IExplorationHooks = {
+    onStart: async () => {},
+    onEnd: async (_page, explorationMs, stopReason) => { ends.push({ explorationMs, stopReason }); },
+  };
+  return { ends, hooks };
+}
+
+describe('DfsExplorer stop reason (passed to onEnd, persisted in run_metadata)', () => {
+  const chain = { S0: { a: 'S1' }, S1: { b: 'S2' }, S2: { c: 'S3' }, S3: {} };
+
+  it('is "completed" when the frontier runs dry', async () => {
+    const spy = endSpy();
+    await run(new FakeApp(chain), {}, undefined, undefined, spy.hooks).explore();
+    assert.deepEqual(spy.ends.map((e) => e.stopReason), ['completed']);
+  });
+
+  it('is "max-states" when a tab hits maxStates', async () => {
+    const spy = endSpy();
+    await run(new FakeApp(chain), { maxStates: 2 }, undefined, undefined, spy.hooks).explore();
+    assert.deepEqual(spy.ends.map((e) => e.stopReason), ['max-states']);
+  });
+
+  it('is "max-duration" when the time budget is spent', async () => {
+    const spy = endSpy();
+    await run(new FakeApp(chain), { maxDurationSecs: 0 }, undefined, undefined, spy.hooks).explore();
+    assert.deepEqual(spy.ends.map((e) => e.stopReason), ['max-duration']);
+  });
+
+  it('is "error" when the exploration throws (onEnd still runs)', async () => {
+    const spy = endSpy();
+    const failing: IStateCapturer = { capture: async () => { throw new Error('boom'); } };
+    await assert.rejects(run(new FakeApp(chain), {}, failing, undefined, spy.hooks).explore(), /boom/);
+    assert.deepEqual(spy.ends.map((e) => e.stopReason), ['error']);
+  });
+});
 
 describe('DfsExplorer', () => {
   it('visits all reachable states, even with cycles', async () => {

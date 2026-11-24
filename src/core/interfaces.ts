@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import type { Action, ElementDescriptor, Snapshot, UIState } from './types.js';
+import type { Action, ElementDescriptor, ExplorationStopReason, Snapshot, UIState } from './types.js';
 
 export interface IClickableExtractor { extract(page: Page): Promise<ElementDescriptor[]> }
 export interface IPageTextExtractor { extract(page: Page): Promise<string[]> }
@@ -56,8 +56,9 @@ export interface IExplorationHooks {
    * After the last state, even if the exploration was interrupted by an error. `explorationMs` is
    * the wall-clock time DfsExplorer spent clicking around, measured end to end — so AnalysisHooks
    * can log/persist it alongside its own analysis time, which only starts once this fires.
+   * `stopReason` says why it ended (RunMetadataHooks persists it); hooks that don't need it ignore it.
    */
-  onEnd(page: Page, explorationMs: number): Promise<void>;
+  onEnd(page: Page, explorationMs: number, stopReason?: ExplorationStopReason): Promise<void>;
   /** Before each action on `page` (every tab). Must never throw. Used to let the extension record
    * the current page's state before the crawler navigates away. */
   beforeAction?(page: Page): Promise<void>;

@@ -17,6 +17,7 @@ import { AblationStatsStore } from './db/AblationStatsStore';
 import { ForgedRequestStore } from './db/ForgedRequestStore';
 import { CrawlStateStore } from './db/CrawlStateStore';
 import { CrawlEdgeStore } from './db/CrawlEdgeStore';
+import { RunMetadataStore } from './db/RunMetadataStore';
 import { AuthzClassificationStore } from './db/AuthzClassificationStore';
 import { AuthzClassifier } from './analysis/authzClassifier';
 import { openDatabase } from './db/openDatabase';
@@ -90,6 +91,8 @@ export function createCrawler(cfg: CrawlConfig = defaultConfig): PlaywrightCrawl
   // the exploration's own output (states/edges), replacing the old states.json/state-graph.json
   const crawlStates = new CrawlStateStore({ db, clearOnStart: cfg.db.clearOnStart });
   const crawlEdges = new CrawlEdgeStore({ db, clearOnStart: cfg.db.clearOnStart });
+  // how each site's crawl was produced (when, code revision, effective config, why it stopped)
+  const runMetadata = new RunMetadataStore({ db, clearOnStart: cfg.db.clearOnStart });
   // classifications are a pure function of the key string, independent of site/run: kept across
   // runs by default (its own clearClassifierCache flag, not the main clearOnStart)
   const classificationStore = new AuthzClassificationStore({ db, clearOnStart: cfg.db.clearClassifierCache });
@@ -111,11 +114,12 @@ export function createCrawler(cfg: CrawlConfig = defaultConfig): PlaywrightCrawl
     forgedRequestStore.clearSite({ site });
     crawlStates.clearSite({ site });
     crawlEdges.clearSite({ site });
+    runMetadata.clearSite({ site });
   };
   const deps: Omit<ObservabilityDeps, 'network'> = {
     reactState: reactStateStore, preindex: preindexStore, httpEventStore, vulnerabilityStore, statsStore,
     ablationVulnerabilityStore, ablationStatsStore, forgedRequestStore,
-    crawlStates, crawlEdges, classifier,
+    crawlStates, crawlEdges, runMetadata, classifier,
   };
   return new PlaywrightCrawler({
     // each site has its own page (more tabs with tabsPerSite) and its own explorer: sites can run in parallel

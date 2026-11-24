@@ -117,7 +117,7 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 | `blocklist` | `logout, log out, sign out, quit, delete` | Substrings (case-insensitive) of text, `aria-label`, or `href` of elements that should never be clicked. |
 | `allowedLinkSchemes` | `http, https, javascript, about` | Allowlist of `href` URL schemes that stay inside the browser. A link to any other scheme (`mailto:`, `tel:`, `sms:`, `webcal:`, `zoommtg:`, custom app deep-links) is both dropped as a clickable and cancelled at click time, so the OS never launches an external app mid-exploration. Schemeless links (`/path`, `#anchor`, `?q`) are always kept. |
 | `db.path` | `storage/crawler.db` | Shared SQLite file for the whole run — every table the crawler writes. |
-| `db.clearOnStart` | `true` | Wipes `crawl_states`/`crawl_edges`/`http_events`/`react_states`/`preindexed_values`/`vulnerabilities`/`analysis_stats`/`ablation_vulnerabilities`/`ablation_stats`/`forged_requests` once at the start of the run. |
+| `db.clearOnStart` | `true` | Wipes `crawl_states`/`crawl_edges`/`http_events`/`react_states`/`preindexed_values`/`vulnerabilities`/`analysis_stats`/`ablation_vulnerabilities`/`ablation_stats`/`forged_requests`/`run_metadata` once at the start of the run. |
 | `db.clearClassifierCache` | `false` | Wipes `authz_classifications` and `authz_polarity` too. Off by default: a classification is a pure function of the key string, independent of site or run, so it is worth keeping forever. |
 | `analysis.maxConcurrentRequests` / `analysis.timeBetweenRequestsMs` | `3` / `250` | Bound and pace forged requests. |
 | `analysis.reportsDir` | `reports` | Where the reproduction script of each flagged finding is written (`<reportsDir>/<site>/<findingId>.repro.ts`, gitignored). |
@@ -205,6 +205,7 @@ Everything the crawler produces lives in one SQLite file, `db.path` (default `st
 
 * `crawl_states` — one row per distinct UI state (id, URL, depth, click path, clickables, visible texts), keyed by `(site, id)`. The screenshot, when `screenshots` is enabled, is a BLOB column on the same row rather than a separate file.
 * `crawl_edges` — the click graph: one row per edge (`from`, `to`, action type/target/text/selector).
+* `run_metadata` — one row per site, written as soon as the exploration ends (before the analysis): `start_url` (the root, past redirects), `started_at`/`ended_at`, `exploration_ms`, `stop_reason` (`completed` = frontier exhausted, `max-states` = a tab hit `maxStates`, `max-duration` = `maxDurationSecs` spent, `error`), `git_commit` (HEAD, `-dirty` with local changes to tracked files) and `config` (the effective `CrawlConfig` as JSON, env overrides applied, minus `userDataDir`/`startUrl`/`startUrls`). A re-crawl replaces it. It tells a complete crawl from a truncated one and which code/config produced the data.
 * `http_events`, `react_states`, `preindexed_values`, `vulnerabilities`, `analysis_stats`, `authz_classifications`, `authz_polarity` — everything from [IDOR analysis](docs/analysis.md).
 * `ablation_vulnerabilities`, `ablation_stats` — the [ablation study](docs/analysis.md#ablation-study-http-json-only)'s own findings/stats, only ever written when `analysis.ablationMode` is on. `forged_requests` — the cache shared between the main pipeline and the ablation, so the same candidate is never forged twice.
 

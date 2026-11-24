@@ -12,6 +12,9 @@ export interface ElementDescriptor {
 }
 export interface Action { type: 'click'; target: ElementDescriptor }
 
+/** Why an exploration ended: frontier exhausted, a limit (per-tab maxStates / maxDurationSecs), or a failure. */
+export type ExplorationStopReason = 'completed' | 'max-states' | 'max-duration' | 'error';
+
 /** Snapshot of the page at a given moment: what is needed to identify the state. */
 export interface Snapshot {
   id: string;
