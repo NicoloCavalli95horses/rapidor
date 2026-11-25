@@ -12,7 +12,7 @@ import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
 import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, excludeSwapDiff, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
 import { assessAuthZ, assessDirection, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
-import { CLIENT_ROUTING_METHOD, vulnerabilityId, normalizeUrl, describeExtractedSegment } from './findings';
+import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
@@ -133,7 +133,7 @@ export class CandidateEvaluator {
    * The cross-candidate DUPLICATE check that used to live here was removed: it keyed on the live
    * reactContentKey, which renders a near-identical paywall shell for every LOCKED sibling (ejoy's 1033 vs
    * 1035), so distinct paid lessons hashed equal and all but one were wrongly dropped. Cross-candidate dedup
-   * now happens deterministically on the leaked ROUTE, in `vulnerabilityId` (clientRoute) — see its doc.
+   * now happens deterministically on the swapped sibling identity, in `vulnerabilityId` (clientSwap) — see its doc.
    */
   private async keepClientRoutingByContent({ pageUrl, candidateUrl, context }: {
     pageUrl: string; candidateUrl: string; context: string;
@@ -289,14 +289,18 @@ export class CandidateEvaluator {
   }): void {
     // Semantic dedup key (see vulnerabilityId's own doc): HTTP keys on origin+method (the LAYER) +
     // the sibling-pair swap identity (stateId, refNodeId, candNodeId, path); CLIENT-ROUTING keys on the
-    // leaked ROUTE (the canonical reconciled candidateUrl), so the same lesson reached from two reference
-    // pages collapses to one. Falls back to the raw candidateUrl if URL parsing throws — never expected.
+    // SWAPPED SIBLING RESOURCE (candidate value + its URL position), carrier-independent, so the same
+    // premium capability reached at two scopes (lingualeo's word-set contexts) collapses to one — while
+    // sibling resources keep their own value. Falls back to the raw candidateUrl if URL parsing throws.
     let origin: string;
     try { origin = new URL(candidateUrl).origin; } catch { origin = candidateUrl; }
+    // position = path segment index-from-right, or the query param name — identical across carriers that
+    // differ only by a path prefix (`/word_set/8/`) or a volatile/tracking param.
+    const swapPos = segment.location === 'path' ? `path|${segment.indexFromRight ?? ''}` : `query|${segment.paramName ?? ''}`;
     const id = vulnerabilityId({
       site, origin, method,
       stateId: candidate.stateId, referenceNodeId: candidate.referenceNodeId, candidateNodeId: candidate.candidateNodeId, path: candidate.path,
-      clientRoute: method === CLIENT_ROUTING_METHOD ? normalizeUrl(candidateUrl) : undefined,
+      clientSwap: method === CLIENT_ROUTING_METHOD ? `${candidate.candidateValue}|${swapPos}` : undefined,
     });
     const inserted = this.deps.vulnerabilityStore.record({
       id, site, referenceUrl, candidateUrl, method,

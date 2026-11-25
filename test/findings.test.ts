@@ -94,16 +94,21 @@ describe('findings: vulnerabilityId', () => {
     assert.equal(vulnerabilityId(base), vulnerabilityId({ ...base }));
   });
 
-  // Client-routing findings key on the leaked ROUTE, not the React node pair: the same lesson reached
-  // from two different reference pages (different stateId/refNode) collapses to one, while sibling lessons
-  // stay distinct. This is what gets ejoy to 4/4 (the reactContentKey dedup collapsed distinct paid siblings).
-  it('keys a client-routing finding on its route, collapsing reference-page variants but not sibling routes', () => {
+  // Client-routing findings key on the SWAPPED SIBLING RESOURCE (candidate value + its URL position),
+  // carrier-independent: the same sibling reached from two reference pages collapses, sibling resources
+  // stay distinct, and — the lingualeo case — the SAME value at two scopes (`/wordMix` vs
+  // `/word_set/8/wordMix`, both last path segment → position `path|0`) collapses to one.
+  it('keys a client-routing finding on the swapped sibling identity, collapsing carrier/scope variants but not sibling values', () => {
     const clientBase = { ...base, method: CLIENT_ROUTING_METHOD };
-    const route1032 = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1032', stateId: 1, referenceNodeId: 'n-1030' });
-    const route1032again = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1032', stateId: 2, referenceNodeId: 'n-1031', candidateNodeId: 'other' });
-    const route1033 = vulnerabilityId({ ...clientBase, clientRoute: 'https://ejoy.test/courses/37/314/1033', stateId: 1, referenceNodeId: 'n-1030' });
-    assert.equal(route1032, route1032again);     // same leaked route from a different reference page → one finding
-    assert.notEqual(route1032, route1033);        // a different sibling lesson → distinct finding
+    const v1032 = vulnerabilityId({ ...clientBase, clientSwap: '1032|path|0', stateId: 1, referenceNodeId: 'n-1030' });
+    const v1032again = vulnerabilityId({ ...clientBase, clientSwap: '1032|path|0', stateId: 2, referenceNodeId: 'n-1031', candidateNodeId: 'other' });
+    const v1033 = vulnerabilityId({ ...clientBase, clientSwap: '1033|path|0', stateId: 1, referenceNodeId: 'n-1030' });
+    assert.equal(v1032, v1032again);     // same sibling from a different reference page → one finding
+    assert.notEqual(v1032, v1033);        // a different sibling lesson → distinct finding
+    // lingualeo: same premium type at two word-set scopes → identical swap identity → one finding
+    const scopeA = vulnerabilityId({ ...clientBase, clientSwap: 'wordMix|path|0' });
+    const scopeB = vulnerabilityId({ ...clientBase, clientSwap: 'wordMix|path|0', stateId: 9, referenceNodeId: 'n-ws8' });
+    assert.equal(scopeA, scopeB);
   });
 
   // The DISTINCTIONS the semantic key preserves: an api-backend leak (different origin) and a

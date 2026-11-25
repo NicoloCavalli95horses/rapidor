@@ -34,19 +34,24 @@ export const CLIENT_ROUTING_METHOD = 'CLIENT';
  * same sibling pair could theoretically be matched from two different preindex values at two different
  * fields — keeping them distinct avoids collapsing semantically different swaps.
  *
- * CLIENT-ROUTING findings key on `clientRoute` instead: their identity IS the leaked route (the reconciled
- * `candidateUrl` after rewriteCorrelatedQuery), not the React node pair. The same leaked lesson reached
- * from two different reference pages (ejoy's `/courses/37/314/1032` proposed from both the 1030 page and
- * the 1031 page) rewrites to ONE route and must collapse to one finding — while sibling lessons keep their
- * own routes. Deterministic, unlike the live reactContentKey, which renders a near-identical paywall shell
- * for every locked sibling and so cannot tell them apart.
+ * CLIENT-ROUTING findings key on `clientSwap` instead: their identity is the SWAPPED SIBLING RESOURCE
+ * (the candidate value) at its URL position (location + path-index/param-name), NOT the full route. This
+ * is carrier-independent on purpose: lingualeo exposes the SAME premium training type at two scopes
+ * (`/en/training/wordMix` and `/en/training/word_set/8/wordMix`) — same leaked capability, two word-set
+ * contexts — and keying on the whole route counted them as two (9 types × 2 → 18). The swap identity
+ * `wordMix|path|0` is identical across both, so they collapse to one (→ 9). The reference sites are
+ * unchanged: there the swapped value is already the distinguishing identity and is unique per route
+ * (ejoy lesson ids 1032..1035, promova step ids 76..84, pimsleur `?id`), so per-value and per-route
+ * keys coincide — and "same lesson from two reference pages" still collapses because the value is the
+ * same. Deterministic, unlike the live reactContentKey (a near-identical paywall shell for every locked
+ * sibling). Was `clientRoute` (normalizeUrl(candidateUrl)); that under-collapsed lingualeo's scopes.
  */
-export function vulnerabilityId({ site, origin, method, stateId, referenceNodeId, candidateNodeId, path, clientRoute }: {
+export function vulnerabilityId({ site, origin, method, stateId, referenceNodeId, candidateNodeId, path, clientSwap }: {
   site: string; origin: string; method: string; stateId: number;
-  referenceNodeId: string; candidateNodeId: string; path: (string | number)[]; clientRoute?: string;
+  referenceNodeId: string; candidateNodeId: string; path: (string | number)[]; clientSwap?: string;
 }): string {
-  if (method === CLIENT_ROUTING_METHOD && clientRoute !== undefined) {
-    return createHash('sha256').update(`site::${site}:client-route::${clientRoute}`).digest('hex');
+  if (method === CLIENT_ROUTING_METHOD && clientSwap !== undefined) {
+    return createHash('sha256').update(`site::${site}:client-swap::${clientSwap}`).digest('hex');
   }
   return createHash('sha256').update(`site::${site}:origin::${origin}:method::${method}:state::${stateId}:ref::${referenceNodeId}:cand::${candidateNodeId}:path::${path.join('.')}`).digest('hex');
 }

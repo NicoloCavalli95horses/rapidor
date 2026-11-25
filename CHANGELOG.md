@@ -2,6 +2,22 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-25 10:30 — fix: client-routing dedup keys on the swapped sibling identity, not the full route
+
+lingualeo reported 18 client-routing findings that are really 9 premium training types, each counted twice: the same type is reached at two word-set scopes (`/en/training/wordMix` and `/en/training/word_set/8/wordMix`). The `clientRoute` dedup key (`normalizeUrl(candidateUrl)`) kept the `/word_set/8/` prefix, so the two scopes hashed to different routes and did not collapse.
+
+- Why: the leaked *capability* is the training TYPE; the word-set is orthogonal (which words, not which paid feature). Counting type×scope double-counts the same leak and inflates the TP count.
+- What: `vulnerabilityId` client-routing branch now keys on `clientSwap` = `candidateValue|location|position` (path index-from-right, or query param name) instead of `clientRoute`. Carrier-independent: identical across a path-prefix or volatile-param difference. `candidateEvaluator.recordFinding` builds the key; `normalizeUrl` is no longer used there.
+- Effect: lingualeo 18 → 9. Proven from the stored rows (distinct `candidateValue|location|segment_index` per site): ejoy 4, pimsleur 4, promova 9-CLIENT, rocketlanguages 1, babbel 2 all unchanged — in the reference sites the swapped value is already unique per route, so per-value and per-route keys coincide, and "same sibling from two reference pages" still collapses. Client-routing only; HTTP findings (busuu, getpronounce, promova's 15 http) use the unchanged branch. Validated with `runAnalysisFromDb` on lingualeo/ejoy/promova/pimsleur.
+
+## 2026-11-25 09:00 — fix: never forge our own `[non-serializable:...]` placeholder as a candidate value
+
+A re-analysis of babbel (negative control) produced a spurious client-routing finding whose candidate value was the literal string `[non-serializable:undefined]` — the marker the browser extension stringifies an unserializable React prop into (`[non-serializable:<ctor>]`). It is our own placeholder, never a value the app uses as an identifier, so forging it into a path/route is meaningless.
+
+- Why: the sibling React node's swapped leaf was an `undefined` prop → serialized to `[non-serializable:undefined]`; candidate generation used it as a replacement value, producing a FP (babbel path swap `0ecaf91… -> [non-serializable:undefined]`, which also compared a `placement_test` widget against a lesson).
+- What: new `isNonSerializableMarker` in `candidateGenerator.ts`, applied beside `segmentBlacklist`/`sameIdShape` in `expand()` — a candidate whose replacement value matches `^\[non-serializable:.*\]$` is dropped. Main pipeline only (the marker is a React artifact; the ablation reads JSON bodies, where it never appears).
+- Effect: babbel 3 → 2 findings (the two `content_release_id` client-routing swaps remain, under manual TP/FP review). Provable no-op elsewhere: across the whole DB only babbel's one finding had a marker as `candidate_value`, so no reference-site TP is affected (no full reference re-run needed).
+
 ## 2026-11-24 21:40 — feature: `node.dom` = the element's opening tag (extension build 57); chrome zone reads only the element's own tag
 
 The extension stored each node's full `outerHTML`, repeating every subtree at each ancestor, although the chrome-zone skip only needs the element's own tag/role/class.

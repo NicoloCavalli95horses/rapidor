@@ -73,6 +73,17 @@ export function sameIdShape({ original, replacement }: { original: string; repla
   return numeric(original) === numeric(replacement);
 }
 
+/**
+ * The browser extension stringifies a React prop it cannot serialize as the literal marker
+ * `[non-serializable:<ctor>]` (an `undefined`/function/symbol leaf becomes `[non-serializable:undefined]`).
+ * It is OUR placeholder, never a value the app uses as an identifier, so it must never be forged into a
+ * request or a forced route — babbel's lesson-player path swap `0ecaf91… -> [non-serializable:undefined]`
+ * was a spurious client-routing FP. Drop it as a candidate replacement value.
+ */
+export function isNonSerializableMarker({ value }: { value: string }): boolean {
+  return /^\[non-serializable:.*\]$/.test(value.trim());
+}
+
 /** One proposed swap: the extracted segment and a sibling-component replacement value for it. */
 export interface UrlCandidate {
   segment: SegmentCandidate;
@@ -235,6 +246,8 @@ export class CandidateGenerator {
         // (ejoy's /website-directory -> /app), which is the same section-swap false positive seen
         // from the other side.
         if (segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
+        // never forge our own non-serializable placeholder (see isNonSerializableMarker)
+        if (isNonSerializableMarker({ value: String(candidate.candidateValue) })) continue;
         // the slot keeps its type (numeric <-> non-numeric is a different kind of link, see sameIdShape)
         if (!sameIdShape({ original: value, replacement: String(candidate.candidateValue) })) continue;
         out.candidates.push(candidate);
