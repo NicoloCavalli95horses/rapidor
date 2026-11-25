@@ -331,7 +331,9 @@ export class AblationPipeline {
     this.forgeValueSensitivity.defer({
       template, forgedKey, context,
       recordHttp: () => {
-        const id = ablationVulnerabilityId({ candidateValue: candidate.candidateValue, path: candidate.candidatePath, method: event.method, url });
+        let origin: string;
+        try { origin = new URL(url).origin; } catch { origin = url; }
+        const id = ablationVulnerabilityId({ site, origin, method: event.method, referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue, path: candidate.candidatePath });
         const inserted = vulnerabilityStore.record({
           id, site,
           referenceUrl: event.url, candidateUrl: url, method: event.method,
@@ -379,10 +381,15 @@ function parseJsonBody(responseBody: string | undefined): unknown {
   }
 }
 
-/** Same dedup-id shape as AnalysisPipeline's vulnerabilityId, substituting the JSON candidate path
- * for a React nodeId (there is no node here, only a position inside a JSON array). */
-function ablationVulnerabilityId({ candidateValue, path, method, url }: {
-  candidateValue: string; path: (string | number)[]; method: string; url: string;
+/**
+ * Mirrors AnalysisPipeline's vulnerabilityId (HTTP branch): keyed on the LAYER (`origin`+`method`) and
+ * the swapped SIBLING PAIR, carrier-independent — the full `url` is EXCLUDED so one leak reached from two
+ * carriers (promova's lesson 77 under two `/my-plan/<plan>/` segments, or differing only by `_rsc`)
+ * collapses to one row, as it already does in the main pipeline. The JSON `referenceValue -> candidateValue`
+ * + the candidate's array-path play the React node pair + `path` the main keys on (there is no node here).
+ */
+function ablationVulnerabilityId({ site, origin, method, referenceValue, candidateValue, path }: {
+  site: string; origin: string; method: string; referenceValue: string; candidateValue: string; path: (string | number)[];
 }): string {
-  return createHash('sha256').update(`ablation::${candidateValue}:path:${JSON.stringify(path)}http::${method}:${url}`).digest('hex');
+  return createHash('sha256').update(`ablation::site::${site}:origin::${origin}:method::${method}:swap::${referenceValue}->${candidateValue}:path::${JSON.stringify(path)}`).digest('hex');
 }

@@ -2,6 +2,17 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-24 19:00 — feature: `run_metadata` table — how each site's crawl was produced
+
+The DB recorded no trace of the config, code revision or stop condition behind a crawl, so a truncated
+crawl looked like a complete one and the data's provenance (needed for the Zenodo artifact) was unknown.
+`analysis_stats.exploration_ms` is also overwritten with 0 by `runAnalysisFromDb` (duolingo, talkpal).
+
+- New `RunMetadataStore` (`run_metadata`, one row per site) written by `RunMetadataHooks` at the end of the exploration, before `AnalysisHooks`: start URL, start/end, `exploration_ms`, `stop_reason`, `git_commit` (`-dirty` aware), effective config JSON (without `userDataDir`/`startUrl(s)`). Wiped by `clearOnStart` and by the per-domain overwrite like the other per-site tables. Not written by `runAnalysisFromDb` (a debug path).
+- `DfsExplorer` reports why it stopped: `IExplorationHooks.onEnd` gets an optional `stopReason` (`completed`/`max-states`/`max-duration`/`error`).
+- Backfilled the 14 sites crawled 22–24/11 (one-off, outside the repo): exploration code and config unchanged since the first crawl (verified by `git diff`), commit = last before the crawl, `exploration_ms` from `analysis_stats` (state-timestamp span for duolingo/talkpal), `stop_reason` inferred: max-duration celpip/duolingo/pimsleur/lingualeo, max-states clozemaster, completed the rest.
+- Tests: `RunMetadataHooks.test.ts` (5), `DfsExplorer.test.ts` +4 stop-reason cases.
+
 ## 2026-11-24 18:36 — fix: positional token match in candidate generation + per-value expansion memo — mangolanguages 403 FPs
 
 mangolanguages flagged 4 client-routing FPs (a 403 "not authorized" page). The lesson links' `url` prop

@@ -2,6 +2,14 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-25 19:20 — fix: ablation finding id mirrors the main (carrier-independent)
+
+The ablation's `vulnerabilityId` kept the full candidate url, so one leak reached from two carriers counted twice (promova's lessons 76/77/78 under two `/my-plan/<plan>/` segments: 6 rows for 3 resources). The main pipeline's id already excludes the url (keys on origin+method+sibling-pair+path).
+
+- Why: main and ablation must count the same way; carrier variation is not a distinct finding.
+- What: `ablationVulnerabilityId` now keys on `site`+`origin`+`method`+`referenceValue->candidateValue`+candidate JSON path, url excluded. Test in `test/AblationPipeline.test.ts` (two carriers -> one finding).
+- Effect: promova ablation 6 -> 3 (lessons 76/77/78, all TP). Different origins stay distinct. talkpal unchanged (its 2 are distinct siblings). The id is deterministic, so a re-run restamps rows. (courses.api lesson 77 dropped separately: its live re-forge now returns 403 — expired bearer — so the error-status guard excludes it; it was a TP at crawl time under a valid session.)
+
 ## 2026-11-25 17:30 — fix: authz gate rejects a value-only signal contradicted by an equal entitlement key
 
 Promova's ablation flagged 101 `/ai-tutor/999 -> /ai-tutor/<n>` swaps (plus 2 `my-plan/…/999`). The gate passed on the tag VALUE `free_talk` ("free"), while the explicit `free` key was `false` on all 171 lessons. The forged RSC payload is the same page shell (echoed id + per-render RSC key + deploy ids), so nothing leaked. The main pipeline never proposes these swaps: the catalog is not rendered as sibling components carrying ids.
@@ -61,14 +69,3 @@ RAPIDOR goes to peer review with an anonymous repository: a public commit hash i
 
 - `git_commit` removed from `RunMetadataStore`/`RunMetadataHooks` (and `gitRevision`), and dropped from `storage/crawler.db` (`ALTER TABLE run_metadata DROP COLUMN`, the 14 backfilled rows kept).
 - `start_url` is now the seed exactly as given (`request.url`, passed to `buildExplorer` as `seedUrl`), not the URL loaded after redirects. The 14 backfilled rows keep their root-state URL (the original seed is not in the DB).
-
-## 2026-11-24 19:00 — feature: `run_metadata` table — how each site's crawl was produced
-
-The DB recorded no trace of the config, code revision or stop condition behind a crawl, so a truncated
-crawl looked like a complete one and the data's provenance (needed for the Zenodo artifact) was unknown.
-`analysis_stats.exploration_ms` is also overwritten with 0 by `runAnalysisFromDb` (duolingo, talkpal).
-
-- New `RunMetadataStore` (`run_metadata`, one row per site) written by `RunMetadataHooks` at the end of the exploration, before `AnalysisHooks`: start URL, start/end, `exploration_ms`, `stop_reason`, `git_commit` (`-dirty` aware), effective config JSON (without `userDataDir`/`startUrl(s)`). Wiped by `clearOnStart` and by the per-domain overwrite like the other per-site tables. Not written by `runAnalysisFromDb` (a debug path).
-- `DfsExplorer` reports why it stopped: `IExplorationHooks.onEnd` gets an optional `stopReason` (`completed`/`max-states`/`max-duration`/`error`).
-- Backfilled the 14 sites crawled 22–24/11 (one-off, outside the repo): exploration code and config unchanged since the first crawl (verified by `git diff`), commit = last before the crawl, `exploration_ms` from `analysis_stats` (state-timestamp span for duolingo/talkpal), `stop_reason` inferred: max-duration celpip/duolingo/pimsleur/lingualeo, max-states clozemaster, completed the rest.
-- Tests: `RunMetadataHooks.test.ts` (5), `DfsExplorer.test.ts` +4 stop-reason cases.

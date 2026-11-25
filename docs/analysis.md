@@ -87,6 +87,8 @@ Exploration (t1) and a `runAnalysisFromDb` re-analysis (t2) can be far apart, bu
 * **Shared forged-request cache** ([src/db/ForgedRequestStore.ts](../src/db/ForgedRequestStore.ts)) — keyed by `(site, method, url, body)`: if the main pipeline already forged the exact same candidate (the two often propose the same id swap from two different sources), the ablation reuses that response instead of hitting the live site again, and vice versa.
 * **Structurally narrower by construction, not by omission** — there is no equivalent of the client-routing probes: those resolve their oracle from a DOM-mutation signal (did the app's own rendering react?), which has no network counterpart at all. A query param or path segment an SPA only ever reads client-side is invisible to a network-only analysis, full stop.
 
+The finding dedup id mirrors the main pipeline's `vulnerabilityId` (HTTP branch): keyed on `origin`+`method` (the layer) + the swapped sibling pair (`referenceValue -> candidateValue` + the candidate's JSON array-path), the full carrier url EXCLUDED, so one leak reached from two carriers (promova's lesson 77 under two `/my-plan/<plan>/` segments, or `_rsc`-only differences) collapses to one row exactly as it does in the main pipeline.
+
 Findings land in their own tables — `ablation_vulnerabilities`/`ablation_stats` — never mixed with `vulnerabilities`/`analysis_stats`, so the two are always comparable:
 
 ```bash

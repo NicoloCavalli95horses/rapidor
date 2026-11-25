@@ -51,6 +51,9 @@ before(async () => {
     if (pathname === '/api/listing') { res.end(LISTING_BODY); return; }
     const q = new URL(req.url ?? '/', 'http://x').searchParams;
     if (pathname === '/api/item') { res.end(JSON.stringify({ id: q.get('id'), title: 'solo item' })); return; }
+    // carrier-echoing route: the forged body differs per carrier (so the forged-body dedup does NOT
+    // collapse two carriers) yet the swap is the same resource — only the vulnerabilityId can collapse it.
+    if (pathname.startsWith('/plan/')) { res.end(JSON.stringify({ users: USERS, carrier: pathname.split('/')[2], req: q.get('id') })); return; }
     if (pathname === '/api/static') { res.end(BODY); return; }   // ignores the value: always the reference body
     if (pathname === '/api/default') { res.end(JSON.stringify({ users: THREE_USERS, requested: 'default' })); return; }   // falls back to a default
     if (pathname === '/api/nested') { res.end(JSON.stringify({ items: NESTED_ITEMS, requested: q.get('id') })); return; }
@@ -323,5 +326,18 @@ describe('AblationPipeline', () => {
     recordEvent(httpEventStore, site, `${baseUrl}/api/nested?id=101`, JSON.stringify({ items: NESTED_ITEMS, requested: '101' }));
     await pipeline.runForSite({ page: await newPage(), site });
     assert.equal(vulnerabilityStore.count(site), 0);
+  });
+
+  // vulnerabilityId collapses carriers (mirrors the main pipeline): the SAME swap reached from two
+  // carrier URLs is one finding, even when the two forged bodies differ (so the forged-body dedup
+  // can't collapse them). promova's lesson 77 under two /my-plan/<plan>/ segments is the real case.
+  it('records ONE finding for the same swap reached from two different carrier URLs', async () => {
+    const { pipeline, httpEventStore, vulnerabilityStore, classifier } = newPipeline();
+    primeClassifier(classifier);
+    const site = 'app.test';
+    recordEvent(httpEventStore, site, `${baseUrl}/plan/A/users?id=101`, JSON.stringify({ users: USERS, carrier: 'A', req: '101' }));
+    recordEvent(httpEventStore, site, `${baseUrl}/plan/B/users?id=101`, JSON.stringify({ users: USERS, carrier: 'B', req: '101' }));
+    await pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(vulnerabilityStore.count(site), 1, 'two carriers of the same swap collapse to one finding');
   });
 });

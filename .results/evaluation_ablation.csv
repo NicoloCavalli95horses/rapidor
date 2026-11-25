@@ -3,7 +3,7 @@ https://www.duolingo.com/learn,x,0,0,0,,
 https://www.clozemaster.com/l/ita-eng/stories,x,0,0,0,,
 https://www.celpipsimulator.com/dashboard/exams,x,0,0,0,,
 https://www.busuu.com/dashboard/timeline/a1,x,0,0,0,,
-https://promova.com/my-plan/appyj8hJ1VFshCjHj,x,7,,,,"da etichettare: 6 /my-plan/<plan>/<step> (SSR, lezioni 76/77/78 x 2 piani) + 1 courses.api steps 73 -> 77; stesse lezioni dei TP del main (3 risorse)"
+https://promova.com/my-plan/appyj8hJ1VFshCjHj,x,3,3,0,1.00,"3 risorse (lezioni 76/77/78 via SSR /my-plan, free:true->false), tutte TP. vulnerabilityId allineato al main: i 2 piani (carrier) collassano in 1 per lezione (prima 6). courses.api (lezione 77, layer API) non piu presente: forge live ora 403 (bearer scaduto); era un TP a t1 sotto sessione valida."
 https://my.babbel.com/dashboard/inprogress,x,0,0,0,,
 https://memrise-stories.replit.app/library,x,0,0,0,,
 https://lingualeo.com/en/training,x,0,0,0,,
@@ -11,6 +11,6 @@ https://learn.pimsleur.com/MiniLearn,x,0,0,0,,
 https://learn.mangolanguages.com/pathway/from/en-US/to/fr/798/1/1,x,0,0,0,,
 https://ejoy-english.com/app/courses/37/314,x,0,0,0,,
 https://arabicroad.com,x,0,0,0,,
-https://app.talkpal.ai/dashboard?redirect=%2Fdashboard,x,2,,,,"da etichettare: /roleplays/<id> -> /roleplays/<id> (RSC), 2 swap"
+https://app.talkpal.ai/dashboard?redirect=%2Fdashboard,x,2,0,2,0.00,"FP: i sibling sono episodi podcast messi nella route /roleplays/<id>; isUnlocked e durationMs esistono solo sul podcast, non e una risorsa paid-gated dello stesso tipo."
 https://app.rocketlanguages.com/members/products/186/dashboard,x,0,0,0,,
 https://app.getpronounce.com/courses/HZnLJPJ2ut?unit=6AXfdnWxKD,x,0,0,0,,
