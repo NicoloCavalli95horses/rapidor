@@ -2,6 +2,14 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-25 17:30 — fix: authz gate rejects a value-only signal contradicted by an equal entitlement key
+
+Promova's ablation flagged 101 `/ai-tutor/999 -> /ai-tutor/<n>` swaps (plus 2 `my-plan/…/999`). The gate passed on the tag VALUE `free_talk` ("free"), while the explicit `free` key was `false` on all 171 lessons. The forged RSC payload is the same page shell (echoed id + per-render RSC key + deploy ids), so nothing leaked. The main pipeline never proposes these swaps: the catalog is not rendered as sibling components carrying ids.
+
+- Why: an entitlement key equal on both sides is positive evidence of the same privilege; a value that merely contains an authz word is not.
+- What: `assessAuthZ` returns `nameKeys` (hits from key/path names). `httpGuards.authzGateVerdict` (shared, main + ablation) rejects when `nameKeys` is empty and the swapped resource has an authz-relevant key with an equal flag/term value. Value-only verdicts without such a key (string enums) are unchanged. Tests in `test/httpGuards.test.ts`. New `scripts/debug/authzGateAudit.ts` (`--trace`, `--value-only`), and `ablationFunnel.ts --trace`.
+- Effect: main unchanged, since all 59 stored findings on the 8 sites with findings pass by key name (audit, 0 rejected); `recheckFindings` cannot test this rule. Ablation: promova 110 → 7 (6 SSR `my-plan` + 1 `courses.api`, lessons 76/77/78, the main's TPs), talkpal 2 → 2. Sites with 0 findings cannot change (the guard only removes).
+
 ## 2026-11-25 14:40 — fix: ablation aligned with the main pipeline (shared decision code)
 
 The ablation must differ from the main pipeline ONLY in the sibling source (JSON bodies vs React components). It was judging candidates more leniently: no diff scoping, the swapped id counted as its own evidence, no `isIdenticalResponse`, no value-insensitivity.
@@ -64,15 +72,3 @@ crawl looked like a complete one and the data's provenance (needed for the Zenod
 - `DfsExplorer` reports why it stopped: `IExplorationHooks.onEnd` gets an optional `stopReason` (`completed`/`max-states`/`max-duration`/`error`).
 - Backfilled the 14 sites crawled 22–24/11 (one-off, outside the repo): exploration code and config unchanged since the first crawl (verified by `git diff`), commit = last before the crawl, `exploration_ms` from `analysis_stats` (state-timestamp span for duolingo/talkpal), `stop_reason` inferred: max-duration celpip/duolingo/pimsleur/lingualeo, max-states clozemaster, completed the rest.
 - Tests: `RunMetadataHooks.test.ts` (5), `DfsExplorer.test.ts` +4 stop-reason cases.
-
-## 2026-11-24 18:36 — fix: positional token match in candidate generation + per-value expansion memo — mangolanguages 403 FPs
-
-mangolanguages flagged 4 client-routing FPs (a 403 "not authorized" page). The lesson links' `url` prop
-`/pathway/…/fr/485/1/1/1` is tokenized; the page segment `485` matched it, and `diffValue` (a token SET
-difference) returned the sibling's differing token, the lesson number `4`, which was swapped into the PATHWAY
-slot: `/fr/485/1/1 -> /fr/4/1/1`.
-
-- `matchFinder.diffValue`: positional comparison (same token count, one differing position) and, with `matchedValue`, that position must hold the matched URL value. Passed by `CandidateGenerator` and the ablation's `findJsonCandidates`.
-- `RecheckRunner` replays the rule on the stored swap diff (`authz_diff`), before any network.
-- `CandidateGenerator.expand`: the value-only expansion (preindex rows → chrome skip → siblings → value filters) is memoized per run, so a repeated segment (`/lesson/1/2/1`) or another URL with the same value reuses it; a node+path is expanded once (one preindex row per token). Same items and `matches` stat as before, minus exact duplicates.
-- Effect: offline replay on every stored finding changes only 5 rows. `recheckFindings`: mangolanguages 0/4 (all 4 FPs rejected), promova 24/25 (the `/my-plan/<id> -> /my-plan/profile` FP rejected). Unit tests: matchFinder 10/10, candidateGenerator 20/20, jsonMatchFinder 12/12, AblationPipeline 9/9. `runAnalysisFromDb`: mangolanguages 0 findings, promova 24 (9 CLIENT + 15 http), promova ablation unchanged at 138. `npm test` 377/377.

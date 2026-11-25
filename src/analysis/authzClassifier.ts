@@ -154,6 +154,8 @@ export interface AuthzAssessment {
   isAuthzRelevant: boolean;
   differences: PropDiff[];
   sensitiveKeys: string[];
+  // the subset of sensitiveKeys hit by a key/path NAME (empty = the verdict rests on values only)
+  nameKeys?: string[];
 }
 
 // A value that is a URL, path or filename is an ASSET reference, not an access-control state. A key
@@ -182,6 +184,7 @@ export async function assessAuthZ({ differences, classifier }: {
   await Promise.all(tokens.map(async (t) => { relevant.set(t, (await classifier.classify(t)).isAuthZRelevant); }));
   const isRel = (v: unknown): v is string => typeof v === 'string' && relevant.get(v) === true;
 
+  const nameKeys = new Set<string>();
   const sensitiveKeys = [...new Set(differences.flatMap((d) => {
     const hits: string[] = [];
     // A value that is itself an authz term always counts (string enums like `premium`/`locked`).
@@ -189,12 +192,12 @@ export async function assessAuthZ({ differences, classifier }: {
     if (isRel(d.reference)) hits.push(d.reference);
     // A key/path that reads like an entitlement counts only if the differing value is not an asset URL.
     const nameHit = [d.key, d.pathStr].find(isRel);
-    if (nameHit !== undefined && !valueLooksLikeAsset(d.current) && !valueLooksLikeAsset(d.reference)) hits.push(nameHit);
+    if (nameHit !== undefined && !valueLooksLikeAsset(d.current) && !valueLooksLikeAsset(d.reference)) { hits.push(nameHit); nameKeys.add(nameHit); }
     return hits;
   }))];
 
   const hasAnyDifference = differences.some((d) => d.reference !== d.current);
-  return { isAuthzRelevant: hasAnyDifference && sensitiveKeys.length > 0, differences, sensitiveKeys };
+  return { isAuthzRelevant: hasAnyDifference && sensitiveKeys.length > 0, differences, sensitiveKeys, nameKeys: [...nameKeys] };
 }
 
 // A term must be at least this likely to be about paid access (NLI relevance) to cast a direction vote,

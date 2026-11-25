@@ -3,7 +3,8 @@
 // (httpGuards, isIdenticalResponse, value-insensitivity). No network; writes nothing but the authz
 // classifier cache. Also checks whether the ablation re-proposes each of the main pipeline's HTTP
 // findings, and counts the live forges a real run would still need (`3.notInForgeCache` > 0 → the
-// session must be valid). Usage: npx tsx scripts/debug/ablationFunnel.ts <site> [<site> ...]
+// session must be valid). Usage: npx tsx scripts/debug/ablationFunnel.ts <site> [<site> ...] [--trace <ref-url substring>]
+// --trace prints every step for the candidates whose reference url contains the substring.
 import { openDatabase } from '../../src/db/openDatabase';
 import { HttpEventStore } from '../../src/db/HttpEventStore';
 import { CrawlStateStore } from '../../src/db/CrawlStateStore';
@@ -18,6 +19,12 @@ import { authzGateVerdict, httpContentGuardReason } from '../../src/analysis/htt
 import { ForgeValueSensitivity, forgeTemplateKey } from '../../src/analysis/forgeValueSensitivity';
 import { normalizeUrl } from '../../src/analysis/findings';
 import { config } from '../../src/config';
+import { describeDiffs } from '../../src/analysis/responseEvaluate';
+
+const args = process.argv.slice(2);
+const traceAt = args.indexOf('--trace');
+const TRACE = traceAt >= 0 ? args.splice(traceAt, 2)[1] : undefined;
+const short = (v: unknown, n = 160) => { const t = typeof v === 'string' ? v : JSON.stringify(v); return t.length > n ? `${t.slice(0, n)}…` : t; };
 
 const db = openDatabase({ path: config.db.path });
 const httpEventStore = new HttpEventStore({ db, clearOnStart: false });
@@ -29,7 +36,7 @@ const { maxSegmentMatches, paramBlacklist, segmentBlacklist, authzDirectionGate 
 const bump = (m: Record<string, number>, k: string, n = 1) => { m[k] = (m[k] ?? 0) + n; };
 const parse = (b?: string) => { if (!b) return undefined; try { const p = JSON.parse(b); return p && typeof p === 'object' ? p : undefined; } catch { return undefined; } };
 
-for (const site of process.argv.slice(2)) {
+for (const site of args) {
   const events = httpEventStore.listMetaBySite(site);
   const bodies: unknown[] = new Array(events.length);
   const history = new Set<string>();
@@ -77,6 +84,10 @@ for (const site of process.argv.slice(2)) {
           const key = `${event.method}|${normalizeUrl(url)}`;
           if (seen.has(key)) { bump(gen, 'cand.dupUrl'); continue; }
           seen.add(key); tasks.push({ event, url, c, seg });
+          if (TRACE && event.url.includes(TRACE)) {
+            const src = events[hit.bodyIndex]!;
+            console.log(`  TRACE gen ${seg.value} -> ${c.candidateValue} | matched in body #${hit.bodyIndex} (${src.method} ${short(src.url, 120)}) at ${JSON.stringify(c.referencePath)} | sibling at ${JSON.stringify(c.candidatePath)} | carriers=${carriers.get(seg.value)?.size ?? 0} hits=${hits.length}`);
+          }
         }
       }
     }
@@ -102,6 +113,8 @@ for (const site of process.argv.slice(2)) {
   const recordedKeys = new Set<string>();
   for (const { event, url, c, seg } of tasks) {
     const verdict = await authzGateVerdict({ referenceProps: c.referenceProps, candidateProps: c.candidateProps, swapPath: ['props', ...c.swapPath], classifier, directionGate: authzDirectionGate });
+    const tr = TRACE !== undefined && event.url.includes(TRACE);
+    if (tr) console.log(`  TRACE authz ${c.candidateValue}: swapPath=${JSON.stringify(c.swapPath)} | ${verdict.reject ?? `PASS keys=${JSON.stringify(verdict.authz.sensitiveKeys)}`} | scoped diff: ${short(describeDiffs(verdict.reject !== undefined ? verdict.differences : verdict.authz.differences), 300)}`);
     if (verdict.reject !== undefined) { bump(ev, verdict.reject.startsWith('candidate less') ? '2.authz.direction' : '1.authz.notRelevant'); continue; }
     const f = forged.get({ site, method: event.method, url, postData: event.postData });
     if (!f) { bump(ev, '3.notInForgeCache'); continue; }
@@ -110,7 +123,9 @@ for (const site of process.argv.slice(2)) {
     sensitivity.observe({ template, forgedKey: fk, value: c.candidateValue });
     const refBody = event.id !== undefined ? httpEventStore.getResponseBody({ site, id: event.id }) : undefined;
     const orig = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: refBody ?? '', contentType: event.contentType };
-    if (!getServerResponseSimilarity(orig, f).areSimilar) { bump(ev, '4.notSimilar'); continue; }
+    const sim = getServerResponseSimilarity(orig, f);
+    if (tr) console.log(`  TRACE forge ${c.candidateValue}: status ${orig.status}->${f.status} | bytes ${orig.body.length}->${f.body.length} | similar=${sim.areSimilar} identical=${isIdenticalResponse({ reference: orig, candidate: f })} | content guard=${httpContentGuardReason({ forged: f, original: orig, responseHistoryKeys: history }) ?? 'pass'} | forgedKey=${fk?.slice(0, 12)}`);
+    if (!sim.areSimilar) { bump(ev, '4.notSimilar'); continue; }
     if (isIdenticalResponse({ reference: orig, candidate: f })) { bump(ev, '5.identicalToReference'); continue; }
     const reason = httpContentGuardReason({ forged: f, original: orig, responseHistoryKeys: history });
     if (reason !== null) { bump(ev, `6.${reason.split(/[:—,]/)[0]!.trim()}`); continue; }

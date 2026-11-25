@@ -2,6 +2,18 @@
 
 Older entries moved out of [CHANGELOG.md](../CHANGELOG.md), newest first.
 
+## 2026-11-24 18:36 — fix: positional token match in candidate generation + per-value expansion memo — mangolanguages 403 FPs
+
+mangolanguages flagged 4 client-routing FPs (a 403 "not authorized" page). The lesson links' `url` prop
+`/pathway/…/fr/485/1/1/1` is tokenized; the page segment `485` matched it, and `diffValue` (a token SET
+difference) returned the sibling's differing token, the lesson number `4`, which was swapped into the PATHWAY
+slot: `/fr/485/1/1 -> /fr/4/1/1`.
+
+- `matchFinder.diffValue`: positional comparison (same token count, one differing position) and, with `matchedValue`, that position must hold the matched URL value. Passed by `CandidateGenerator` and the ablation's `findJsonCandidates`.
+- `RecheckRunner` replays the rule on the stored swap diff (`authz_diff`), before any network.
+- `CandidateGenerator.expand`: the value-only expansion (preindex rows → chrome skip → siblings → value filters) is memoized per run, so a repeated segment (`/lesson/1/2/1`) or another URL with the same value reuses it; a node+path is expanded once (one preindex row per token). Same items and `matches` stat as before, minus exact duplicates.
+- Effect: offline replay on every stored finding changes only 5 rows. `recheckFindings`: mangolanguages 0/4 (all 4 FPs rejected), promova 24/25 (the `/my-plan/<id> -> /my-plan/profile` FP rejected). Unit tests: matchFinder 10/10, candidateGenerator 20/20, jsonMatchFinder 12/12, AblationPipeline 9/9. `runAnalysisFromDb`: mangolanguages 0 findings, promova 24 (9 CLIENT + 15 http), promova ablation unchanged at 138. `npm test` 377/377.
+
 ## 2026-11-24 18:31 — docs: getpronounce joins the reference set; busuu/promova expected counts refreshed
 
 The getpronounce TP must survive future decision-logic changes, so it is now a regression reference.
