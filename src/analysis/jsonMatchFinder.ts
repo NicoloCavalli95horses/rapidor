@@ -94,6 +94,9 @@ export interface JsonCandidate {
   candidateValue: string;
   referenceProps: unknown;   // the sibling object itself, for compareObj — same role as a React node's `props`
   candidateProps: unknown;
+  // the swapped leaf's path INSIDE referenceProps/candidateProps: the analog of MatchCandidate.path, so the
+  // shared authz gate can scope the diff to the swapped resource (see httpGuards.authzGateVerdict)
+  swapPath: (string | number)[];
 }
 
 interface ArrayAncestor {
@@ -159,7 +162,7 @@ export function findJsonCandidates({ root, path, matchedValue }: {
       candidates.push({
         referencePath: [...arrayPath, itemIndex, ...relPath], candidatePath,
         referenceValue: referenceRaw, candidateValue,
-        referenceProps: referenceItem, candidateProps: candidateItem,
+        referenceProps: referenceItem, candidateProps: candidateItem, swapPath: relPath,
       });
     }
   }

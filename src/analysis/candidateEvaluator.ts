@@ -10,14 +10,15 @@ import { type SegmentCandidate } from './segments';
 import { forgeRequestCached, type ResponseLike } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, isEmptyJsonResponse, isErrorEnvelopeResponse, compareObj, scopeDiffsToResource, excludeSwapDiff, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
-import { assessAuthZ, assessDirection, type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
+import { type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
 import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
 import { ClientSiblingGroups } from './clientSiblingGroups';
 import { ForgeValueSensitivity, forgeTemplateKey } from './forgeValueSensitivity';
+import { authzGateVerdict, httpContentGuardReason } from './httpGuards';
 
 /** Only the knobs this stage reads (see config.analysis for each one's own comment). */
 export interface CandidateEvaluatorOptions {
@@ -208,30 +209,16 @@ export class CandidateEvaluator {
   private async authzGate({ candidate, context }: {
     candidate: ReturnType<typeof findCandidates>[number]; context: string;
   }): Promise<AuthzAssessment | null> {
-    // Scope the diff to the SWAPPED resource's own subtree before classifying: a generic key elsewhere in
-    // a whole-component swap (a nav/sidebar's `user`) must not license the finding — only an entitlement
-    // attached to the swapped id (ejoy's `lesson.lock` under `lesson.id`). See scopeDiffsToResource.
-    const differences = scopeDiffsToResource({
-      differences: compareObj(candidate.referenceProps, candidate.candidateProps),
-      swapPath: candidate.path,
+    // Scoped to the SWAPPED resource, swap diff excluded, direction gate: shared with the ablation (httpGuards).
+    const verdict = await authzGateVerdict({
+      referenceProps: candidate.referenceProps, candidateProps: candidate.candidateProps, swapPath: candidate.path,
+      classifier: this.deps.classifier, directionGate: this.deps.options.authzDirectionGate,
     });
-    // Classify WITHOUT the swapped identifier's own diff (excludeSwapDiff), but keep the full diff on the
-    // returned assessment so the recorded motivation still shows what was swapped.
-    const authz = await assessAuthZ({ differences: excludeSwapDiff({ differences, swapPath: candidate.path }), classifier: this.deps.classifier });
-    if (!authz.isAuthzRelevant) {
-      log.debug(`AnalysisPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${context} | ${describeDiffs(differences)}`);
+    if (verdict.reject !== undefined) {
+      log.debug(`AnalysisPipeline: candidate rejected (${verdict.reject}) — ${context} | ${describeDiffs(verdict.differences)}`);
       return null;
     }
-    // Direction: the candidate must be the RESTRICTED side. A free sibling of a paid reference the user
-    // legitimately reached (a free preview) is never a paid-content leak. See assessDirection.
-    if (this.deps.options.authzDirectionGate) {
-      const direction = await assessDirection({ authz, classifier: this.deps.classifier });
-      if (direction.lessRestricted) {
-        log.debug(`AnalysisPipeline: candidate rejected (candidate less restricted than the reference, delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')}) — ${context}`);
-        return null;
-      }
-    }
-    return { ...authz, differences };
+    return verdict.authz;
   }
 
   /**
@@ -243,35 +230,11 @@ export class CandidateEvaluator {
   private httpContentGuardReject({ forged, original, context }: {
     forged: ResponseLike; original: ResponseLike; context: string;
   }): boolean {
-    // Server REJECTED/errored (4xx/5xx, notably 401/403 "access denied"): the resource was never reached,
-    // so never a leak. Fires when the ORIGINAL also errored (two similar error bodies would look like a
-    // match) and keeps an expired-token run honest (every forge 401/403 → nothing flagged, no stale 200).
-    if (forged.status >= 400) {
-      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response status ${forged.status}: access denied / error, not a leak) — ${context}`);
-      return true;
-    }
-    // No actual data (`{}`, `[]`, or an all-empty wrapper like {"data":{"data":[],"total":0}}): leaked nothing.
-    if (isEmptyJsonResponse({ body: forged.body })) {
-      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response carries no data: empty object/array) — ${context}`);
-      return true;
-    }
-    // Error envelope despite 200 (`{"error":true}`, a top-level `error` string/object, `success:false`,
-    // `status:"error"`): reached nothing even with real-looking fields beside the flag (apps like Mondly).
-    if (isErrorEnvelopeResponse({ body: forged.body })) {
-      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response is an error envelope despite 200) — ${context}`);
-      return true;
-    }
-    const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
-    // The reference event's OWN response is excluded from the history check: a forge returning the
-    // original's body is the "server ignored the value" case, not "accessible at some OTHER url".
-    const referenceKey = canonicalResponseKey({ status: original.status, body: original.body });
-    // History: the forged data is a response the crawler already collected at a DIFFERENT url — the user
-    // can already reach it, so not a leak.
-    if (forgedKey !== undefined && forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
-      log.debug(`AnalysisPipeline: HTTP candidate not flagged (forged response already in the crawler's own http_events — already-accessible data) — ${context}`);
-      return true;
-    }
-    return false;
+    // Error status, empty data, error envelope, already-collected data: shared with the ablation (httpGuards).
+    const reason = httpContentGuardReason({ forged, original, responseHistoryKeys: this.responseHistoryKeys });
+    if (reason === null) return false;
+    log.debug(`AnalysisPipeline: HTTP candidate not flagged (${reason}) — ${context}`);
+    return true;
   }
 
   /**

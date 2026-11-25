@@ -23,6 +23,10 @@ import { ForgedRequestStore } from '../src/db/ForgedRequestStore';
 import { AuthzClassificationStore } from '../src/db/AuthzClassificationStore';
 import { AuthzClassifier } from '../src/analysis/authzClassifier';
 import { AblationPipeline } from '../src/analysis/AblationPipeline';
+import { ReactStateStore } from '../src/db/ReactStateStore';
+import { SessionAuthStore } from '../src/db/SessionAuthStore';
+import { checkEntryPointFresh } from '../src/analysis/authFreshness';
+import { extensionLaunchArgs } from '../src/browser/ExtensionCalls';
 import { config } from '../src/config';
 
 log.setLevel(LogLevel.INFO);
@@ -52,6 +56,11 @@ const statsStore = new AblationStatsStore({ db, clearOnStart: false });
 // reused instead of hit again live — see ForgedRequestStore's own doc comment.
 const forgedRequestStore = new ForgedRequestStore({ db, clearOnStart: false });
 const classifier = new AuthzClassifier(new AuthzClassificationStore({ db, clearOnStart: false }));
+// Read only by the auth-freshness gate below (a session check, not analysis input: the ablation itself
+// never reads React state).
+const reactStateStore = new ReactStateStore({ db, clearOnStart: false });
+// Refreshed credentials from refreshAuth.ts, as in runAnalysisFromDb (undefined on the common path).
+const authOverride = new SessionAuthStore({ db }).get({ site: SITE });
 
 const pipeline = new AblationPipeline({
   httpEventStore, crawlStateStore, vulnerabilityStore, statsStore, forgedRequestStore, classifier,
@@ -63,6 +72,8 @@ const pipeline = new AblationPipeline({
     paramBlacklist: config.analysis.paramBlacklist,
     segmentBlacklist: config.analysis.segmentBlacklist,
     authzDirectionGate: config.analysis.authzDirectionGate,
+    overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
+    authOverride,
   },
 });
 
@@ -71,8 +82,23 @@ console.log(`  start_url=${START_URL}`);
 console.log(`  http_events=${httpEventStore.count(SITE)}, crawl_states=${crawlStateStore.listBySite(SITE).length}`);
 console.log(`  profile=${config.userDataDir}`);
 
-const context = await chromium.launchPersistentContext(config.userDataDir, { headless: true, channel: 'chromium' });
+// Extension loaded only so the auth gate can read the entry point's live React fingerprint.
+const context = await chromium.launchPersistentContext(config.userDataDir, {
+  headless: true, channel: 'chromium',
+  args: config.extension ? extensionLaunchArgs(config.extension) : [],
+});
 const page = context.pages()[0] ?? (await context.newPage());
+await page.goto(START_URL, { waitUntil: 'load', timeout: 30_000 }).catch((e) => console.warn('initial goto failed (continuing):', (e as Error).message));
+
+// Same entry-point auth-freshness gate as runAnalysisFromDb: forging under an expired session would turn
+// every live forge into a 401/403 and silently report 0 findings.
+const gate = await checkEntryPointFresh({ page, reactStateStore, site: SITE, entryUrl: START_URL, maxWaitMs: config.analysis.clientRoutingProbe.maxWaitMs });
+console.log(`  auth gate: ${gate.fresh ? 'FRESH' : 'EXPIRED'} — ${gate.reason} (seed fingerprints=${gate.seedCount})${authOverride ? ' | using refreshed credentials (session_auth)' : ''}`);
+if (!gate.fresh) {
+  console.error(`\n⚠️  SESSION EXPIRED — re-authenticate, then re-run: npx tsx scripts/refreshAuth.ts ${START_URL}\n`);
+  await context.close();
+  process.exit(2);
+}
 
 const startedAt = Date.now();
 await pipeline.runForSite({ page, site: SITE });

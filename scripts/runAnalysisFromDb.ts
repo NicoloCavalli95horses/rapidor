@@ -155,6 +155,7 @@ if (config.analysis.ablationMode) {
       segmentBlacklist: config.analysis.segmentBlacklist,
       authzDirectionGate: config.analysis.authzDirectionGate,
       overwriteFindingsPerSite: config.analysis.overwriteFindingsPerSite,
+      authOverride,
     },
   });
   const ablationStartedAt = Date.now();

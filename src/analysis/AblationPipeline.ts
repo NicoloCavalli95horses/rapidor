@@ -6,13 +6,16 @@ import type { CrawlStateStore } from '../db/CrawlStateStore';
 import type { AblationVulnerabilityStore } from '../db/AblationVulnerabilityStore';
 import type { AblationStatsStore } from '../db/AblationStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
-import { extractSegments, candidateUrlFor } from './segments';
+import { extractSegments, candidateUrlFor, type SegmentCandidate } from './segments';
 import { buildJsonPreindex, findJsonCandidates, type JsonCandidate } from './jsonMatchFinder';
-import { paramNameBlacklisted, isLocaleParam, isTrackingParam, sameIdShape } from './candidateGenerator';
+import { paramNameBlacklisted, isLocaleParam, isTrackingParam, sameIdShape, isNonSerializableMarker } from './candidateGenerator';
 import { forgeRequestCached } from './requestForge';
+import { applyAuthOverride, type AuthOverride } from './authSession';
 import { runWithConcurrency, sleep } from '../utils/utils';
-import { getServerResponseSimilarity, canonicalResponseKey, compareObj, describeDiffs, isEmptyJsonResponse, isErrorEnvelopeResponse } from './responseEvaluate';
-import { assessAuthZ, assessDirection, type AuthzClassifier } from './authzClassifier';
+import { getServerResponseSimilarity, canonicalResponseKey, describeDiffs, isIdenticalResponse } from './responseEvaluate';
+import type { AuthzClassifier } from './authzClassifier';
+import { authzGateVerdict, httpContentGuardReason } from './httpGuards';
+import { ForgeValueSensitivity, forgeTemplateKey } from './forgeValueSensitivity';
 import { formatDuration } from '../core/duration';
 import { normalizeUrl } from './findings';
 
@@ -39,6 +42,8 @@ export interface AblationPipelineOptions {
   // Mirrors config.analysis.overwriteFindingsPerSite for the ablation's own table: when not explicitly
   // false, a re-run clears this site's previous ablation_vulnerabilities before recording.
   overwriteFindingsPerSite?: boolean;
+  // Same as AnalysisPipelineOptions.authOverride: re-points the forge at a re-authenticated session.
+  authOverride?: AuthOverride;
 }
 
 export interface AblationPipelineDeps {
@@ -62,10 +67,15 @@ export interface AblationPipelineDeps {
  * sitting in plain sight in the JSON the site's own API already returned?
  *
  * Candidate generation, replacing matchFinder's componentIndex walk: for a URL segment that matches
- * a value inside that SAME request's own JSON response body (findJsonMatches, the JSON analog of
- * PreindexedValueStore.findByValue), the "siblings" are other elements of the nearest enclosing
- * array in that body (findJsonCandidates) — the JSON idiom for "multiple instances of the same kind
- * of entity", playing the role RAPIDOR's componentIndex plays for React nodes.
+ * a value inside a captured JSON body (buildJsonPreindex, the JSON analog of
+ * PreindexedValueStore.findByValue), the "siblings" are the other elements of every enclosing array
+ * (findJsonCandidates) — the JSON idiom for "multiple instances of the same kind of entity", playing
+ * the role RAPIDOR's componentIndex plays for React nodes.
+ *
+ * Everything else is the main pipeline's: same generation filters, and the SAME decision code
+ * (httpGuards: scoped authz gate + direction, content guards; plus isIdenticalResponse and the
+ * value-insensitivity/dedup finalization). Only the React/DOM-bound steps are absent (chrome zone,
+ * client-routing probes and the HTTP→client-routing fallback).
  *
  * Deliberately narrower than AnalysisPipeline by construction, not by omission: there is no
  * equivalent of the client-routing probes (checkClientSideRouting/checkClientSideRoutingForPath).
@@ -90,6 +100,9 @@ export class AblationPipeline {
   // (history). Both reset at the start of runForSite so a per-site run never leaks state across sites.
   private recordedForgedBodyKeys = new Set<string>();
   private responseHistoryKeys = new Set<string>();
+  // Same value-insensitivity guard as the main pipeline (forgeValueSensitivity.ts): findings are deferred
+  // to the end of the run, since the colliding sibling forge may come later.
+  private forgeValueSensitivity = new ForgeValueSensitivity();
 
   constructor(private deps: AblationPipelineDeps) {}
 
@@ -101,6 +114,7 @@ export class AblationPipeline {
     // accumulating (record is INSERT OR IGNORE on a deterministic id). Reset the per-run guard sets too.
     if (options.overwriteFindingsPerSite !== false) vulnerabilityStore.clearSite({ site });
     this.recordedForgedBodyKeys = new Set<string>();
+    this.forgeValueSensitivity.reset();
     // Scoped to THIS site only: listMetaBySite/forEachResponse already filter by site, and both
     // `bodies`/`preindex` below are built fresh from exactly this stream on every call — never cached
     // across sites, so a JSON body captured for a different site can never leak into this one's index.
@@ -170,14 +184,22 @@ export class AblationPipeline {
     // `event` provides the segment's own URL (the splice target and, via `evaluateCandidate`, the
     // baseline response to compare the forged candidate against) — NOT necessarily the body the
     // match/siblings were found in: that's `bodies[hit.bodyIndex]`, resolved independently per hit.
-    generation:
+    // Forge references are 200 GETs only (same as AnalysisPipeline, and the GET-only invariant): `event` is
+    // the splice target AND the forged request, so a non-GET would reach forgeRequest's refusal and a
+    // 204/3xx/4xx has no usable reference body. One representative per CANONICAL url, as the main pipeline
+    // (same candidates, comparable stats). Every event still fed the preindex and the history filter.
+    const uniqueGets: typeof events = [];
+    const seenEventUrls = new Set<string>();
     for (const event of events) {
-      // Forge references are 200 GETs only (same as AnalysisPipeline, and the GET-only invariant):
-      // `event` is the splice target AND the forged request, so a non-GET here would reach
-      // forgeRequest's non-GET refusal (talkpal's roleplay POSTs carry roleplay ids, so they DID), and a
-      // 204/3xx/4xx has no usable reference body. Every event's body still fed the JSON preindex above
-      // (siblings come from any response); the history filter still used every event.
       if (event.method.toUpperCase() !== 'GET' || event.status !== 200) continue;
+      const canonical = normalizeUrl(event.url);
+      if (seenEventUrls.has(canonical)) continue;
+      seenEventUrls.add(canonical);
+      uniqueGets.push(event);
+    }
+
+    generation:
+    for (const event of uniqueGets) {
       for (const segment of extractSegments({ url: event.url })) {
         segmentsExtracted++;
         // Same blacklists as the main pipeline (candidateGenerator): a pagination/sorting query param
@@ -205,6 +227,8 @@ export class AblationPipeline {
             // Blacklist applies in BOTH directions (as in the main pipeline): also skip a candidate whose
             // REPLACEMENT value is a blacklisted path-segment root (mutating an id INTO `/app` etc.).
             if (!segment.paramName && options.segmentBlacklist.includes(String(candidate.candidateValue).toLowerCase())) continue;
+            // same as the main pipeline (a no-op on server JSON, kept so the two filters stay identical)
+            if (isNonSerializableMarker({ value: String(candidate.candidateValue) })) continue;
             // same type-shape rule as the main pipeline (see candidateGenerator.sameIdShape)
             if (!sameIdShape({ original: segment.value, replacement: String(candidate.candidateValue) })) continue;
             candidatesFound++;
@@ -215,7 +239,7 @@ export class AblationPipeline {
             const key = `${event.method}|${normalizeUrl(url)}`;
             if (seen.has(key)) continue;
             seen.add(key);
-            tasks.push(() => this.evaluateCandidate({ page, site, event, url, candidate }));
+            tasks.push(() => this.evaluateCandidate({ page, site, event, url, candidate, segment }));
             if (seen.size > options.maxGeneratedRequests) { infeasible = true; break generation; }
           }
         }
@@ -236,6 +260,7 @@ export class AblationPipeline {
       log.info(`AblationPipeline: dispatching ${tasks.length} candidate request(s) for ${site}`);
       await runWithConcurrency({ tasks, limit: options.maxConcurrentRequests });
     }
+    this.finalizeFindings();
 
     const analysisMs = Date.now() - analysisStartedAt;
     log.info(`AblationPipeline: ${site} — analysis ${formatDuration(analysisMs)}`);
@@ -247,96 +272,98 @@ export class AblationPipeline {
     });
   }
 
-  private async evaluateCandidate({ page, site, event, url, candidate }: {
-    page: Page; site: string; event: HttpEventRow; url: string; candidate: JsonCandidate;
+  /**
+   * Same decision sequence as CandidateEvaluator.evaluateHttpCandidate, minus what needs React/DOM (the
+   * client-routing fallback): authz gate first (no forge without an entitlement diff), forge, identical-
+   * response gate, shared content guards, then a DEFERRED record (value-insensitivity + cross-candidate
+   * dedup in finalizeFindings, as finalizeHttpFindings).
+   */
+  private async evaluateCandidate({ page, site, event, url, candidate, segment }: {
+    page: Page; site: string; event: HttpEventRow; url: string; candidate: JsonCandidate; segment: SegmentCandidate;
   }): Promise<void> {
     const { vulnerabilityStore, classifier, forgedRequestStore, httpEventStore, options } = this.deps;
+    const context = `${event.method} ${event.url} -> ${url}`;
 
-    // event came from listMetaBySite (no body): fetch the reference body lazily, once, here — bounded by
-    // maxConcurrentRequests, so only a handful of bodies are ever in memory at a time (not all 0.6 GB).
-    const referenceBody = event.id !== undefined ? httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
+    // CHEAP FIRST, shared with the main pipeline: diff scoped to the swapped resource, swap diff excluded,
+    // direction gate. The `props` prefix makes the JSON item play a React node's props (the helpers strip it).
+    const verdict = await authzGateVerdict({
+      referenceProps: candidate.referenceProps, candidateProps: candidate.candidateProps,
+      swapPath: ['props', ...candidate.swapPath], classifier, directionGate: options.authzDirectionGate,
+    });
+    if (verdict.reject !== undefined) {
+      log.debug(`AblationPipeline: candidate rejected (${verdict.reject}) — ${context} | ${describeDiffs(verdict.differences)}`);
+      return;
+    }
+    const authz = verdict.authz;
 
     const forged = await forgeRequestCached({
-      cache: forgedRequestStore, site, page, url, method: event.method, headers: event.requestHeaders, postData: event.postData,
+      cache: forgedRequestStore, site, page, url, method: event.method,
+      headers: applyAuthOverride({ headers: event.requestHeaders, override: options.authOverride }),
+      postData: event.postData,
     });
     await sleep(options.timeBetweenRequestsMs);
 
-    const similarity = getServerResponseSimilarity(
-      { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: referenceBody ?? '', contentType: event.contentType },
-      forged,
-    );
-    if (!similarity.areSimilar) {
-      log.debug(`AblationPipeline: candidate rejected (forged response not similar) — ${event.method} ${event.url} -> ${url}`);
-      return;
-    }
-    // Error-status guard, same as AnalysisPipeline: a 4xx/5xx forge (access denied / error) never
-    // reached the resource, so it is never a leak — even if two error responses look similar.
-    if (forged.status >= 400) {
-      log.debug(`AblationPipeline: candidate rejected (forged response status ${forged.status}: denied/error) — ${event.method} ${event.url} -> ${url}`);
-      return;
-    }
-    // Empty-data guard: a forge that returns no actual data (`{}`, `[]`, or an all-empty wrapper like
-    // ejoy's `search-new` -> {"data":{"data":[],"total":0}} for a mutated param) leaked nothing, however
-    // much it differs from the reference — not a finding.
-    if (isEmptyJsonResponse({ body: forged.body })) {
-      log.debug(`AblationPipeline: candidate rejected (forged response carries no data: empty object/array) — ${event.method} ${event.url} -> ${url}`);
-      return;
-    }
-    // Error-envelope guard, same as AnalysisPipeline: a 200 whose top-level JSON is an error/denial
-    // envelope (`{"error":true}`, `success:false`, `status:"error"`) reached nothing, not a leak.
-    if (isErrorEnvelopeResponse({ body: forged.body })) {
-      log.debug(`AblationPipeline: candidate rejected (forged response is an error envelope despite 200) — ${event.method} ${event.url} -> ${url}`);
-      return;
-    }
-
-    const differences = compareObj(candidate.referenceProps, candidate.candidateProps);
-    const authz = await assessAuthZ({ differences, classifier });
-    if (!authz.isAuthzRelevant) {
-      log.debug(`AblationPipeline: candidate rejected (no authz-relevant diff, sensitiveKeys=${JSON.stringify(authz.sensitiveKeys)}) — ${event.method} ${event.url} -> ${url} | ${describeDiffs(differences)}`);
-      return;
-    }
-    // Same direction gate as the main pipeline: the candidate must be the restricted side.
-    if (options.authzDirectionGate) {
-      const direction = await assessDirection({ authz, classifier });
-      if (direction.lessRestricted) {
-        log.debug(`AblationPipeline: candidate rejected (candidate less restricted than the reference, delta=${direction.delta.toFixed(2)}: ${direction.evidence.join(' ')}) — ${event.method} ${event.url} -> ${url}`);
-        return;
-      }
-    }
-
-    // Same always-on HTTP content guards as AnalysisPipeline: drop a forged response already present in
-    // the crawler's own http_events (already-accessible data), and dedup two swaps that forge an
-    // identical response. No body => no key => finding kept. There is no await between here and the
-    // record below, so the check-and-add on recordedForgedBodyKeys is atomic under concurrent evaluation.
+    // Every forge is evidence about its request slot, accepted or not (see forgeValueSensitivity.ts).
+    const template = forgeTemplateKey({ method: event.method, url: event.url, segment });
     const forgedKey = canonicalResponseKey({ status: forged.status, body: forged.body });
-    // The reference event's own response is EXCLUDED from the history check: a forge returning the
-    // original's body is the "server ignored the swapped value" case, not data accessible at another
-    // URL. (This ablation deliberately lacks AnalysisPipeline's isIdenticalResponse gate, so such a
-    // candidate stays flaggable here — the studied weakness; only a match with a DIFFERENT captured
-    // response is suppressed.)
-    const referenceKey = canonicalResponseKey({ status: event.status ?? 0, body: referenceBody ?? '' });
-    if (forgedKey !== undefined) {
-      if (forgedKey !== referenceKey && this.responseHistoryKeys.has(forgedKey)) {
-        log.debug(`AblationPipeline: candidate not flagged (forged response already in http_events at a different URL — already-accessible data) — ${event.method} ${event.url} -> ${url}`);
-        return;
-      }
-      if (this.recordedForgedBodyKeys.has(forgedKey)) {
-        log.debug(`AblationPipeline: candidate not flagged (duplicate forged response of an already-recorded finding) — ${event.method} ${event.url} -> ${url}`);
-        return;
-      }
-      this.recordedForgedBodyKeys.add(forgedKey);
+    this.forgeValueSensitivity.observe({ template, forgedKey, value: candidate.candidateValue });
+
+    // event came from listMetaBySite (no body): fetch the reference body lazily, bounded by the concurrency.
+    const referenceBody = event.id !== undefined ? httpEventStore.getResponseBody({ site, id: event.id }) : event.responseBody;
+    const original = { status: event.status ?? 0, headers: event.responseHeaders ?? {}, body: referenceBody ?? '', contentType: event.contentType };
+    const similarity = getServerResponseSimilarity(original, forged);
+    if (!similarity.areSimilar) {
+      log.debug(`AblationPipeline: candidate rejected (forged response not similar) — ${context}`);
+      return;
+    }
+    // Server ignored the swapped value (identical to the original): nothing leaked. The main pipeline tries
+    // its client-routing fallback here; the ablation has none, so it drops.
+    if (isIdenticalResponse({ reference: original, candidate: forged })) {
+      log.debug(`AblationPipeline: candidate rejected (forged response identical to the original: the server ignores the value) — ${context}`);
+      return;
+    }
+    const reason = httpContentGuardReason({ forged, original, responseHistoryKeys: this.responseHistoryKeys });
+    if (reason !== null) {
+      log.debug(`AblationPipeline: candidate not flagged (${reason}) — ${context}`);
+      return;
     }
 
-    const id = ablationVulnerabilityId({ candidateValue: candidate.candidateValue, path: candidate.candidatePath, method: event.method, url });
-    const inserted = vulnerabilityStore.record({
-      id, site,
-      referenceUrl: event.url, candidateUrl: url, method: event.method,
-      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
-      motivation: describeDiffs(differences),
-      responseSimilarity: similarity, authzDiff: authz,
+    this.forgeValueSensitivity.defer({
+      template, forgedKey, context,
+      recordHttp: () => {
+        const id = ablationVulnerabilityId({ candidateValue: candidate.candidateValue, path: candidate.candidatePath, method: event.method, url });
+        const inserted = vulnerabilityStore.record({
+          id, site,
+          referenceUrl: event.url, candidateUrl: url, method: event.method,
+          referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
+          motivation: describeDiffs(authz.differences),
+          responseSimilarity: similarity, authzDiff: authz,
+        });
+        if (inserted) log.warning(`AblationPipeline: potential access control issue (http-json-ablation) — ${context}`);
+      },
+      onValueInsensitive: async () => {},   // no client-routing fallback in the ablation
     });
-    if (inserted) {
-      log.warning(`AblationPipeline: potential access control issue (http-json-ablation) — ${event.method} ${event.url} -> ${url}`);
+  }
+
+  /**
+   * Mirrors CandidateEvaluator.finalizeHttpFindings: in arrival order, (1) drop a finding whose forged
+   * response another VALUE reproduced in the same request slot (server default), (2) dedup two swaps with
+   * an identical forged response, then record.
+   */
+  private finalizeFindings(): void {
+    for (const f of this.forgeValueSensitivity.drain()) {
+      if (this.forgeValueSensitivity.isValueInsensitive({ template: f.template, forgedKey: f.forgedKey })) {
+        log.debug(`AblationPipeline: candidate not flagged (another value forged in the same slot returned the identical response: the server falls back to a default) — ${f.context}`);
+        continue;
+      }
+      if (f.forgedKey !== undefined) {
+        if (this.recordedForgedBodyKeys.has(f.forgedKey)) {
+          log.debug(`AblationPipeline: candidate not flagged (duplicate forged response of an already-recorded finding) — ${f.context}`);
+          continue;
+        }
+        this.recordedForgedBodyKeys.add(f.forgedKey);
+      }
+      f.recordHttp();
     }
   }
 }

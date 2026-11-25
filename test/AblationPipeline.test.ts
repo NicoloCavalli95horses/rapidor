@@ -28,12 +28,19 @@ after(async () => { await rm(root, { recursive: true, force: true }); });
 let server: Server;
 let baseUrl: string;
 let requestCount = 0; // bumped on every real request the server receives — used to prove cache reuse
-const BODY = JSON.stringify({ users: [{ id: '101', premium: false }, { id: '102', premium: true }] });
+const USERS = [{ id: '101', premium: false }, { id: '102', premium: true }];
+// The forged response echoes the requested value, so a sibling forge is NOT byte-identical to the
+// reference (an identical one is the "server ignored the value" case, dropped by isIdenticalResponse).
+const usersBody = (requested: string | null) => JSON.stringify({ users: USERS, requested });
+const BODY = usersBody('101');
 // Two more routes, for the cross-body-matching test: a per-item endpoint whose own response has NO
 // siblings at all, and an unrelated listing endpoint that happens to carry the same id alongside its
 // real siblings — mirrors the real case buildJsonPreindex exists for (busuu's own
 // component/objective_<uuid>, a single-object response, vs. a separate course-structure-style
 // listing that actually enumerates every objective).
+const THREE_USERS = [{ id: '101', premium: false }, { id: '102', premium: true }, { id: '103', premium: true }];
+// the entitlement flag sits OUTSIDE the swapped resource (`lesson`): the scoped authz gate must ignore it
+const NESTED_ITEMS = [{ lesson: { id: '101' }, premium: false }, { lesson: { id: '102' }, premium: true }];
 const LISTING_BODY = JSON.stringify({ items: [{ id: '101', premium: false }, { id: '102', premium: true }] });
 
 before(async () => {
@@ -42,8 +49,12 @@ before(async () => {
     res.setHeader('content-type', 'application/json');
     const pathname = new URL(req.url ?? '/', 'http://x').pathname;
     if (pathname === '/api/listing') { res.end(LISTING_BODY); return; }
-    if (pathname === '/api/item') { res.end(JSON.stringify({ id: new URL(req.url ?? '/', 'http://x').searchParams.get('id'), title: 'solo item' })); return; }
-    res.end(BODY); // every other path (the existing tests' /api/users): unchanged, always the same fixed body
+    const q = new URL(req.url ?? '/', 'http://x').searchParams;
+    if (pathname === '/api/item') { res.end(JSON.stringify({ id: q.get('id'), title: 'solo item' })); return; }
+    if (pathname === '/api/static') { res.end(BODY); return; }   // ignores the value: always the reference body
+    if (pathname === '/api/default') { res.end(JSON.stringify({ users: THREE_USERS, requested: 'default' })); return; }   // falls back to a default
+    if (pathname === '/api/nested') { res.end(JSON.stringify({ items: NESTED_ITEMS, requested: q.get('id') })); return; }
+    res.end(usersBody(q.get('id') ?? q.get('curPage'))); // /api/users
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as { port: number };
@@ -71,15 +82,20 @@ describe('AblationPipeline', () => {
 
   const { newPage } = useBrowser();
 
-  function recordEvent(httpEventStore: HttpEventStore, site: string, url: string): void {
+  function recordEvent(httpEventStore: HttpEventStore, site: string, url: string, responseBody = BODY): void {
     httpEventStore.record({
       site,
       request: {
         url, method: 'GET', requestHeaders: {}, status: 200,
         responseHeaders: { 'content-type': 'application/json' }, contentType: 'application/json',
-        responseBody: BODY, timestamp: new Date().toISOString(), pageUrl: `${baseUrl}/`,
+        responseBody, timestamp: new Date().toISOString(), pageUrl: `${baseUrl}/`,
       },
     });
+  }
+
+  function primeClassifier(classifier: AuthzClassifier): void {
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('id', { score: 0, isAuthZRelevant: false });
+    (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
   }
 
   it('flags a sibling found inside the JSON response body, using the same diff/authz oracle as the main pipeline', async () => {
@@ -241,7 +257,7 @@ describe('AblationPipeline', () => {
     const candidateUrl = `${baseUrl}/api/users?id=102`;
     forgedRequestStore.record({
       site, method: 'GET', url: candidateUrl, postData: undefined,
-      response: { status: 200, headers: { 'content-type': 'application/json' }, body: BODY, contentType: 'application/json' },
+      response: { status: 200, headers: { 'content-type': 'application/json' }, body: usersBody('102'), contentType: 'application/json' },
     });
 
     const before = requestCount;
@@ -263,7 +279,7 @@ describe('AblationPipeline', () => {
     (classifier as unknown as { cache: Map<string, unknown> }).cache.set('premium', { score: 1, isAuthZRelevant: true });
 
     const site = 'app.test';
-    recordEvent(httpEventStore, site, `${baseUrl}/api/item?id=101`); // own response: {id:'101', title:'solo item'} — no siblings
+    recordEvent(httpEventStore, site, `${baseUrl}/api/item?id=101`, JSON.stringify({ id: '101', title: 'solo item' })); // own response: {id:'101', title:'solo item'} — no siblings
     httpEventStore.record({
       site,
       request: {
@@ -279,5 +295,33 @@ describe('AblationPipeline', () => {
     assert.equal(vulnerabilityStore.count(site), 1);
     const [row] = db.prepare('SELECT candidate_url FROM ablation_vulnerabilities WHERE site = ?').all(site) as { candidate_url: string }[];
     assert.equal(row.candidate_url, `${baseUrl}/api/item?id=102`); // spliced into /api/item's own URL, not /api/listing's
+  });
+
+  // Shared-guard parity with the main pipeline (httpGuards + isIdenticalResponse + value-insensitivity).
+  it('drops a forge whose response is identical to the reference (the server ignores the value)', async () => {
+    const { pipeline, httpEventStore, vulnerabilityStore, classifier } = newPipeline();
+    primeClassifier(classifier);
+    const site = 'app.test';
+    recordEvent(httpEventStore, site, `${baseUrl}/api/static?id=101`);
+    await pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(vulnerabilityStore.count(site), 0);
+  });
+
+  it('drops findings whose slot is value-insensitive (two values forge the same response)', async () => {
+    const { pipeline, httpEventStore, vulnerabilityStore, classifier } = newPipeline();
+    primeClassifier(classifier);
+    const site = 'app.test';
+    recordEvent(httpEventStore, site, `${baseUrl}/api/default?id=101`, JSON.stringify({ users: THREE_USERS, requested: '101' }));
+    await pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(vulnerabilityStore.count(site), 0, '102 and 103 both return the default body');
+  });
+
+  it('scopes the authz diff to the swapped resource: an entitlement outside it does not count', async () => {
+    const { pipeline, httpEventStore, vulnerabilityStore, classifier } = newPipeline();
+    primeClassifier(classifier);
+    const site = 'app.test';
+    recordEvent(httpEventStore, site, `${baseUrl}/api/nested?id=101`, JSON.stringify({ items: NESTED_ITEMS, requested: '101' }));
+    await pipeline.runForSite({ page: await newPage(), site });
+    assert.equal(vulnerabilityStore.count(site), 0);
   });
 });
