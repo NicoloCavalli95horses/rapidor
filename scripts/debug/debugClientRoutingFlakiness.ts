@@ -3,8 +3,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
-import { installParamUsageTracking } from '../src/browser/paramUsageTracker';
-import { checkClientSideRouting } from '../src/analysis/clientRouting';
+import { installParamUsageTracking } from '../../src/browser/paramUsageTracker';
+import { checkClientSideRouting } from '../../src/analysis/clientRouting';
 
 const PAGE_URL = 'https://learn.pimsleur.com/MiniLearn/MiniLesson?id=296&force_auto_play=false';
 // Replicates AnalysisPipeline's real probe order for this page's 4 candidates, back to back on the

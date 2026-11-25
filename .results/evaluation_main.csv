@@ -1,0 +1,16 @@
+website,explored,findings,TP,FP,precision,comments
+https://www.duolingo.com/learn,x,0,0,0,,ok
+https://www.clozemaster.com/l/ita-eng/stories,x,0,0,0,,ok
+https://www.celpipsimulator.com/dashboard/exams,x,0,0,0,,ok
+https://www.busuu.com/dashboard/timeline/a1,x,14,14,0,1.00,ok
+https://promova.com/my-plan/appyj8hJ1VFshCjHj,x,24,9,0,1.00,"9 client-routing, 9 SSR, 6 API sulle stesse lezioni ma con informazioni distinte (24 in tutto, ma consideriamo le risorse, cioe solo 9)"
+https://my.babbel.com/dashboard/inprogress,x,2,0,2,0.00,"2 FP inevitabili: fa fallback su lezione gratuita, ma il DOM ha metadati diversi e quindi viene flaggato. L'identita della lezione sta su due segmenti dell'URL, ne mutiamo uno solo e questo ci porta al fallback"
+https://memrise-stories.replit.app/library,x,0,0,0,,ok
+https://lingualeo.com/en/training,x,9,9,0,1.00,"ok"
+https://learn.pimsleur.com/MiniLearn,x,4,4,0,1.00,"ok"
+https://learn.mangolanguages.com/pathway/from/en-US/to/fr/798/1/1,x,0,0,0,,ok
+https://ejoy-english.com/app/courses/37/314,x,4,4,0,1.00,"ok"
+https://arabicroad.com,x,0,0,0,,ok
+https://app.talkpal.ai/dashboard?redirect=%2Fdashboard,x,0,0,0,,ok
+https://app.rocketlanguages.com/members/products/186/dashboard,x,1,0,1,0.00,"1 FP inevitabile (rispetta tutti i criteri, non e' pagina 404, e' locked, ma non carica risorse premium)"
+https://app.getpronounce.com/courses/HZnLJPJ2ut?unit=6AXfdnWxKD,x,1,1,0,1.00,"echo > shimmer,  usa voce AI premium per generare testo a piacimento"
