@@ -7,6 +7,7 @@ import type { CrawlStateStore } from '../db/CrawlStateStore';
 import type { VulnerabilityStore, StoredFinding } from '../db/VulnerabilityStore';
 import type { AnalysisStatsStore } from '../db/AnalysisStatsStore';
 import type { ForgedRequestStore } from '../db/ForgedRequestStore';
+import type { RunMetadataStore } from '../db/RunMetadataStore';
 import { spliceSegment, candidateUrlFor } from './segments';
 import { runWithConcurrency, mean, median } from '../utils/utils';
 import type { AuthzClassifier } from './authzClassifier';
@@ -16,6 +17,7 @@ import { normalizeUrl } from './findings';
 import { ClientRoutingVerifier } from './clientRoutingVerifier';
 import { RecheckRunner } from './recheckRunner';
 import { CandidateEvaluator } from './candidateEvaluator';
+import { writeSiteReports } from './reportWriter';
 import type { AuthOverride } from './authSession';
 import { formatDuration } from '../core/duration';
 
@@ -66,6 +68,9 @@ export interface AnalysisPipelineDeps {
   // shared with AblationPipeline — see ForgedRequestStore's own doc comment
   forgedRequestStore: ForgedRequestStore;
   classifier: AuthzClassifier;
+  // Optional: supplies the crawl's seed URL (run_metadata.start_url) for a report's "where to start".
+  // Absent in tests / offline replay, where a report simply falls back to the finding's reference URL.
+  runMetadataStore?: RunMetadataStore;
   options: AnalysisPipelineOptions;
 }
 
@@ -141,8 +146,6 @@ export class AnalysisPipeline {
         maxConcurrentRequests: deps.options.maxConcurrentRequests,
         timeBetweenRequestsMs: deps.options.timeBetweenRequestsMs,
         offline: deps.options.offline,
-        userDataDir: deps.options.userDataDir,
-        reportsDir: deps.options.reportsDir,
         clientRoutingProbe: deps.options.clientRoutingProbe,
         authOverride: deps.options.authOverride,
         clientRoutingPathCoherence: deps.options.clientRoutingPathCoherence,
@@ -388,6 +391,20 @@ export class AnalysisPipeline {
       analysisMs,
       infeasible: false,
     });
+
+    // Regenerate this site's reports from the just-recorded findings, replacing the previous ones in one
+    // atomic swap (reports/<site>/ mirrors the DB). Reads back the rows (with their evidence payload) so
+    // the exact same code path serves scripts/regenerateReports.ts. Never throws (writeSiteReports logs).
+    this.writeReports({ site });
+  }
+
+  /** Rebuilds reports/<site>/ from the stored findings (one subfolder per finding: report.md + test.ts + evidence.json). */
+  private writeReports({ site }: { site: string }): void {
+    const rows = this.deps.vulnerabilityStore.listReportRows(site);
+    if (rows.length === 0) return;
+    const seedUrl = this.deps.runMetadataStore?.get({ site })?.startUrl;
+    const result = writeSiteReports({ reportsDir: this.deps.options.reportsDir, site, rows, seedUrl });
+    if (result.replaced) log.info(`AnalysisPipeline: ${site} — wrote ${result.written} report(s) to ${this.deps.options.reportsDir}/${site}${result.skipped.length ? ` (${result.skipped.length} skipped: no evidence)` : ''}`);
   }
 
 

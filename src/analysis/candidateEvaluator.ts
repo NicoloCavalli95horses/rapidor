@@ -10,11 +10,11 @@ import { type SegmentCandidate } from './segments';
 import { forgeRequestCached, type ResponseLike } from './requestForge';
 import { applyAuthOverride, type AuthOverride } from './authSession';
 import { rewriteCorrelatedQuery } from './correlatedQuery';
-import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, describeDiffs, type PropDiff, type ResponseSimilarity } from './responseEvaluate';
+import { getServerResponseSimilarity, isIdenticalResponse, canonicalResponseKey, describeDiffs, type ResponseSimilarity } from './responseEvaluate';
 import { type AuthzClassifier, type AuthzAssessment } from './authzClassifier';
 import { CLIENT_ROUTING_METHOD, vulnerabilityId, describeExtractedSegment } from './findings';
 import { Semaphore, sleep, withParam, urlEmbedsValue } from '../utils/utils';
-import { writeReproductionScript, type ReproductionKind } from './reproductionScript';
+import { buildEvidence, type ReproductionKind } from './reportEvidence';
 import type { ClientRoutingVerifier } from './clientRoutingVerifier';
 import { ClientSiblingGroups } from './clientSiblingGroups';
 import { ForgeValueSensitivity, forgeTemplateKey } from './forgeValueSensitivity';
@@ -25,8 +25,6 @@ export interface CandidateEvaluatorOptions {
   maxConcurrentRequests: number;
   timeBetweenRequestsMs: number;
   offline?: boolean;
-  userDataDir?: string;
-  reportsDir: string;
   clientRoutingProbe: { minWaitMs: number; idleMs: number; maxWaitMs: number };
   // see AnalysisPipelineOptions.authOverride — applied to the captured headers before every forge
   authOverride?: AuthOverride;
@@ -265,6 +263,14 @@ export class CandidateEvaluator {
       stateId: candidate.stateId, referenceNodeId: candidate.referenceNodeId, candidateNodeId: candidate.candidateNodeId, path: candidate.path,
       clientSwap: method === CLIENT_ROUTING_METHOD ? `${candidate.candidateValue}|${swapPos}` : undefined,
     });
+    // The report/test regeneration payload (sibling props + reproduction urls + auth-redacted baseline),
+    // stored on the row so reports can be rebuilt from the DB alone — no re-crawl, no re-analysis. The
+    // reports themselves are written once per site at the end of the run (AnalysisPipeline.writeReports),
+    // not here, so an interrupted run never leaves a half-written reports tree.
+    const evidence = buildEvidence({
+      candidate, reproductionReferenceUrl: reproduction.referenceUrl, reproductionCandidateUrl: reproduction.candidateUrl,
+      kind: reproduction.kind, clientRoutingProbe: this.deps.options.clientRoutingProbe,
+    });
     const inserted = this.deps.vulnerabilityStore.record({
       id, site, referenceUrl, candidateUrl, method,
       referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
@@ -272,15 +278,9 @@ export class CandidateEvaluator {
       // mutated-value position for the paper's Fig. 4 (path index from the right, or a query param)
       segmentLocation: segment.location,
       segmentIndex: segment.location === 'path' ? (segment.indexFromRight ?? null) : null,
+      evidence,
     });
     this.logConfirmedFinding({ id, inserted, message: logMessage });
-    if (inserted) {
-      this.writeReproduction({
-        id, site, referenceUrl: reproduction.referenceUrl, candidateUrl: reproduction.candidateUrl,
-        motivation, differences: authz.differences, sensitiveKeys: authz.sensitiveKeys, candidate,
-        kind: reproduction.kind,
-      });
-    }
   }
 
   /**
@@ -530,20 +530,4 @@ export class CandidateEvaluator {
     });
   }
 
-  /** Assembles the common fields every call site above already has in scope and delegates to writeReproductionScript. */
-  private writeReproduction({ id, site, referenceUrl, candidateUrl, motivation, differences, sensitiveKeys, candidate, kind }: {
-    id: string; site: string; referenceUrl: string; candidateUrl: string; motivation: string;
-    differences: PropDiff[]; sensitiveKeys: string[];
-    candidate: ReturnType<typeof findCandidates>[number];
-    kind: ReproductionKind;
-  }): void {
-    writeReproductionScript({
-      id, site, referenceUrl, candidateUrl, motivation, differences, sensitiveKeys,
-      referenceValue: String(candidate.referenceValue), candidateValue: candidate.candidateValue,
-      referenceProps: candidate.referenceProps, candidateProps: candidate.candidateProps,
-      userDataDir: this.deps.options.userDataDir, reportsDir: this.deps.options.reportsDir,
-      clientRoutingProbe: this.deps.options.clientRoutingProbe,
-      kind,
-    });
-  }
 }

@@ -74,7 +74,8 @@ While this happens, three more things run unconditionally for every site (see [I
 | [src/browser/ReactStateHooks.ts](src/browser/ReactStateHooks.ts) | Reads and persists RAPIDOR's React state ([src/db/ReactStateStore.ts](src/db/ReactStateStore.ts)) and pre-indexes it ([src/db/PreindexedValueStore.ts](src/db/PreindexedValueStore.ts)). |
 | [src/analysis/AnalysisPipeline.ts](src/analysis/AnalysisPipeline.ts) | Entry point of the preindex → match → forge → evaluate chain: generates and dispatches candidates, records stats. The work sits in its collaborators — [candidateGenerator.ts](src/analysis/candidateGenerator.ts), [candidateEvaluator.ts](src/analysis/candidateEvaluator.ts), [clientRoutingVerifier.ts](src/analysis/clientRoutingVerifier.ts), [recheckRunner.ts](src/analysis/recheckRunner.ts), [PagePool.ts](src/analysis/PagePool.ts), [findings.ts](src/analysis/findings.ts). See [IDOR analysis](docs/analysis.md). |
 | [scripts/stats.ts](scripts/stats.ts) | Prints per-site crawl/IDOR stats, cross-site averages, and flagged findings from `storage/crawler.db`. |
-| [src/analysis/reproductionScript.ts](src/analysis/reproductionScript.ts) | Generates a runnable `.repro.ts` for every flagged finding; see [Reproduction scripts](docs/analysis.md#reproduction-scripts). |
+| [src/analysis/reportWriter.ts](src/analysis/reportWriter.ts) | Rebuilds `reports/<site>/` from the stored findings (one folder per finding: `report.md` + `test.ts` + `evidence.json`), swapped in atomically; see [Reports](docs/analysis.md#reports-reportmd-and-testts). Renderers: [reportMarkdown.ts](src/analysis/reportMarkdown.ts), [reportTest.ts](src/analysis/reportTest.ts); shared test oracle: [reportOracle.ts](src/analysis/reportOracle.ts). |
+| [scripts/regenerateReports.ts](scripts/regenerateReports.ts), [scripts/backfillEvidence.ts](scripts/backfillEvidence.ts) | Regenerate the reports/tests from the DB without re-crawling; backfill the `evidence` payload on findings stored before that column existed (non-destructive). |
 | [scripts/runAnalysisFromDb.ts](scripts/runAnalysisFromDb.ts), [scripts/runAblationFromDb.ts](scripts/runAblationFromDb.ts) | Re-run the main / ablation analysis on a site's already-captured data in `storage/crawler.db` (no new exploration, nothing cleared); `SITE` is derived from the `START_URL` argument. |
 | [scripts/recheckFindings.ts](scripts/recheckFindings.ts) | Re-examines only the findings already in `vulnerabilities` for one site with the current engine (forge from cache / probe + DOM guards) and prints which would still be flagged and why the others are dropped. Writes nothing: the stored findings stay the baseline. Fast regression check after a change to the decision logic (it cannot find new findings: use `runAnalysisFromDb` for that). |
 | [scripts/compareAblation.ts](scripts/compareAblation.ts) | Compares the main pipeline against the ablation pipeline over `analysis_stats`/`ablation_stats`; see [IDOR analysis](docs/analysis.md). |
@@ -120,7 +121,7 @@ Everything is in [src/config.ts](src/config.ts). The most important settings:
 | `db.clearOnStart` | `true` | Wipes `crawl_states`/`crawl_edges`/`http_events`/`react_states`/`preindexed_values`/`vulnerabilities`/`analysis_stats`/`ablation_vulnerabilities`/`ablation_stats`/`forged_requests`/`run_metadata` once at the start of the run. |
 | `db.clearClassifierCache` | `false` | Wipes `authz_classifications` and `authz_polarity` too. Off by default: a classification is a pure function of the key string, independent of site or run, so it is worth keeping forever. |
 | `analysis.maxConcurrentRequests` / `analysis.timeBetweenRequestsMs` | `3` / `250` | Bound and pace forged requests. |
-| `analysis.reportsDir` | `reports` | Where the reproduction script of each flagged finding is written (`<reportsDir>/<site>/<findingId>.repro.ts`, gitignored). |
+| `analysis.reportsDir` | `reports` | Where each finding's report folder is written (`<reportsDir>/<site>/<kind>_<shortId>/` with `report.md` + `test.ts` + `evidence.json`); the whole `reports/<site>/` tree is rewritten atomically each run. |
 | `analysis.clientRoutingProbe` | `1000 / 300 / 3000 ms` | The client-side-routing probe's (`checkClientSideRouting`/`checkClientSideRoutingForPath`) DOM-settle window after a synthetic `pushState`+`popstate`: floor (earliest a reaction is reported settled) / DOM-quiet settle / ceiling. The window is network-aware — it will not settle while a fetch/XHR the route fired is still in flight (so a render gated on a data request is caught) — and the ceiling bounds everything. |
 | `analysis.clientRoutingConcurrency` | `8` | How many pages the client-routing phase probes on in parallel. Each candidate's probe + DOM snapshots mutate a page's live DOM, so they run one-per-page across a pool of this many pages (same authenticated context); near-linear speedup on that phase. |
 | `analysis.maxSegmentMatches` | `300` | A URL segment whose value appears in more than this many preindexed nodes is a generic keyword, not an identifier, and is skipped in candidate generation. |
@@ -195,9 +196,9 @@ extension: {
 
 ## IDOR analysis (authz/IDOR detection)
 
-At the end of each site's exploration, `AnalysisPipeline` correlates captured React state with captured HTTP traffic: preindex → segment extraction → match finding → GET-only request forging → response evaluation (with an embedding-based authorization classifier), plus a client-side-routing fallback for values an SPA only reads client-side. Every flagged finding gets a standalone reproduction script under `reports/`.
+At the end of each site's exploration, `AnalysisPipeline` correlates captured React state with captured HTTP traffic: preindex → segment extraction → match finding → GET-only request forging → response evaluation (with an embedding-based authorization classifier), plus a client-side-routing fallback for values an SPA only reads client-side. Every flagged finding gets its own report folder under `reports/` (`report.md` + an executable `test.ts` + `evidence.json`).
 
-Full details — pipeline steps, client-routing oracle, reproduction scripts and the HTTP-JSON-only ablation study — are in **[docs/analysis.md](docs/analysis.md)**.
+Full details — pipeline steps, client-routing oracle, the per-finding reports/tests and the HTTP-JSON-only ablation study — are in **[docs/analysis.md](docs/analysis.md)**.
 
 ## Output
 
@@ -209,7 +210,7 @@ Everything the crawler produces lives in one SQLite file, `db.path` (default `st
 * `http_events`, `react_states`, `preindexed_values`, `vulnerabilities`, `analysis_stats`, `authz_classifications`, `authz_polarity` — everything from [IDOR analysis](docs/analysis.md).
 * `ablation_vulnerabilities`, `ablation_stats` — the [ablation study](docs/analysis.md#ablation-study-http-json-only)'s own findings/stats, only ever written when `analysis.ablationMode` is on. `forged_requests` — the cache shared between the main pipeline and the ablation, so the same candidate is never forged twice.
 
-The only files written outside the database are the generated [reproduction scripts](docs/analysis.md#reproduction-scripts) under `analysis.reportsDir` (`reports/`).
+The only files written outside the database are the generated [per-finding reports](docs/analysis.md#reports-reportmd-and-testts) under `analysis.reportsDir` (`reports/`). Each finding gets a folder `reports/<site>/<kind>_<shortId>/` holding `report.md` (a human-readable write-up), `test.ts` (an executable oracle) and `evidence.json`; the whole `reports/<site>/` tree is rewritten in one atomic swap each run, so it always mirrors the `vulnerabilities` table. Regenerate them from the DB without re-crawling with `npx tsx scripts/regenerateReports.ts <START_URL|--all>`.
 
 Crawlee's own bookkeeping (request queue, key-value store) stays separate, under `storage/{datasets,key_value_stores,request_queues}`, and is cleared at the start of each run.
 

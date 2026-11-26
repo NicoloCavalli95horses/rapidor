@@ -102,7 +102,7 @@ export function buildExplorer(
   // 3. the algorithm receives everything ready-made
   const analysisPipeline = new AnalysisPipeline({
     httpEventStore, preindexStore: preindex, reactStateStore: reactState, crawlStateStore: crawlStates, vulnerabilityStore, statsStore,
-    forgedRequestStore, classifier,
+    forgedRequestStore, classifier, runMetadataStore: runMetadata,
     options: {
       maxConcurrentRequests: cfg.analysis.maxConcurrentRequests, timeBetweenRequestsMs: cfg.analysis.timeBetweenRequestsMs,
       dbPath: cfg.db.path, userDataDir: cfg.userDataDir, reportsDir: cfg.analysis.reportsDir,

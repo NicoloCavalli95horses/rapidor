@@ -2,6 +2,19 @@
 
 Older entries: [docs/CHANGELOG-archive.md](docs/CHANGELOG-archive.md).
 
+## 2026-11-26 09:10 — feature: per-finding reports (report.md + test.ts), regenerable from the DB
+
+Replaced the single `.repro.ts` per finding with a folder `reports/<site>/<kind>_<shortId>/` holding a human-readable `report.md`, a thin executable `test.ts`, and `evidence.json`. Reports are now rebuilt per site from the DB and swapped in atomically, so `reports/<site>/` always mirrors the `vulnerabilities` table, and they regenerate without a re-crawl.
+
+- Why: the old self-contained `.repro.ts` mixed the explanation and the oracle in one `console.log` script, accumulated one timestamped file per run (618 files for 59 findings), and could not be regenerated from the DB.
+- What:
+  - New `vulnerabilities.evidence` column (sibling-node props + reproduction urls + auth-redacted HTTP baseline); `VulnerabilityStore.record` stores it, `setEvidence`/`listReportRows`/`sitesWithFindings` added. Migration is additive (ALTER, like `segment_*`).
+  - New modules: `reportEvidence.ts` (payload + header redaction), `reportMarkdown.ts` (report.md), `reportTest.ts` (test.ts template), `reportOracle.ts` (shared runtime: HTTP re-forge vs. DOM-diff oracle + session-freshness skip), `reportWriter.ts` (atomic per-site folder swap). Removed `reproductionScript.ts`.
+  - `report.md`: summary table, where-to-start, legit vs forged URL, sibling-props table (authz-relevant marked), why-IDOR, evidence. `test.ts`: RED while the leak reproduces, SKIP if the session expired; delegates to `reportOracle.ts` so the verdict tracks the engine. Client-routing uses the DOM diff as oracle with remount-noise calibration; screenshots are visual evidence only.
+  - New scripts: `scripts/regenerateReports.ts <START_URL|--all>` (rebuild from the DB; `--all` also prunes `reports/` folders of sites with no current findings) and `scripts/backfillEvidence.ts` (non-destructive: re-derives each finding's sibling pair purely and UPDATEs `evidence` only — never touches a finding).
+  - `report.md` "Where to start" shows the crawl's seed page (`run_metadata.start_url`, the catalog listing free + paid resources), not the forged URL; section retitled "Reference vs. forged resource".
+- Effect: backfill matched all 59 stored findings (0 unmatched; 3 low-confidence outside the reference set: rocketlanguages 1, babbel 2), the 6 reference sites matched high-confidence (busuu 14, promova 24, lingualeo 9, ejoy 4, pimsleur 4, getpronounce 1). Findings unchanged (UPDATE evidence only). `npm run typecheck` clean; `test/AnalysisPipeline.test.ts` 15/15 (now exercises the report writer end-to-end).
+
 ## 2026-11-25 19:20 — fix: ablation finding id mirrors the main (carrier-independent)
 
 The ablation's `vulnerabilityId` kept the full candidate url, so one leak reached from two carriers counted twice (promova's lessons 76/77/78 under two `/my-plan/<plan>/` segments: 6 rows for 3 resources). The main pipeline's id already excludes the url (keys on origin+method+sibling-pair+path).

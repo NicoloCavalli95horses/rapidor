@@ -85,7 +85,7 @@ export interface CrawlConfig {
     // page is a real tab doing navigations/screenshots (RAM/CPU) and parallel probes mean more
     // concurrent traffic to the site, so this is deliberately modest, not maxed out.
     clientRoutingConcurrency: number;
-    reportsDir: string;            // where each flagged finding's reproduction script lands: <reportsDir>/<site>/<findingId>.repro.ts
+    reportsDir: string;            // where each finding's report folder lands: <reportsDir>/<site>/<kind>_<shortId>/ (report.md + test.ts + evidence.json)
     // window the client-side-routing probe (checkClientSideRouting/checkClientSideRoutingForPath)
     // waits for a DOM mutation after a synthetic pushState+popstate. Three bounds (see
     // WAIT_DOM_IDLE_SRC in clientRouting.ts): `minWaitMs` is the floor (earliest a reaction may be
