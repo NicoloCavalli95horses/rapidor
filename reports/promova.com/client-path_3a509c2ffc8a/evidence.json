@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1329,
+  "referenceNodeId": "node-239",
+  "candidateNodeId": "node-280",
+  "path": [
+    "props",
+    "lessons",
+    0,
+    "id"
+  ],
+  "referenceProps": {
+    "lessons": [
+      {
+        "id": 73,
+        "title": "Single vowels: ㅏ and ㅓ",
+        "free": true,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr48s0bfbpdcnmqc5g.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#9CA8DB",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 74,
+        "title": "Single vowels: ㅗ, ㅜ, and ㅣ",
+        "free": true,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr48s0bfbpdcnmqc7g.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#88BF95",
+        "progress": {
+          "status": "new",
+          "percent": 0,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 75,
+        "title": "Basic consonants: ㄱ and ㄷ",
+        "free": true,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4940bfbpdcnmqc9g.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#EDD8A9",
+        "progress": {
+          "status": "new",
+          "percent": 0,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 76,
+        "title": "Basic consonants: ㄴ and ㅁ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr49c0bfbpdcnmqcbg.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#FFE9AE",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 77,
+        "title": "Basic consonants: ㄹ and ㅇ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr49k0bfbpdcnmqcdg.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#D5D8A9",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 78,
+        "title": "Single vowels: ㅡ, ㅐ, and ㅔ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr49s0bfbpdcnmqcfg.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#C4E3C4",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      }
+    ],
+    "activeLessonId": 73,
+    "isPremium": false,
+    "aiTutorPremium": false,
+    "variant": "today",
+    "getLessonHref": "[non-serializable:Function]",
+    "onLessonClick": "[non-serializable:Function]",
+    "busyLessonId": null
+  },
+  "candidateProps": {
+    "lessons": [
+      {
+        "id": 79,
+        "title": "Revision: Single vowels",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4ac0bfbpdcnmqchg.svg",
+        "description": "ㅏ, ㅓ, ㅗ, ㅜ, ㅡ, ㅣ, ㅐ, and ㅔ",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#E7E8A2",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 80,
+        "title": "Basic consonants: ㅂ, ㅈ, and ㅅ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4ak0bfbpdcnmqcjg.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#FCCDAC",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 81,
+        "title": "Revision: Basic consonants",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4ac0bfbpdcnmqchg.svg",
+        "description": "ㄱ, ㄴ, ㄷ, ㄹ, ㅁ, ㅇ, ㅂ, ㅈ, and ㅅ",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#E7E8A2",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 82,
+        "title": "Y-vowels: ㅑ and ㅕ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4as0bfbpdcnmqcng.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#CBE0A6",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 83,
+        "title": "Y-vowels: ㅛ, ㅠ, ㅒ, and ㅖ",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4b40bfbpdcnmqcpg.svg",
+        "description": "Pronunciation, writing rules, and examples",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#B8DEE0",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      },
+      {
+        "id": 84,
+        "title": "Revision: Y-vowels",
+        "free": false,
+        "level": "A1",
+        "image": "https://img.api.promova.com/files/d3dr4ac0bfbpdcnmqchg.svg",
+        "description": "ㅑ, ㅕ, ㅛ, ㅠ, ㅒ, and ㅖ",
+        "lesson_cover": "vocabulary_big",
+        "color_code": "#E7E8A2",
+        "progress": {
+          "status": "in_progress",
+          "percent": 3,
+          "update": {
+            "canvas": "[max-depth]",
+            "for_you": "[max-depth]",
+            "my_plan": "[max-depth]"
+          }
+        }
+      }
+    ],
+    "activeLessonId": null,
+    "isPremium": false,
+    "aiTutorPremium": false,
+    "variant": "preview",
+    "onLessonClick": "[non-serializable:Function]"
+  },
+  "reproductionReferenceUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/73",
+  "reproductionCandidateUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/79",
+  "kind": {
+    "type": "client-routing-path",
+    "candidateUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/79"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

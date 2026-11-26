@@ -1,7 +1,13 @@
 node_modules/*
 storage/*
-reports/*
 .env
+
+# Generated per-finding reports (report.md + test.ts + evidence.json) ARE committed, for
+# reproducibility. Only the regenerable extras are ignored: screenshots a test writes on run,
+# the paper-stats CSVs, and the atomic-swap scratch dirs.
+reports/**/assets/
+reports/*.csv
+reports/.*
 demo/crawler.db
 demo/crawler.db-shm
 demo/crawler.db-wal

@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1969,
+  "referenceNodeId": "node-1215",
+  "candidateNodeId": "node-1084",
+  "path": [
+    "props",
+    "data",
+    "contentReleaseId"
+  ],
+  "referenceProps": {
+    "data": {
+      "title": "Un boulot en or ! Part 1",
+      "subtitle": "A dream job!",
+      "learnMode": "learn",
+      "description": "how to tell others what you do for a living\nthe forms of \"faire\"\nhow to form questions with \"qu'est-ce que…?\"",
+      "topics": [
+        "how to tell others what you do for a living",
+        "the forms of \"faire\"",
+        "how to form questions with \"qu'est-ce que…?\""
+      ],
+      "imageId": "9c5ac17dbd73a38c4f821bb6536da4fa",
+      "canDos": [
+        "A1_14",
+        "A1_26"
+      ],
+      "tags": [
+        "level:a1",
+        "motivation:relationships",
+        "motivation:school",
+        "motivation:work",
+        "vocabulary:work_study:university_academia",
+        "vocabulary:work_study:work_life",
+        "vocabulary:descriptions:describing_objects",
+        "grammar:verb:present_tense",
+        "grammar:pronoun:interrogative"
+      ],
+      "contentId": "931f2c6f34884c079457db0043f4340e",
+      "learningActivityId": "579f167c35254b76837a1007ca239d5c",
+      "completed": false,
+      "completedAt": null,
+      "active": false,
+      "unlocked": false,
+      "lessonIndex": 0,
+      "contentReleaseId": "21579bc6e366ed2e12952008b330f3cb1d0211ad"
+    },
+    "learnLanguageAlpha3": "FRA",
+    "trackInteracted": "[non-serializable:Function]"
+  },
+  "candidateProps": {
+    "data": {
+      "title": "Vin rouge et cacahuètes. Part 1",
+      "subtitle": "Red wine and peanuts.",
+      "learnMode": "learn",
+      "description": "numbers 9 to 12\nvocabulary for things you find in a bar\nplural articles",
+      "topics": [
+        "numbers 9 to 12",
+        "vocabulary for things you find in a bar",
+        "plural articles"
+      ],
+      "imageId": "67ac2413d82748d08449d6214d55b8ec",
+      "canDos": [
+        "A1_8",
+        "A1_16"
+      ],
+      "tags": [
+        "level:a1",
+        "motivation:interest_culture",
+        "motivation:travel",
+        "motivation:relationships",
+        "motivation:work",
+        "vocabulary:food_drink:groceries_fruits_vegetables",
+        "vocabulary:time_numbers:numbers",
+        "vocabulary:food_drink:beverages",
+        "grammar:number_cardinal",
+        "grammar:noun:plural"
+      ],
+      "contentId": "4b725131d46543aba12a669b74a8ba77",
+      "learningActivityId": "d4f528fc57d74208aa22c8f5becc973b",
+      "completed": false,
+      "completedAt": null,
+      "active": false,
+      "unlocked": false,
+      "lessonIndex": 0,
+      "contentReleaseId": "b383a84f45053f7ef594127f61355288a9e96d31"
+    },
+    "learnLanguageAlpha3": "FRA",
+    "trackInteracted": "[non-serializable:Function]"
+  },
+  "reproductionReferenceUrl": "https://my.babbel.com/en_GB/lesson-player/FRA/0ecaf91449be4f5aaa53790769d5aed3/e0b0ff97-a402-42f6-a8a3-9b48c5895426?return_url=https%3A%2F%2Fmy.babbel.com%2Fdashboard%2Finprogress&learning_activity_id=80b70c10260b4424a78803c7bf95fe87&content_release_id=21579bc6e366ed2e12952008b330f3cb1d0211ad&origin=learning_path",
+  "reproductionCandidateUrl": "https://my.babbel.com/en_GB/lesson-player/FRA/0ecaf91449be4f5aaa53790769d5aed3/e0b0ff97-a402-42f6-a8a3-9b48c5895426?return_url=https%3A%2F%2Fmy.babbel.com%2Fdashboard%2Finprogress&learning_activity_id=80b70c10260b4424a78803c7bf95fe87&content_release_id=b383a84f45053f7ef594127f61355288a9e96d31&origin=learning_path",
+  "kind": {
+    "type": "client-routing-query",
+    "paramName": "content_release_id",
+    "candidateValue": "b383a84f45053f7ef594127f61355288a9e96d31"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

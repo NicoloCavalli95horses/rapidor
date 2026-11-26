@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1714,
+  "referenceNodeId": "node-59",
+  "candidateNodeId": "node-101",
+  "path": [
+    "props",
+    "miniLesson",
+    "id"
+  ],
+  "referenceProps": {
+    "miniLesson": {
+      "id": 296,
+      "miniCourseId": 1,
+      "isUniversal": true,
+      "lessonCode": "CountingUN",
+      "title": "Counting Across Cultures",
+      "fullImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/full/CountingUN_Getty_538111008_1200px.png?versionId=8LrEsiA2n6PNZ0xbBHyE9q6Kz5vFnP0A",
+      "thumbImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/thumb/CountingUN_Getty_538111008_1200px.png?versionId=lZAwWAjXNTmRqDv54EBgQWIxx402nOwy",
+      "audioFileId": 2429951,
+      "audioFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_audio/Universal_CountingUN.mp3?versionId=5aXXE7g2yyBz3auuZwL_IW94mN7hePqf",
+      "category": "Language Learning",
+      "keywords": [
+        "Motivation",
+        "Language Tips"
+      ],
+      "featured": true,
+      "durationMilliseconds": 723775,
+      "isFree": true
+    },
+    "progress": {
+      "completed": true,
+      "lastPlayedLocation": 401322,
+      "lastPlayedTime": 1795433562009,
+      "mediaItemId": 2429951,
+      "miniCourseId": 1,
+      "subUserId": "87y3jt6xgd4u7"
+    },
+    "hasMark": true
+  },
+  "candidateProps": {
+    "miniLesson": {
+      "id": 298,
+      "miniCourseId": 1,
+      "isUniversal": true,
+      "lessonCode": "MindMattersUN",
+      "title": "Your Brain on Language",
+      "fullImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/full/MindMattersUN_Getty_1619312356_1200px.png?versionId=XFUdrySuIDbhrx8AxuHtwHga9UuOSGuK",
+      "thumbImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/thumb/MindMattersUN_Getty_1619312356_1200px.png?versionId=zpGo.cBi1CP0G07t9tovZV4Or8nShJy1",
+      "audioFileId": 2429949,
+      "audioFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_audio/Universal_MindMattersUN.mp3?versionId=Ty7O5T53UnHehzASLCX29YbHS_Mdbpt3",
+      "category": "Language Learning",
+      "keywords": [
+        "Motivation",
+        "Language Tips"
+      ],
+      "featured": false,
+      "durationMilliseconds": 466338,
+      "isFree": null
+    },
+    "progress": {
+      "completed": true,
+      "lastPlayedLocation": 0,
+      "lastPlayedTime": 1795172260276,
+      "mediaItemId": 2429949,
+      "miniCourseId": 1,
+      "subUserId": "87y3jt6xgd4u7"
+    },
+    "isLocked": true,
+    "canUpgrade": false,
+    "courseName": "Arabic Egyptian",
+    "focusElementId": "miniLesson_298"
+  },
+  "reproductionReferenceUrl": "https://learn.pimsleur.com/MiniLearn/MiniLesson?id=296&force_auto_play=false",
+  "reproductionCandidateUrl": "https://learn.pimsleur.com/MiniLearn/MiniLesson?id=298&force_auto_play=false",
+  "kind": {
+    "type": "client-routing-query",
+    "paramName": "id",
+    "candidateValue": "298"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1969,
+  "referenceNodeId": "node-1215",
+  "candidateNodeId": "node-1020",
+  "path": [
+    "props",
+    "data",
+    "contentReleaseId"
+  ],
+  "referenceProps": {
+    "data": {
+      "title": "Un boulot en or ! Part 1",
+      "subtitle": "A dream job!",
+      "learnMode": "learn",
+      "description": "how to tell others what you do for a living\nthe forms of \"faire\"\nhow to form questions with \"qu'est-ce que…?\"",
+      "topics": [
+        "how to tell others what you do for a living",
+        "the forms of \"faire\"",
+        "how to form questions with \"qu'est-ce que…?\""
+      ],
+      "imageId": "9c5ac17dbd73a38c4f821bb6536da4fa",
+      "canDos": [
+        "A1_14",
+        "A1_26"
+      ],
+      "tags": [
+        "level:a1",
+        "motivation:relationships",
+        "motivation:school",
+        "motivation:work",
+        "vocabulary:work_study:university_academia",
+        "vocabulary:work_study:work_life",
+        "vocabulary:descriptions:describing_objects",
+        "grammar:verb:present_tense",
+        "grammar:pronoun:interrogative"
+      ],
+      "contentId": "931f2c6f34884c079457db0043f4340e",
+      "learningActivityId": "579f167c35254b76837a1007ca239d5c",
+      "completed": false,
+      "completedAt": null,
+      "active": false,
+      "unlocked": false,
+      "lessonIndex": 0,
+      "contentReleaseId": "21579bc6e366ed2e12952008b330f3cb1d0211ad"
+    },
+    "learnLanguageAlpha3": "FRA",
+    "trackInteracted": "[non-serializable:Function]"
+  },
+  "candidateProps": {
+    "data": {
+      "title": "Trois Anglais dans l'équipe. Review",
+      "subtitle": "Three English people on the team.",
+      "learnMode": "recapitulate",
+      "description": "how to state your nationality\nthe feminine and masculine forms of nationalities\nthe definite and indefinite articles in the singular\nnumbers 1 to 8\nplural nouns",
+      "topics": [
+        "how to state your nationality",
+        "the feminine and masculine forms of nationalities",
+        "the definite and indefinite articles in the singular",
+        "numbers 1 to 8",
+        "plural nouns"
+      ],
+      "imageId": "8ea351a40f5d4236b9b5f09566251cc8",
+      "canDos": [],
+      "tags": [
+        "motivation:travel",
+        "motivation:work",
+        "motivation:school",
+        "level:a1",
+        "grammar:noun:gender",
+        "grammar:noun:plural"
+      ],
+      "contentId": "13f2f3ee30f548758940744fdca36125",
+      "learningActivityId": "6a1e85314aef4c27a0738d8170d7375e",
+      "completed": false,
+      "completedAt": null,
+      "active": false,
+      "unlocked": false,
+      "lessonIndex": 3,
+      "contentReleaseId": "014a43038a2ac1ad11a5a3de584879f5cdf514a9"
+    },
+    "learnLanguageAlpha3": "FRA",
+    "trackInteracted": "[non-serializable:Function]"
+  },
+  "reproductionReferenceUrl": "https://my.babbel.com/en_GB/lesson-player/FRA/0ecaf91449be4f5aaa53790769d5aed3/e0b0ff97-a402-42f6-a8a3-9b48c5895426?return_url=https%3A%2F%2Fmy.babbel.com%2Fdashboard%2Finprogress&learning_activity_id=80b70c10260b4424a78803c7bf95fe87&content_release_id=21579bc6e366ed2e12952008b330f3cb1d0211ad&origin=learning_path",
+  "reproductionCandidateUrl": "https://my.babbel.com/en_GB/lesson-player/FRA/0ecaf91449be4f5aaa53790769d5aed3/e0b0ff97-a402-42f6-a8a3-9b48c5895426?return_url=https%3A%2F%2Fmy.babbel.com%2Fdashboard%2Finprogress&learning_activity_id=80b70c10260b4424a78803c7bf95fe87&content_release_id=014a43038a2ac1ad11a5a3de584879f5cdf514a9&origin=learning_path",
+  "kind": {
+    "type": "client-routing-query",
+    "paramName": "content_release_id",
+    "candidateValue": "014a43038a2ac1ad11a5a3de584879f5cdf514a9"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

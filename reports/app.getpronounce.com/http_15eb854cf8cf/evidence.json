@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "stateId": 2395,
+  "referenceNodeId": "node-158",
+  "candidateNodeId": "node-168",
+  "path": [
+    "key"
+  ],
+  "referenceProps": {
+    "countryId": "US",
+    "onChange": "[non-serializable:Function]",
+    "voice": {
+      "countryId": "US",
+      "activePartner": {
+        "voiceId": "echo",
+        "name": "Jack",
+        "descriptionKey": "descriptions.echo",
+        "isFree": true,
+        "text": "Hello, I'm Jack, cooperative and polite, always ready to help and make your day better!",
+        "providerVoiceId": "echo",
+        "provider": "openai"
+      }
+    },
+    "voiceId": "echo",
+    "name": "Jack",
+    "descriptionKey": "descriptions.echo",
+    "isFree": true,
+    "text": "Hello, I'm Jack, cooperative and polite, always ready to help and make your day better!",
+    "providerVoiceId": "echo",
+    "provider": "openai",
+    "available": true
+  },
+  "candidateProps": {
+    "countryId": "US",
+    "onChange": "[non-serializable:Function]",
+    "voice": {
+      "countryId": "US",
+      "activePartner": {
+        "voiceId": "echo",
+        "name": "Jack",
+        "descriptionKey": "descriptions.echo",
+        "isFree": true,
+        "text": "Hello, I'm Jack, cooperative and polite, always ready to help and make your day better!",
+        "providerVoiceId": "echo",
+        "provider": "openai"
+      }
+    },
+    "voiceId": "shimmer",
+    "name": "Emma",
+    "providerVoiceId": "shimmer",
+    "descriptionKey": "descriptions.shimmer",
+    "isFree": false,
+    "text": "Hi there! I'm Emma, your go-to source of energy and kindness, always ready to brighten your day!",
+    "provider": "openai",
+    "available": false
+  },
+  "reproductionReferenceUrl": "https://api.getpronounce.com/pronounce?text=Oh%2C+nice%21&voice=echo&provider=openai&speed=1&tag=chat.backchannel",
+  "reproductionCandidateUrl": "https://api.getpronounce.com/pronounce?text=Oh%2C+nice%21&voice=shimmer&provider=openai&speed=1&tag=chat.backchannel",
+  "kind": {
+    "type": "http",
+    "method": "GET",
+    "headers": {
+      "x-request-client": "web",
+      "sec-ch-ua-platform": "\"Linux\"",
+      "referer": "https://app.getpronounce.com/",
+      "accept-language": "en-US",
+      "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\"",
+      "sec-ch-ua-mobile": "?0",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+      "accept": "application/json, text/plain, */*",
+      "x-request-version": "a9938085b"
+    },
+    "baselineStatus": 200,
+    "baselineHeaders": {
+      "content-type": "audio/mpeg",
+      "cache-control": "public, max-age=3600"
+    },
+    "baselineBody": "��D�\u0000\u0010\u0010�h\u0001F\u0018\u0000&L�4��\u0011\u001e�&\u000e\u0016\u0000\u0000\u0004\u0010 A\b�p00003�\u001c��|?��>�\u000f�p\u0010\u0004>'\u0007\u0001\u0000@\u0010��|?�\u0000��\u000f�N.\u000f�՜�v\u0010��A�u�fQ@Q&wb��D�\u0012\u0016�\u0001�h\u0000�4�I\u0017a3%��\u0005�\u000b�\u0014�@r\u0017\n\t�xZ�����������_gZ�ta��\u001e�����������'\u0007���0�iF0\u0014��n���5��)��=:)���D�\t\u0014�r�\u0001�h\u0000]�'�\u00165DCV�Z\\��q �2��a(Q\u0004$[\u0010J$�,](3\u0019\u001fAN�����11Y��\u001dZ6��n��\u0018��f�Y�hA#*�������_�:�\u0001�Z���D�\t\u0013�j�\u0000�\u0004��Q\u0002`oeܛ\b#+�s\u0013Jc#�u���\u0010��;YP\u001b�e�����^��/���dU1���ކ)�\u0004\u0014,G��i������\u001fMb�w���͒�θ�P��D�\r\u0015�j�\u0000�N����z�L�\u001c~/0ȁ���\u0001@4�\u0016\u001e��k+����s��r��\u001cg���\u000f?4��\u001b\u00168�!\u001c�\u0004$\u001f*\u0013�\t����o�����R�W\u0018߲�@\u0005��D�\b\u0013���\u0000�J�cd7���n�-�W�\u0001�%]������v��j��X�-U������������۠[t\u0012~�2\u0006\u0017�ƺ�����V���έ\nf6��x�Iӥ\u001b�P��D�\f\u0015�f�\u0000�D�\u0018@\u0006I���g=�Z��\t�\u0010\bj\u0003!셑�R\r\u0015z��q�XC\u0013���9�@\u0001_��\b3+���\u0001�\u0001+�1Q�V�'���B�\u001aE���B�{�Տ2A����D�\b\u00101Z�\u0000�\u0004��k\u0006�\u0006&�m`�r\u001c�O�R�����\u0014 �\u0016�[�7;��ϟ�\u0019�������\u001c`���c�0�\rY�-b�\u0012D{\u0006��q$% �j<\u0003��\"�������D�\u001a\u0010�N�\u0000�\u0004�{8\f����%\u0011(qȅ�bC*�p�{]�{�H�{�O��\u000eA�tP'�m\n�j\\�L�\u00049�X*P�L\f�\u0012c3L�h\u001d���Y\u0019���\u000e�d�G��J�I���D�*\u0012a��\u0000�ʔ��^�����6\u0011T��h.ښ�\u0013���fr\u000b�����z^�q�0���Z廊�|�B\u001f�\u0014a/��\u0006�8os�WF�$u\u001cA\n��N6+ZD�4]ƚK���D�3\u0012\t\"�\u0000��p�O��+f@�� pL\u0018e����^E�Uz�y�0�\u0013�f\u0007\u001a0x\u0011\u0019LXDX/XJ��_\u001b����9$X,#�h�`�l\rg0i��\u001e[�T�ބf@�_����D�=\u0011�\u0000�Ĕ!��\r����\\\\U{����A\u001c`�.\u0018�S'\b�nt�3�\b9&�Ӛ�����]�\u000b�`����Zhq��%\u0015�t��Nt\u00130\u001c\u000eqz�ں!\bq\u0001�����D�H\u0013a��\u0000�ʔ�����Eß�\u0017@��U��\"\u0007u�����\u001a�_�JpS\u0010�̈,�rBB\u000b�SS����~���$VȗP?�Ǌ�N�����'�djy?z���\u000eə��D�M\u0010�2�\u0000��pO���\u0004]9\u001e\u0019r2(U��\"M>���\r\u0010YԘl��,բ��{?ԇ�7�ȼ]%6�������X���(J���\u0012\u0018\u0001\u0000Ǆ\n˱�F�\u000b�I����D�\\\u0011A.�\u0000�\u001apa\u0010Ra,L/Ț78#�Eցx\u0000�\u00126�F�>����q�s\u0018\u0012z�o��H_�������\u001b�E&� �d\u0016��\nUS�\u0017/�U�\u001e�����v>�\u00060\f��D�j\u0015���\u0000�\u000e�\u001d[[��\u0003;��p\u0002`?=��w���\u0019����r��\u0003�e�\u0013\u0012n�b�e\u0013\u0017\u0005� \u0006+��O_�[\u0002����SI\u0004Η\u0016?��\u0003\u0012'$n\u0017�9�\u0018��Ikc���D�f\u0016yz�\u0000�\n�_A��5�_�\n�\u001f(�n\u0003Yn��\u0010\u001e����\f�Tl.�V�c�~���m▃��\u0013\u000f\u0004C�����\u001ddVO��������N��@Q����\u0004�x�}����D�_\u0016Z��\u0000�ʸf� ukd�+`V��N&�E��W\u0013�N�^\u0004����є��[\u00129��$� �9�\b'�\u0012\f�P\u0015S���v?���F��@\u000fM��j�{�a�9\u0004X\fa��D�X\u0013Q\u0016�\u0000��p�M0P���m�\u0013��.c\u001eZ���,��o������#aB�$q�\u0000\u0015,\u001e�\u0000�~HyP�?��\u0016n�����w��\\\u0007\f����d>��_�PҊ�n`@��D�]\u0016\u0019��\u0000�֔�Q[3v,�QI���p\u0005���W�ʋI����h��x�\u0001�\u0002�\u0003ᨴ�R�bM#}Wj���\t\u0005\u0005?��Ϫ����m!Ĩ\f[@p��G��]�P6��D�W\u00119\u0012�\u0000�\u000ep��ۿ����8�\u0000ZD\u001f\r��Q$\u0011�w��)�O��%��@\u0006>6��@\b7f��(�B���;T�l���|\u0019�������@��!��EK�R]���23��D�e\u0010���\u0000��p�_���^��{�S�;����l�M�\"@��Ru��\u000b��\b�\r�\u0004\u001b�I\u0018F��a�-\u001aiA\u0001$�\u0017�k\b\u0013@�J1�`����B~h-H�y�\u00150Um���D�t\u001b�\u001a�\u0000x������\bBZ�����_���e�����U�;R6��i\u0011 ��9@||� �E1���@(D̦�\"�Q�b;aWb�#m�#�neO���YԚw��cR��D�X\u0017+\u001a�\u00008R��\n���\u0007g�����_ޞ�ҮQn/\u000e\u0014\n��aa,^ycH�.HyM<Z\\�݇�C�ďC\u000e\u001b�\u00159HQtL\u001d\fI+���x�[\u0018\u0002�������������D�N\u0010:��\u0000\u0010\u000e���cfx�w;y��\u0018�+\tDPQ�:\tA\u0017\u000b\u0016E\u0014I�:I��Bܲ\u001a5I>^�nv\\&Q� �r[��G�\u000b�11\u0015\u001b����祝N�촻=N�ee\f\u0014`��D�`\u0012�δ\u0000\u0010\f�����At\u0004\u0012\u0014\u0018PG1@@\u0010a�QA50��n(�Y܅R���\u0010\\<R+D�d���x���\u000b���������'k������|�+\u0006��T'\u0011\b\u000eO(s����D�h\u0011jʼ\u0000\u0010\n���sT3s�\u0016�i��[&\u001a��[j�\u001b��m\u000b�iq�\u0006j\u0003\"\u0007\u0002�Ã�����������>��J4T�b�J\u0000�\rfQ��\u001cp�\u0014yX:C��\u000f9\u001d�Y��D�u\u0010�Ҹ\u0000\u0010\u0010�D�QԆ:����\u0014\u0001S\u000f��\u000e��\t���\u001c��ְ^ֵ�-��\u0010���N\u0018��������i[en��1���JҡKR���@D�)r�\u001dJ_+$�Y����Dą\u0011*��\u0000(\n�(���L{+Pu\nC6\f�P\u0016p�`Zh\u0015�&\u000ei\u0014�:ޙ�\"v�\u0001\u0003#�\u0016D�1,\"\u0010\u0015{�4�\u0015������{2�\u0016t��Y��=:��\u001a�\u0015�%33<\u000b1^��Dē\u00122ֈ\u0000xD�7L0�.��T˸I\u0010@�$�Q$��r��@\"D�\u0012\"D�\u00123$d䂂��AAAAB���\u0012\n\n�������\u001dn��LAME3.100������������Dĝ\u0010��,\u0000ьL�������������������������������������������������������������������������������������DĬ\u0011X�\u0010\u0000�\fM�����������������������������������������������������������������������������������",
+    "baselineContentType": "audio/mpeg"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

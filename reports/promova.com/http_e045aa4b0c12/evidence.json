@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1330,
+  "referenceNodeId": "node-258",
+  "candidateNodeId": "node-304",
+  "path": [
+    "props",
+    "lesson",
+    "id"
+  ],
+  "referenceProps": {
+    "lesson": {
+      "id": 73,
+      "title": "Single vowels: ㅏ and ㅓ",
+      "free": true,
+      "level": "A1",
+      "image": "https://img.api.promova.com/files/d3dr48s0bfbpdcnmqc5g.svg",
+      "description": "Pronunciation, writing rules, and examples",
+      "lesson_cover": "vocabulary_big",
+      "color_code": "#9CA8DB",
+      "progress": {
+        "status": "in_progress",
+        "percent": 3,
+        "update": {
+          "canvas": {
+            "updated_at": "2026-11-22T13:04:06Z",
+            "status": "in_progress"
+          },
+          "for_you": {
+            "updated_at": "2026-11-22T13:04:06Z",
+            "status": "in_progress"
+          },
+          "my_plan": {
+            "updated_at": "2026-11-22T13:04:06Z",
+            "status": "in_progress"
+          }
+        }
+      }
+    },
+    "number": 1,
+    "state": "active",
+    "indented": false,
+    "href": "/my-plan/app3XAphYAQgyNJwg/73",
+    "onClick": "[non-serializable:Function]",
+    "isBusy": false
+  },
+  "candidateProps": {
+    "lesson": {
+      "id": 80,
+      "title": "Basic consonants: ㅂ, ㅈ, and ㅅ",
+      "free": false,
+      "level": "A1",
+      "image": "https://img.api.promova.com/files/d3dr4ak0bfbpdcnmqcjg.svg",
+      "description": "Pronunciation, writing rules, and examples",
+      "lesson_cover": "vocabulary_big",
+      "color_code": "#FCCDAC",
+      "progress": {
+        "status": "in_progress",
+        "percent": 3,
+        "update": {
+          "canvas": {
+            "updated_at": "2026-11-20T17:28:18Z",
+            "status": "in_progress"
+          },
+          "for_you": {
+            "updated_at": "2026-11-20T17:28:18Z",
+            "status": "in_progress"
+          },
+          "my_plan": {
+            "updated_at": "2026-11-20T17:28:18Z",
+            "status": "in_progress"
+          }
+        }
+      }
+    },
+    "number": 2,
+    "state": "preview",
+    "indented": false,
+    "href": "[non-serializable:undefined]",
+    "onClick": "[non-serializable:undefined]",
+    "isBusy": false
+  },
+  "reproductionReferenceUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/73?_rsc=t7V1gVa0mp36bgNr",
+  "reproductionCandidateUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/80?_rsc=t7V1gVa0mp36bgNr",
+  "kind": {
+    "type": "http",
+    "method": "GET",
+    "headers": {
+      "accept": "*/*",
+      "accept-language": "en-US",
+      "cookie": "<redacted>",
+      "referer": "https://promova.com/my-plan/app3XAphYAQgyNJwg",
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+      "next-router-prefetch": "1",
+      "next-router-segment-prefetch": "/_tree",
+      "next-url": "/en/my-plan/app3XAphYAQgyNJwg",
+      "rsc": "1",
+      "sec-ch-ua": "\"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"156\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Linux\"",
+      "traceparent": "00-d6f646aa544b5bf27de2415f2fac8694-3181911095d2894c-01",
+      "x-deployment-id": "d812f8241fcc650cc5a0c21b188919f460dffd2a"
+    },
+    "baselineStatus": 200,
+    "baselineHeaders": {
+      "alt-svc": "h3=\":443\"; ma=86400",
+      "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+      "cf-cache-status": "DYNAMIC",
+      "cf-ray": "a5e8229f8cce7597-CDG",
+      "content-encoding": "gzip",
+      "content-security-policy": "frame-ancestors 'self' https://english-improve.com/ https://english-improve.stage-boosters.com https://stage.spanish-boost.com https://spanish-boost.com",
+      "content-type": "text/x-component",
+      "date": "Sun, 22 Nov 2026 13:03:36 GMT",
+      "link": "<https://resources.promova.com>; rel=preconnect; crossorigin, <https://resources.promova.com>; rel=dns-prefetch",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=JGLU%2B0zq%2FkrNMRPg7IUo%2BjVa15VxiwlBZyqGsGxgwwKa8iQNNRU5pIrfX7G2d5FgAJzDR8G1tyqqIFplArwZtj%2Fm69VpaeJTAciKD%2FcFEg1pyXOPd4Q6TCwoCkm%2FDRw49jsBF%2B76U10JfaM7usm3rtVT7Xngd58OMdU%3D\"}]}",
+      "server": "cloudflare",
+      "set-cookie": "<redacted>",
+      "vary": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding",
+      "x-cache": "MISS",
+      "x-frame-options": "DENY",
+      "x-middleware-rewrite": "/en/my-plan/app3XAphYAQgyNJwg/73?_rsc=t7V1gVa0mp36bgNr",
+      "x-nextjs-deployment-id": "d812f8241fcc650cc5a0c21b188919f460dffd2a",
+      "x-nextjs-rewritten-path": "/en/my-plan/app3XAphYAQgyNJwg/73",
+      "x-origin-location": "nbg1",
+      "x-request-url": "http://0.0.0.0:3000/my-plan/app3XAphYAQgyNJwg/73",
+      "x-server": "prod-promova-frontend-anywhere-nbg1-01",
+      "x-server-location": "nbg1"
+    },
+    "baselineBody": "7:[[\"children\",{\"s\":\"__PAGE__\"}]]\n6:[[\"children\",{\"s\":{\"n\":\"lesson_id\",\"t\":\"d\",\"k\":\"73\",\"s\":[\"learning-map\"]},\"c\":\"$Q7\"}]]\n5:[[\"children\",{\"s\":{\"n\":\"course_id\",\"t\":\"d\",\"k\":\"app3XAphYAQgyNJwg\",\"s\":[\"start-onboarding\"]},\"c\":\"$Q6\"}]]\n4:[[\"children\",{\"s\":\"my-plan\",\"c\":\"$Q5\"}]]\n3:[[\"children\",{\"s\":\"(without-layout)\",\"c\":\"$Q4\"}]]\n2:[[\"children\",{\"s\":\"(cabinet)\",\"c\":\"$Q3\"}]]\n1:[[\"children\",{\"s\":{\"n\":\"lang\",\"t\":\"d\",\"k\":\"en\",\"s\":[\".well-known\",\"api\"]},\"c\":\"$Q2\"}]]\n0:{\"q\":\"\",\"i\":false,\"S\":false,\"r\":\"$undefined\",\"t\":{\"t\":{\"s\":\"\",\"h\":16,\"c\":\"$Q1\"},\"h\":{\"r\":[null,null],\"p\":true,\"v\":null}}}\n",
+    "baselineContentType": "text/x-component"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

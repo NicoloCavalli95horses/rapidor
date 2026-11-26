@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1329,
+  "referenceNodeId": "node-241",
+  "candidateNodeId": "node-297",
+  "path": [
+    "props",
+    "lesson",
+    "id"
+  ],
+  "referenceProps": {
+    "lesson": {
+      "id": 73,
+      "title": "Single vowels: ㅏ and ㅓ",
+      "free": true,
+      "level": "A1",
+      "image": "https://img.api.promova.com/files/d3dr48s0bfbpdcnmqc5g.svg",
+      "description": "Pronunciation, writing rules, and examples",
+      "lesson_cover": "vocabulary_big",
+      "color_code": "#9CA8DB",
+      "progress": {
+        "status": "in_progress",
+        "percent": 3,
+        "update": {
+          "canvas": {
+            "updated_at": "2026-11-22T13:04:30Z",
+            "status": "in_progress"
+          },
+          "for_you": {
+            "updated_at": "2026-11-22T13:04:30Z",
+            "status": "in_progress"
+          },
+          "my_plan": {
+            "updated_at": "2026-11-22T13:04:30Z",
+            "status": "in_progress"
+          }
+        }
+      }
+    },
+    "number": 1,
+    "state": "active",
+    "indented": false,
+    "href": "/my-plan/app3XAphYAQgyNJwg/73",
+    "onClick": "[non-serializable:Function]",
+    "isBusy": false
+  },
+  "candidateProps": {
+    "lesson": {
+      "id": 82,
+      "title": "Y-vowels: ㅑ and ㅕ",
+      "free": false,
+      "level": "A1",
+      "image": "https://img.api.promova.com/files/d3dr4as0bfbpdcnmqcng.svg",
+      "description": "Pronunciation, writing rules, and examples",
+      "lesson_cover": "vocabulary_big",
+      "color_code": "#CBE0A6",
+      "progress": {
+        "status": "in_progress",
+        "percent": 3,
+        "update": {
+          "canvas": {
+            "updated_at": "2026-11-20T17:28:25Z",
+            "status": "in_progress"
+          },
+          "for_you": {
+            "updated_at": "2026-11-20T17:28:25Z",
+            "status": "in_progress"
+          },
+          "my_plan": {
+            "updated_at": "2026-11-20T17:28:25Z",
+            "status": "in_progress"
+          }
+        }
+      }
+    },
+    "number": 4,
+    "state": "preview",
+    "indented": false,
+    "href": "[non-serializable:undefined]",
+    "onClick": "[non-serializable:undefined]",
+    "isBusy": false
+  },
+  "reproductionReferenceUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/73",
+  "reproductionCandidateUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/82",
+  "kind": {
+    "type": "client-routing-path",
+    "candidateUrl": "https://promova.com/my-plan/app3XAphYAQgyNJwg/82"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

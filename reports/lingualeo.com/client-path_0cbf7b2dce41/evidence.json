@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1854,
+  "referenceNodeId": "node-120",
+  "candidateNodeId": "node-108",
+  "path": [
+    "props",
+    "url"
+  ],
+  "referenceProps": {
+    "type": "word_translate",
+    "counter": 161,
+    "counterType": "words",
+    "minCounter": 5,
+    "progress": null,
+    "titleText": "Word-Translation",
+    "tooltipText": "Improves your translation skills and boosts your understanding of texts and speech.",
+    "available": null,
+    "skills": [
+      "listening",
+      "vocabulary"
+    ],
+    "timer": null,
+    "serviceStatus": "[non-serializable:undefined]",
+    "url": "/en/training/wordTranslate?utm_action=10",
+    "locale": "en",
+    "wordSetsLink": "/en/dictionary/sets-recommended-wordsets",
+    "jungleLink": "/en/jungle/all"
+  },
+  "candidateProps": {
+    "type": "brainstorm",
+    "counter": 161,
+    "counterType": "words",
+    "minCounter": 5,
+    "progress": null,
+    "titleText": "Brainstorm",
+    "tooltipText": "Helps you focus on all aspects of learning new words: translation, listening comprehension, and writing.",
+    "available": 0,
+    "skills": [
+      "writing",
+      "listening",
+      "vocabulary"
+    ],
+    "timer": null,
+    "serviceStatus": "[non-serializable:undefined]",
+    "url": "/en/training/wordMix?utm_action=10",
+    "locale": "en",
+    "wordSetsLink": "/en/dictionary/sets-recommended-wordsets",
+    "jungleLink": "/en/jungle/all"
+  },
+  "reproductionReferenceUrl": "https://lingualeo.com/en/training/wordTranslate?utm_action=10",
+  "reproductionCandidateUrl": "https://lingualeo.com/en/training/wordMix?utm_action=10",
+  "kind": {
+    "type": "client-routing-path",
+    "candidateUrl": "https://lingualeo.com/en/training/wordMix?utm_action=10"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

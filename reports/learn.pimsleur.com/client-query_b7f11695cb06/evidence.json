@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "stateId": 1714,
+  "referenceNodeId": "node-59",
+  "candidateNodeId": "node-83",
+  "path": [
+    "props",
+    "miniLesson",
+    "id"
+  ],
+  "referenceProps": {
+    "miniLesson": {
+      "id": 296,
+      "miniCourseId": 1,
+      "isUniversal": true,
+      "lessonCode": "CountingUN",
+      "title": "Counting Across Cultures",
+      "fullImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/full/CountingUN_Getty_538111008_1200px.png?versionId=8LrEsiA2n6PNZ0xbBHyE9q6Kz5vFnP0A",
+      "thumbImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/thumb/CountingUN_Getty_538111008_1200px.png?versionId=lZAwWAjXNTmRqDv54EBgQWIxx402nOwy",
+      "audioFileId": 2429951,
+      "audioFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_audio/Universal_CountingUN.mp3?versionId=5aXXE7g2yyBz3auuZwL_IW94mN7hePqf",
+      "category": "Language Learning",
+      "keywords": [
+        "Motivation",
+        "Language Tips"
+      ],
+      "featured": true,
+      "durationMilliseconds": 723775,
+      "isFree": true
+    },
+    "progress": {
+      "completed": true,
+      "lastPlayedLocation": 401322,
+      "lastPlayedTime": 1795433562009,
+      "mediaItemId": 2429951,
+      "miniCourseId": 1,
+      "subUserId": "87y3jt6xgd4u7"
+    },
+    "hasMark": true
+  },
+  "candidateProps": {
+    "miniLesson": {
+      "id": 295,
+      "miniCourseId": 1,
+      "isUniversal": true,
+      "lessonCode": "PimMethodUN",
+      "title": "The Pimsleur Method",
+      "fullImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/full/PimMethodUN_Adobe_610022973_1200px.png?versionId=1qVUvHeDuq2cf6PzP2.pbrDeqw1t1KP_",
+      "thumbImageFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_photo/thumb/PimMethodUN_Adobe_610022973_1200px.png?versionId=btdOQr6KXyQsWkZWJqGP.a8yqIAOOO5H",
+      "audioFileId": 2402193,
+      "audioFilePath": "https://d3kaeubvx0x0ex.cloudfront.net/universal%20mini%20course/English/asset/lesson_audio/Pimsleur_Guide.mp3?versionId=CHI.VKuIgnCcFpJaN1QESjeZ9nCQWtr7",
+      "category": "Language Learning",
+      "keywords": [
+        "Motivation",
+        "Language Tips"
+      ],
+      "featured": false,
+      "durationMilliseconds": 643291,
+      "isFree": null
+    },
+    "progress": {
+      "completed": true,
+      "lastPlayedLocation": 22082,
+      "lastPlayedTime": 1795172285166,
+      "mediaItemId": 2402193,
+      "miniCourseId": 1,
+      "subUserId": "87y3jt6xgd4u7"
+    },
+    "isLocked": true,
+    "canUpgrade": false,
+    "courseName": "Arabic Egyptian",
+    "focusElementId": "miniLesson_295"
+  },
+  "reproductionReferenceUrl": "https://learn.pimsleur.com/MiniLearn/MiniLesson?id=296&force_auto_play=false",
+  "reproductionCandidateUrl": "https://learn.pimsleur.com/MiniLearn/MiniLesson?id=295&force_auto_play=false",
+  "kind": {
+    "type": "client-routing-query",
+    "paramName": "id",
+    "candidateValue": "295"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}

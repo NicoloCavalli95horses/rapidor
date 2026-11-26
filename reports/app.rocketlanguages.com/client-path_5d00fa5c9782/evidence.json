@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "stateId": 2620,
+  "referenceNodeId": "node-90",
+  "candidateNodeId": "node-107",
+  "path": [
+    "key"
+  ],
+  "referenceProps": {
+    "item": {
+      "localeTitle": "leaderboard",
+      "path": "leaderboard",
+      "icon": {
+        "$$typeof": "[non-serializable:Symbol]",
+        "render": "[non-serializable:Function]"
+      }
+    },
+    "onLockedClick": "[non-serializable:Function]"
+  },
+  "candidateProps": {
+    "item": {
+      "localeTitle": "rocket-certification",
+      "path": "rocket-certification",
+      "icon": {
+        "$$typeof": "[non-serializable:Symbol]",
+        "render": "[non-serializable:Function]"
+      },
+      "hiddenForCourse": [
+        "sign-language",
+        "english"
+      ],
+      "hiddenForProductLevel": [
+        4
+      ],
+      "lockedForType": [
+        2,
+        10
+      ],
+      "hiddenForType": [
+        13
+      ]
+    },
+    "onLockedClick": "[non-serializable:Function]"
+  },
+  "reproductionReferenceUrl": "https://app.rocketlanguages.com/members/products/186/tools/leaderboard",
+  "reproductionCandidateUrl": "https://app.rocketlanguages.com/members/products/186/tools/rocket-certification",
+  "kind": {
+    "type": "client-routing-path",
+    "candidateUrl": "https://app.rocketlanguages.com/members/products/186/tools/rocket-certification"
+  },
+  "clientRoutingProbe": {
+    "minWaitMs": 1000,
+    "idleMs": 300,
+    "maxWaitMs": 3000
+  }
+}
